@@ -18,9 +18,9 @@ _VALID_LENGTHS = {6: "MA-L", 7: "MA-M", 9: "MA-S"}
 def normalise_mac_hex(value: Any) -> str:
     """Return twelve uppercase hex digits from a valid 48-bit MAC."""
     raw = str(value or "").strip()
-    if not raw or not re.fullmatch(r"[0-9A-Fa-f:\\-.\\s]+", raw):
+    if not raw or not re.fullmatch(r"[0-9A-Fa-f:.\-\s]+", raw):
         return ""
-    raw = re.sub(r"[:\\-.\\s]", "", raw).upper()
+    raw = re.sub(r"[:.\-\s]", "", raw).upper()
     return raw if _HEX.fullmatch(raw) else ""
 
 
