@@ -119,7 +119,7 @@ The suite includes isolated tests for startup/identity/diagnostic helpers and in
 ## Project structure
 
 - `networkradar.py` — application runtime, API and orchestration.
-- `index.html` — dashboard markup and page structure.
+- `index.html` — dashboard markup and page structure. The page uses external CSS/JS assets and contains no inline style attributes.
 - `networkradar.css` — standalone responsive dashboard stylesheet.
 - `dashboard.js` — standalone dashboard client and interactions.
 - `networkradar_modules/` — reusable identity, startup and diagnostics components.
