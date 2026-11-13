@@ -1669,3 +1669,34 @@ body.nav-collapsed #sideNavigation a.active::after {
   overflow:auto;
   max-height:320px;
 }
+
+
+.headline-number { font-size:22px; font-weight:800; }
+.progress-track {
+  height:9px;
+  background:#07111f;
+  border:1px solid var(--line);
+  border-radius:99px;
+  overflow:hidden;
+  margin-top:12px;
+}
+.progress-fill {
+  height:100%;
+  width:0%;
+  background:linear-gradient(90deg,#2689ee,#39d6b0);
+  transition:width .35s ease;
+}
+.is-hidden { display:none; }
+.is-hidden-spaced { display:none; margin:12px 0; }
+.toast {
+  display:none;
+  position:fixed;
+  right:20px;
+  bottom:20px;
+  z-index:100;
+  background:#153d35;
+  color:#d8fff0;
+  border:1px solid #35d39a;
+  padding:12px 18px;
+  border-radius:10px;
+}
