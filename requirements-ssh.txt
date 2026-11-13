@@ -1,0 +1,3 @@
+# Optional SSH terminal dependency for NetworkRadar.
+# Install only when using Phantom Terminal: python -m pip install -r requirements-ssh.txt
+paramiko>=3.4,<5
