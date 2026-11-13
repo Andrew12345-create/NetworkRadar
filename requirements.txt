@@ -1,0 +1,4 @@
+# NetworkRadar 8.4.0 core runtime uses Python standard library only.
+# Optional external tools (installed separately):
+# - Nmap: https://nmap.org/download.html
+# - Wireshark/TShark: https://www.wireshark.org/download.html

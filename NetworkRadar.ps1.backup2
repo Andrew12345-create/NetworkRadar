@@ -1,0 +1,711 @@
+﻿#Requires -Version 5.1
+
+<#
+=============================================================
+ CYBERLAB 4.0 | NETWORK INTELLIGENCE
+=============================================================
+
+Features:
+  - Nmap network discovery
+  - MAC address and manufacturer identification
+  - Persistent device inventory
+  - First-seen and last-seen timestamps
+  - Online and no-response event history
+  - CSV persistence
+  - XML validation
+  - Defensive error handling
+  - Automatic 30-second refresh
+
+Network discovery only.
+No credential collection, packet interception, or
+unauthorized remote control.
+=============================================================
+#>
+
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = "Stop"
+
+# ============================================================
+# 1. CONFIGURATION
+# ============================================================
+
+$script:NmapPath = "C:\Program Files (x86)\Nmap\nmap.exe"
+$script:Network = "192.168.100.0/24"
+$script:ScanInterval = 30
+
+$script:DataDirectory = "C:\CyberLab\NetworkRadar\data"
+$script:DeviceFile = Join-Path $script:DataDirectory "devices.csv"
+$script:EventFile = Join-Path $script:DataDirectory "events.csv"
+$script:XmlFile = Join-Path $script:DataDirectory "latest-scan.xml"
+
+$script:ScanNumber = 0
+
+# Use case-insensitive dictionaries with string keys.
+$script:DeviceHistory =
+    New-Object 'System.Collections.Generic.Dictionary[string,object]' (
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+
+$script:PreviousOnline =
+    New-Object 'System.Collections.Generic.HashSet[string]' (
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+
+# ============================================================
+# 2. INITIALIZE DATA DIRECTORY
+# ============================================================
+
+function Initialize-Application {
+
+    if (-not (Test-Path -LiteralPath $script:NmapPath -PathType Leaf)) {
+        throw "Nmap executable not found: $script:NmapPath"
+    }
+
+    New-Item `
+        -Path $script:DataDirectory `
+        -ItemType Directory `
+        -Force |
+        Out-Null
+
+    Write-Host "Nmap executable verified." -ForegroundColor Green
+    Write-Host "Data directory verified." -ForegroundColor Green
+}
+
+# ============================================================
+# 3. VALIDATE IPV4 ADDRESSES
+# ============================================================
+
+function Test-ValidIPv4 {
+
+    param(
+        [AllowNull()]
+        [string]$Address
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Address)) {
+        return $false
+    }
+
+    $ParsedAddress = $null
+
+    $Valid = [System.Net.IPAddress]::TryParse(
+        $Address,
+        [ref]$ParsedAddress
+    )
+
+    if (-not $Valid) {
+        return $false
+    }
+
+    return (
+        $ParsedAddress.AddressFamily -eq
+        [System.Net.Sockets.AddressFamily]::InterNetwork
+    )
+}
+
+# ============================================================
+# 4. CREATE A STANDARD DEVICE RECORD
+# ============================================================
+
+function New-DeviceRecord {
+
+    param(
+        [string]$IP,
+        [string]$MAC = "Unavailable",
+        [string]$Manufacturer = "Unknown",
+        [string]$Hostname = "-"
+    )
+
+    return [PSCustomObject]@{
+        IP           = $IP
+        MAC          = $MAC
+        Manufacturer = $Manufacturer
+        Hostname     = $Hostname
+        FirstSeen    = ""
+        LastSeen     = ""
+        LastStatus   = "ONLINE"
+    }
+}
+
+# ============================================================
+# 5. LOAD DEVICE HISTORY
+# ============================================================
+
+function Import-DeviceHistory {
+
+    if (-not (Test-Path -LiteralPath $script:DeviceFile)) {
+        Write-Host "No previous inventory found. Starting fresh."
+        return
+    }
+
+    try {
+
+        $Rows = @(Import-Csv -LiteralPath $script:DeviceFile)
+
+        foreach ($Row in $Rows) {
+
+            if ($null -eq $Row) {
+                continue
+            }
+
+            if (
+                $Row.PSObject.Properties.Name -notcontains "IP"
+            ) {
+                continue
+            }
+
+            $IP = [string]$Row.IP
+
+            if (-not (Test-ValidIPv4 $IP)) {
+                continue
+            }
+
+            $Record = New-DeviceRecord `
+                -IP $IP `
+                -MAC ([string]$Row.MAC) `
+                -Manufacturer ([string]$Row.Manufacturer) `
+                -Hostname ([string]$Row.Hostname)
+
+            $Record.FirstSeen = [string]$Row.FirstSeen
+            $Record.LastSeen = [string]$Row.LastSeen
+            $Record.LastStatus = [string]$Row.LastStatus
+
+            if ([string]::IsNullOrWhiteSpace($Record.LastStatus)) {
+                $Record.LastStatus = "UNKNOWN"
+            }
+
+            $script:DeviceHistory[$IP] = $Record
+        }
+
+        Write-Host (
+            "Loaded {0} historical device records." -f
+            $script:DeviceHistory.Count
+        ) -ForegroundColor Green
+    }
+    catch {
+
+        Write-Warning (
+            "History could not be loaded: " +
+            $_.Exception.Message
+        )
+
+        Write-Warning "The existing history file has not been deleted."
+    }
+}
+
+# ============================================================
+# 6. WRITE EVENT HISTORY
+# ============================================================
+
+function Write-DeviceEvent {
+
+    param(
+        [string]$IP,
+        [string]$Event,
+        [string]$Details
+    )
+
+    $EventRecord = [PSCustomObject]@{
+        Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        IP        = $IP
+        Event     = $Event
+        Details   = $Details
+    }
+
+    if (Test-Path -LiteralPath $script:EventFile) {
+
+        $EventRecord |
+            Export-Csv `
+                -LiteralPath $script:EventFile `
+                -Append `
+                -NoTypeInformation `
+                -Encoding UTF8
+    }
+    else {
+
+        $EventRecord |
+            Export-Csv `
+                -LiteralPath $script:EventFile `
+                -NoTypeInformation `
+                -Encoding UTF8
+    }
+}
+
+# ============================================================
+# 7. SAVE INVENTORY SAFELY
+# ============================================================
+
+function Export-DeviceHistory {
+
+    if ($script:DeviceHistory.Count -eq 0) {
+        return
+    }
+
+    $TemporaryFile = Join-Path `
+        $script:DataDirectory `
+        "devices.tmp.csv"
+
+    $Records = @(
+        foreach ($Key in $script:DeviceHistory.Keys) {
+
+            $Record = $script:DeviceHistory[$Key]
+
+            if ($null -eq $Record) {
+                continue
+            }
+
+            if (
+                $Record.PSObject.Properties.Name -contains "IP"
+            ) {
+                $Record
+            }
+        }
+    )
+
+    try {
+
+        $Records |
+            Sort-Object IP |
+            Export-Csv `
+                -LiteralPath $TemporaryFile `
+                -NoTypeInformation `
+                -Encoding UTF8
+
+        Move-Item `
+            -LiteralPath $TemporaryFile `
+            -Destination $script:DeviceFile `
+            -Force
+    }
+    catch {
+
+        Write-Warning (
+            "Could not save inventory: " +
+            $_.Exception.Message
+        )
+
+        Write-Warning "The previous inventory has been retained."
+    }
+}
+
+# ============================================================
+# 8. RUN NMAP HOST DISCOVERY
+# ============================================================
+
+function Get-LiveDevices {
+
+    $Results = New-Object 'System.Collections.Generic.List[object]'
+
+    if (Test-Path -LiteralPath $script:XmlFile) {
+        Remove-Item -LiteralPath $script:XmlFile -Force
+    }
+
+    $Arguments = @(
+        "-sn"
+        "-n"
+        "-oX"
+        $script:XmlFile
+        $script:Network
+    )
+
+    Write-Host "[*] Running Nmap host discovery..." `
+        -ForegroundColor Yellow
+
+    $NmapOutput = @(& $script:NmapPath @Arguments 2>&1)
+    $NmapExitCode = $LASTEXITCODE
+
+    $NmapOutput | Set-Content -LiteralPath (Join-Path $script:DataDirectory "nmap-latest.log") -Encoding UTF8
+
+    $ExitCode = $NmapExitCode
+
+    if ($ExitCode -ne 0) {
+        throw "Nmap failed with exit code $ExitCode."
+    }
+
+    if (-not (Test-Path -LiteralPath $script:XmlFile -PathType Leaf)) {
+        throw "Nmap did not produce an XML report."
+    }
+
+    # Parse the XML report.
+    [xml]$Document = Get-Content `
+        -LiteralPath $script:XmlFile `
+        -Raw
+
+    $HostNodes = $Document.SelectNodes("/nmaprun/host")
+
+    foreach ($HostNode in $HostNodes) {
+
+        if ($null -eq $HostNode) {
+            continue
+        }
+
+        $StatusNode = $HostNode.SelectSingleNode("status")
+
+        if ($null -eq $StatusNode) {
+            continue
+        }
+
+        if ($StatusNode.GetAttribute("state") -ne "up") {
+            continue
+        }
+
+        $IP = ""
+        $MAC = "Unavailable"
+        $Manufacturer = "Unknown"
+        $Hostname = "-"
+
+        # Extract address information.
+        $AddressNodes = $HostNode.SelectNodes("address")
+
+        foreach ($AddressNode in $AddressNodes) {
+
+            if ($null -eq $AddressNode) {
+                continue
+            }
+
+            $Type = $AddressNode.GetAttribute("addrtype")
+            $Value = $AddressNode.GetAttribute("addr")
+
+            if ($Type -eq "ipv4") {
+                $IP = $Value
+            }
+
+            if ($Type -eq "mac") {
+
+                $MAC = $Value
+
+                $Vendor = $AddressNode.GetAttribute("vendor")
+
+                if (-not [string]::IsNullOrWhiteSpace($Vendor)) {
+                    $Manufacturer = $Vendor
+                }
+            }
+        }
+
+        # Validate the IP before creating a record.
+        if (-not (Test-ValidIPv4 $IP)) {
+            continue
+        }
+
+        # Extract hostname when present.
+        $HostnameNode = $HostNode.SelectSingleNode(
+            "hostnames/hostname"
+        )
+
+        if ($null -ne $HostnameNode) {
+
+            $Name = $HostnameNode.GetAttribute("name")
+
+            if (-not [string]::IsNullOrWhiteSpace($Name)) {
+                $Hostname = $Name
+            }
+        }
+
+        $Record = New-DeviceRecord `
+            -IP $IP `
+            -MAC $MAC `
+            -Manufacturer $Manufacturer `
+            -Hostname $Hostname
+
+        # List.Add() does not emit the collection index.
+        $Results.Add($Record)
+    }
+
+    return ,$Results.ToArray()
+}
+
+# ============================================================
+# 9. UPDATE DEVICE INVENTORY
+# ============================================================
+
+function Update-Inventory {
+
+    param(
+        [AllowEmptyCollection()]
+        [object[]]$CurrentDevices
+    )
+
+    $CurrentOnline =
+        New-Object 'System.Collections.Generic.HashSet[string]' (
+            [System.StringComparer]::OrdinalIgnoreCase
+        )
+
+    $Now = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    foreach ($Device in $CurrentDevices) {
+
+        if ($null -eq $Device) {
+            continue
+        }
+
+        # Defensively validate object structure.
+        $PropertyNames = @($Device.PSObject.Properties.Name)
+
+        if ($PropertyNames -notcontains "IP") {
+            continue
+        }
+
+        $IP = [string]$Device.IP
+
+        if (-not (Test-ValidIPv4 $IP)) {
+            continue
+        }
+
+        [void]$CurrentOnline.Add($IP)
+
+        if (-not $script:DeviceHistory.ContainsKey($IP)) {
+
+            $Record = New-DeviceRecord `
+                -IP $IP `
+                -MAC ([string]$Device.MAC) `
+                -Manufacturer ([string]$Device.Manufacturer) `
+                -Hostname ([string]$Device.Hostname)
+
+            $Record.FirstSeen = $Now
+            $Record.LastSeen = $Now
+            $Record.LastStatus = "ONLINE"
+
+            $script:DeviceHistory[$IP] = $Record
+
+            Write-DeviceEvent `
+                -IP $IP `
+                -Event "FIRST_SEEN" `
+                -Details "Device first discovered."
+
+            continue
+        }
+
+        $Existing = $script:DeviceHistory[$IP]
+
+        if ($null -eq $Existing) {
+            continue
+        }
+
+        if ($Existing.LastStatus -ne "ONLINE") {
+
+            Write-DeviceEvent `
+                -IP $IP `
+                -Event "ONLINE_AGAIN" `
+                -Details "Device responded after a previous non-response."
+        }
+
+        $Existing.LastSeen = $Now
+        $Existing.LastStatus = "ONLINE"
+
+        if (
+            -not [string]::IsNullOrWhiteSpace([string]$Device.MAC) -and
+            $Device.MAC -ne "Unavailable"
+        ) {
+            $Existing.MAC = $Device.MAC
+        }
+
+        if (
+            -not [string]::IsNullOrWhiteSpace([string]$Device.Manufacturer) -and
+            $Device.Manufacturer -ne "Unknown"
+        ) {
+            $Existing.Manufacturer = $Device.Manufacturer
+        }
+
+        if (
+            -not [string]::IsNullOrWhiteSpace([string]$Device.Hostname) -and
+            $Device.Hostname -ne "-"
+        ) {
+            $Existing.Hostname = $Device.Hostname
+        }
+    }
+
+    # Record devices that disappeared since the previous scan.
+    foreach ($IP in @($script:PreviousOnline)) {
+
+        if (-not $CurrentOnline.Contains([string]$IP)) {
+
+            if ($script:DeviceHistory.ContainsKey([string]$IP)) {
+
+                $Existing = $script:DeviceHistory[[string]$IP]
+
+                if ($Existing.LastStatus -eq "ONLINE") {
+
+                    $Existing.LastStatus = "NO_RESPONSE"
+
+                    Write-DeviceEvent `
+                        -IP ([string]$IP) `
+                        -Event "NO_RESPONSE" `
+                        -Details "Device did not respond to the latest scan."
+                }
+            }
+        }
+    }
+
+    # Update the current online set.
+    $script:PreviousOnline.Clear()
+
+    foreach ($IP in $CurrentOnline) {
+        [void]$script:PreviousOnline.Add([string]$IP)
+    }
+
+    Export-DeviceHistory
+}
+
+# ============================================================
+# 10. DISPLAY DASHBOARD
+# ============================================================
+
+function Show-Dashboard {
+
+    param(
+        [AllowEmptyCollection()]
+        [object[]]$CurrentDevices
+    )
+
+    Clear-Host
+
+    Write-Host ""
+    Write-Host "============================================================" `
+        -ForegroundColor Cyan
+
+    Write-Host "        CYBERLAB 4.0 // NETWORK INTELLIGENCE" `
+        -ForegroundColor Green
+
+    Write-Host "============================================================" `
+        -ForegroundColor Cyan
+
+    Write-Host ""
+
+    Write-Host " Network    : $script:Network"
+    Write-Host " Computer   : $env:COMPUTERNAME"
+    Write-Host " Scan       : $script:ScanNumber"
+    Write-Host " Timestamp  : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+
+    Write-Host ""
+
+    Write-Host " LIVE DEVICES: $($CurrentDevices.Count)" `
+        -ForegroundColor Green
+
+    Write-Host ""
+
+    if ($CurrentDevices.Count -gt 0) {
+
+        $CurrentDevices |
+            Sort-Object IP |
+            Format-Table `
+                IP,
+                MAC,
+                Manufacturer,
+                Hostname,
+                Status `
+                -AutoSize |
+            Out-Host
+    }
+    else {
+
+        Write-Host "No responding devices found." `
+            -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+    Write-Host " PERSISTENT DEVICE HISTORY" -ForegroundColor Cyan
+    Write-Host ""
+
+    if ($script:DeviceHistory.Count -gt 0) {
+
+        $History = @(
+            foreach ($Key in $script:DeviceHistory.Keys) {
+                $script:DeviceHistory[$Key]
+            }
+        )
+
+        $History |
+            Sort-Object IP |
+            Select-Object `
+                IP,
+                Manufacturer,
+                FirstSeen,
+                LastSeen,
+                LastStatus |
+            Format-Table -AutoSize |
+            Out-Host
+    }
+
+    Write-Host ""
+    Write-Host " Inventory : $script:DeviceFile" -ForegroundColor Gray
+    Write-Host " Events    : $script:EventFile" -ForegroundColor Gray
+
+    Write-Host ""
+    Write-Host " Refresh interval: $script:ScanInterval seconds" `
+        -ForegroundColor Cyan
+
+    Write-Host " Press CTRL+C to stop." -ForegroundColor Magenta
+}
+
+# ============================================================
+# 11. MAIN APPLICATION
+# ============================================================
+
+try {
+
+    Initialize-Application
+    Import-DeviceHistory
+
+    Write-Host ""
+    Write-Host "CyberLab initialization complete." `
+        -ForegroundColor Green
+
+    Start-Sleep -Seconds 2
+
+    while ($true) {
+
+        $script:ScanNumber++
+
+        try {
+
+            $CurrentDevices = @(Get-LiveDevices)
+
+            Update-Inventory -CurrentDevices $CurrentDevices
+
+            Show-Dashboard -CurrentDevices $CurrentDevices
+        }
+        catch {
+
+            Write-Host ""
+            Write-Host "============================================================" `
+                -ForegroundColor Red
+
+            Write-Host " SCAN FAILED" -ForegroundColor Red
+
+            Write-Host (
+                "Message: {0}" -f $_.Exception.Message
+            ) -ForegroundColor Yellow
+
+            if ($_.InvocationInfo) {
+
+                Write-Host (
+                    "Line: {0}" -f
+                    $_.InvocationInfo.ScriptLineNumber
+                ) -ForegroundColor Yellow
+
+                Write-Host (
+                    "Statement: {0}" -f
+                    $_.InvocationInfo.Line
+                ) -ForegroundColor Yellow
+            }
+
+            Write-Host "============================================================" `
+                -ForegroundColor Red
+
+            Write-Host "Previous inventory files have been retained."
+        }
+
+        Start-Sleep -Seconds $script:ScanInterval
+    }
+}
+catch {
+
+    Write-Host ""
+    Write-Host "FATAL INITIALIZATION ERROR" -ForegroundColor Red
+
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+
+    Write-Host ""
+    Write-Host "Press Enter to close."
+
+    Read-Host | Out-Null
+}

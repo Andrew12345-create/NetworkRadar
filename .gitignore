@@ -1,0 +1,35 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+*.pcap
+*.pcapng
+logs/
+captures/
+.vscode/
+.DS_Store
+
+# NetworkRadar local runtime data
+/data/
+
+# Local databases and runtime files
+/database/*.db
+/database/*.db-*
+/database/*.sqlite
+/database/*.sqlite3
+/database/.*lock
+
+# Backups and temporary files
+*.bak
+*.backup
+*.backup-*
+*.backup.*
+
+# Archived and legacy development files
+/legacy_reference/
