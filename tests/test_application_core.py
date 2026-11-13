@@ -63,6 +63,28 @@ class EndpointManagementAuthorizationTests(unittest.TestCase):
             app.is_authorized = original
 
 
+class NetworkAdapterSelectionTests(unittest.TestCase):
+    def test_lowest_effective_default_route_metric_wins(self):
+        adapters = [
+            {"idx": 4, "status": "Up", "ip": "192.168.1.20"},
+            {"idx": 9, "status": "Up", "ip": "10.0.0.20"},
+        ]
+        routes = {
+            4: {"_metric": 80},
+            9: {"_metric": 15},
+        }
+        selected = app._select_primary_adapter(adapters, routes)
+        self.assertEqual(selected["idx"], 9)
+
+    def test_up_adapter_is_fallback_when_no_default_route_exists(self):
+        adapters = [
+            {"idx": 4, "status": "Up", "ip": "192.168.1.20"},
+            {"idx": 9, "status": "Up", "ip": "10.0.0.20"},
+        ]
+        self.assertEqual(app._select_primary_adapter(adapters, {})["idx"], 4)
+        self.assertIsNone(app._select_primary_adapter([], {}))
+
+
 class NetworkApprovalFreshnessTests(unittest.TestCase):
     def test_recent_approval_is_fresh(self):
         now = datetime(2026, 1, 1, 12, 0, 0)
