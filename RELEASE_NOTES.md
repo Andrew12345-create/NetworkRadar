@@ -29,6 +29,8 @@ The discovery refactor has begun without changing the public application entry p
 - Extracted local ARP cache collection and Windows-compatible output parsing into `networkradar_modules/discovery/arp.py`.
 - Extracted MAC normalisation, usable IPv4 selection, default-route adapter selection and TShark interface matching into `networkradar_modules/discovery/adapters.py`.
 - Extracted device-family inference into `networkradar_modules/discovery/classification.py`. The helper is now independent of application locks and receives the gateway address explicitly.
+- Extracted reverse-DNS, NetBIOS and SSDP probes into `networkradar_modules/discovery/probes.py`.
+- Hardened SSDP description retrieval: the advertised URL must point to the responding private host, and HTTP redirects are revalidated to prevent a device from redirecting the fetch to another host or metadata endpoint.
 - Added isolated tests for scanner execution, XML parsing, ARP parsing, interface selection and device classification.
 
 The higher-level inventory orchestration, multi-source enrichment and database persistence remain in `networkradar.py` for the next refactor stage.
