@@ -91,6 +91,14 @@ class TSharkInterfaceSelectionTests(unittest.TestCase):
                 [("1", "Wi-Fi")], primary_name="Ethernet 2"
             )
 
+    def test_manual_network_override_can_use_safe_interface_fallback(self):
+        self.assertEqual(
+            app._select_tshark_interface(
+                [("1", "Wi-Fi")], primary_name="Manual override"
+            ),
+            "1",
+        )
+
 
 class NetworkAdapterSelectionTests(unittest.TestCase):
     def test_lowest_effective_default_route_metric_wins(self):
