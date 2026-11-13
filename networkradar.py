@@ -190,6 +190,12 @@ except ImportError:
 # The package metadata is the single source of the application version.
 from networkradar_modules import __version__ as APP_VERSION
 from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
+from networkradar_modules.identity.fingerprints import (
+    derive_identity as _derive_identity_core,
+    dhcp_fingerprint as _dhcp_fingerprint_core,
+    normalise_mac as _normalise_mac_core,
+    mac_properties as _mac_properties_core,
+)
 from networkradar_modules.core.startup import (
     StartupError, acquire_instance_lock as _acquire_instance_lock,
     release_instance_lock as _release_instance_lock, bind_local_server,
@@ -1372,21 +1378,8 @@ def discover_devices():
     return run_nmap_discovery(current_network(), NMAP, NMAP_LOG)
 
 def derive_identity(device):
-    mac = (device.get("mac") or "").replace("-", ":").upper()
-    if re.fullmatch(r"[0-9A-F]{2}(?::[0-9A-F]{2}){5}", mac):
-        first = int(mac.split(":")[0], 16)
-        if first & 0x02:
-            # Randomised/locally administered MACs are observations, not durable
-            # identity anchors. Keep identity scoped to the current IP instead.
-            basis = "IP fallback (locally administered MAC ignored)"
-            key = f"ip:{device['ip']}"
-        else:
-            basis = "MAC"
-            key = f"mac:{mac}"
-    else:
-        basis = "IP fallback"
-        key = f"ip:{device['ip']}"
-    return uuid.uuid5(uuid.NAMESPACE_URL, "nr:" + key).hex[:24], key, basis
+    """Compatibility wrapper around the pure identity-key derivation module."""
+    return _derive_identity_core(device)
 
 def persist_identity(conn, device, ts):
     derived_id, key, basis = derive_identity(device)
@@ -1466,23 +1459,16 @@ def infer_type(device, ssdp=None):
     return _classify_device_type(device, ssdp, gateway_ip=gateway_ip)
 
 def dhcp_fingerprint(vendor_class, parameter_request_list):
-    vc = re.sub(r"\s+", " ", (vendor_class or "").strip().lower())[:120]
-    prl = ",".join(x.strip() for x in (parameter_request_list or "").split(",") if x.strip())
-    return hashlib.sha256((vc + "|" + prl).encode("utf-8", "ignore")).hexdigest()[:24]
+    """Compatibility wrapper around deterministic DHCP fingerprinting."""
+    return _dhcp_fingerprint_core(vendor_class, parameter_request_list)
 
 def _normalise_mac(mac):
-    m = (mac or "").strip().replace("-", ":").upper()
-    return m if re.fullmatch(r"[0-9A-F]{2}(?::[0-9A-F]{2}){5}", m) else ""
+    """Compatibility wrapper for canonical MAC address normalisation."""
+    return _normalise_mac_core(mac)
 
 def mac_properties(mac):
-    m = _normalise_mac(mac)
-    if not m:
-        return {"valid": False, "multicast": False, "locally_administered": False,
-                "unicast": False, "prefix": ""}
-    first = int(m[:2], 16)
-    return {"valid": True, "multicast": bool(first & 1),
-            "locally_administered": bool(first & 2),
-            "unicast": not bool(first & 1), "prefix": m[:8].replace(":", "")}
+    """Compatibility wrapper for IEEE MAC address property extraction."""
+    return _mac_properties_core(mac)
 
 # ============================================================
 # RADAR IDENTITY (preserved from 8.1.0)
