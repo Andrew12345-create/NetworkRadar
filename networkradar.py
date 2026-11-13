@@ -1549,7 +1549,8 @@ def update_oui_database(timeout=20):
                         VALUES(?,?,?,?) ON CONFLICT(prefix) DO UPDATE SET
                         organization=excluded.organization,registry=excluded.registry,
                         updated_at=excluded.updated_at""",
-                        [(k, v["organization"], reg, now_text()) for k, v in items])                DB_MANAGER.write(_w)
+                        [(k, v["organization"], reg, now_text()) for k, v in items])
+                DB_MANAGER.write(_w)
                 added += len(parsed)
                 with _OUI_LOCK:
                     _OUI_MEM.clear()
