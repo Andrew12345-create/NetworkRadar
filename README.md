@@ -1,63 +1,134 @@
-# NetworkRadar 8.4.0
+# NetworkRadar 12.0.3
 
-A compatibility-first recovery release of the supplied NetworkRadar platform.
+NetworkRadar is a Windows-focused, local-first network discovery and device-intelligence application. It combines authorised network discovery, device inventory, DNS/DHCP/ARP observations, identity evidence, historical tracking, exposure observations, investigations and a localhost dashboard. Optional management features include SSH terminal access and Windows/endpoint-management integrations.
+
+> **Project status:** Active development. The repository contains a large application core and a growing modular package. The current snapshot has not yet completed a full Windows end-to-end security and compatibility test cycle. Treat remote-management features as advanced functionality and use them only on systems and networks you own or are explicitly authorised to administer.
+
+## Current application version
+
+The application version is defined once in `networkradar_modules/__init__.py` and exposed to the dashboard and logs by `networkradar.py`.
 
 ## Requirements
 
-- Windows 10/11
-- Python 3.10 or newer
-- Nmap (for discovery and service/OS fingerprinting)
-- Wireshark/TShark (for packet-observation engines)
-- PowerShell 5.1
+- Windows 10 or Windows 11.
+- Python 3.10 or newer.
+- Nmap installed and available on PATH, or configured with `NETWORKRADAR_NMAP`.
+- Wireshark/TShark installed and available on PATH, or configured with `NETWORKRADAR_TSHARK`.
+- Capture permissions and a compatible Npcap installation may be required for packet-observation features.
 
-The core Python runtime and automated tests use only the Python standard
-library. Nmap and TShark are separate Windows installations.
+The core application uses the Python standard library. Paramiko is optional and required only for the SSH terminal.
 
-## Install / run
+## Installation
 
-1. Extract the complete ZIP to a writable folder, e.g. `C:\CyberLab\NetworkRadar`.
-2. Keep the `database` and `data` folders beside `networkradar.py`.
-3. Open PowerShell in that folder.
-4. Run `Set-ExecutionPolicy -Scope Process Bypass` only if your local policy
-   prevents running the launcher; this setting lasts only for that shell.
-5. Run `./NetworkRadar.ps1`.
-6. Open `http://127.0.0.1:8765` if the browser does not open automatically.
+1. Clone or download the complete repository. Do not copy only `networkradar.py`; the application imports the `networkradar_modules` package.
+2. Open PowerShell in the repository directory.
+3. Create and activate a virtual environment:
 
-If port 8765 is occupied, NetworkRadar reports the bind failure. To explicitly
-permit selection of the next available local port, run:
+   ```powershell
+   py -3 -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   python -m pip install --upgrade pip
+   ```
+
+4. Install optional SSH support if you intend to use Phantom Terminal:
+
+   ```powershell
+   python -m pip install -r requirements-ssh.txt
+   ```
+
+5. Install Nmap and Wireshark/TShark separately and confirm that `nmap --version` and `tshark --version` work in PowerShell.
+6. Start NetworkRadar:
+
+   ```powershell
+   .\NetworkRadar.ps1
+   ```
+
+   If PowerShell blocks the launcher, you may temporarily permit scripts in the current PowerShell process only:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process Bypass
+   .\NetworkRadar.ps1
+   ```
+
+The dashboard opens at **http://127.0.0.1:8766** by default.
+
+## Packet-capture interface selection
+
+NetworkRadar first identifies the active Windows adapter using route metrics, then matches that adapter to TShark by interface GUID/name/description. This avoids silently capturing on a different Wi-Fi or Ethernet adapter when several are present.
+
+To inspect TShark's interface list:
 
 ```powershell
-./NetworkRadar.ps1 --allow-alt-port
+tshark -D
 ```
 
-Or choose a specific port for this session:
+If automatic matching cannot identify the active adapter, set the TShark interface number (or a matching displayed name) for the current PowerShell session:
 
 ```powershell
-$env:NETWORKRADAR_PORT = "8766"
-./NetworkRadar.ps1
+$env:NETWORKRADAR_TSHARK_INTERFACE = "3"
+.\NetworkRadar.ps1
 ```
 
-The web console remains bound to `127.0.0.1`.
+## Port configuration
+
+Set a specific port for the current PowerShell session:
+
+```powershell
+$env:NETWORKRADAR_PORT = "8767"
+.\NetworkRadar.ps1
+```
+
+NetworkRadar does not silently change ports. To explicitly permit a search of the next 30 ports:
+
+```powershell
+.\NetworkRadar.ps1 --allow-alt-port
+```
+
+The primary dashboard is intended to bind to loopback (`127.0.0.1`). Do not expose it through port forwarding or a reverse proxy without a separate security review.
+
+## Data and database
+
+On startup, the application creates its local `data/` and `database/` directories when needed. These directories are intentionally excluded from Git because they contain local network inventory, observations, captures, credentials/trust material and runtime database files.
+
+- Back up your own `data/` and `database/` folders before upgrading.
+- When updating application code, retain your existing local database and data folders.
+- Older approved profiles without a valid `last_authorized` timestamp will require a one-time re-approval.
+- Do not commit scan output, packet captures, database files, SSH known-host records, agent secrets, certificates or private keys.
+
+This repository does **not** ship a live SQLite database.
 
 ## Run tests
+
+From the repository root:
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-## Data safety
+The suite includes isolated tests for startup, SQLite database management, identity, diagnostics, Nmap XML parsing, ARP parsing, adapter selection and device-family classification, plus application regression tests for identity scoring and network-approval freshness. Actual Windows discovery, packet capture, browser and remote-management behaviour still requires testing on a real Windows host.
 
-The included database is a consistent SQLite backup of the uploaded database.
-The source database was not modified. The supplied database integrity check
-passed and all 51 application table row counts match the source archive.
-Always back up your active `database` and `data` folders before replacing an
-existing installation. Do not overwrite a newer working database with this
-archive's database; if updating an existing installation, replace application
-code only and retain your current database/data folders.
+## Security and authorised use
 
-## Version scope
+- Only scan networks for which you have permission.
+- Active discovery and endpoint management are gated by a locally approved network profile.
+- Open ports and service banners are observations, not proof of vulnerabilities or compromise.
+- SSH host keys must be reviewed and explicitly trusted before authentication.
+- Remote actions can affect availability. Review targets and confirm disruptive actions carefully.
+- The optional endpoint-agent hub is disabled by default and requires TLS configuration. This repository snapshot does not yet provide a separately packaged endpoint-agent client installer; do not treat the hub alone as a complete deployable agent solution.
 
-See `RELEASE_NOTES.md` and `docs/ARCHITECTURE.md`. The supplied archive
-contained an 8.2.0 application, not the failed 8.3.0 source or its runtime
-traceback. This build makes the verified recovery improvements possible from
-the files provided and does not claim to reconstruct unavailable code.
+## Project structure
+
+- `networkradar.py` — application runtime, API and orchestration.
+- `index.html` — dashboard markup and page structure. The page uses external CSS/JS assets and contains no inline style attributes.
+- `networkradar.css` — standalone responsive dashboard stylesheet.
+- `dashboard.js` — standalone dashboard client and interactions.
+- `networkradar_modules/` — reusable identity, startup, database, diagnostics and discovery components. Discovery modules cover Nmap XML/scanning, ARP parsing, adapter selection, evidence-based device-family classification, reverse-DNS/NetBIOS probes and SSDP/UPnP discovery.
+- `migrations/` — additive database schema migrations.
+- `tests/` — unit and application regression tests.
+- `docs/` — architecture and audit notes.
+
+See [Architecture](docs/ARCHITECTURE.md), [Release Notes](RELEASE_NOTES.md), and [Audit History](AUDIT_AND_TEST_RESULTS.md).
+
+## License
+
+No license file has been selected yet. Public visibility on GitHub does not by itself grant permission to copy, modify or redistribute this project. Add an explicit license before presenting NetworkRadar as an open-source release.

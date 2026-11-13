@@ -19,7 +19,7 @@ captures/
 /data/
 
 # Local databases and runtime files
-/database/*.db
+/database/
 /database/*.db-*
 /database/*.sqlite
 /database/*.sqlite3
@@ -33,3 +33,16 @@ captures/
 
 # Archived and legacy development files
 /legacy_reference/
+
+# Root-level historical/backup artifacts (keep active package files under their directories)
+*.backup*
+*-backup*.py
+/*_5_1.py
+/networkradar_modules*.py
+/migrations*.sql
+
+# Local secrets, certificates and trust material
+*.pem
+*.p12
+*.pfx
+*.key
