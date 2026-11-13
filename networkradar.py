@@ -6288,6 +6288,8 @@ def stop_agent_hub():
 
 
 def start_agent_hub_status():
+    if not is_authorized():
+        return {"state":"BLOCKED","reason":"The current network profile is not authorised."}
     if AGENT_HUB is not None:
         return {"state":"ONLINE","address":str(AGENT_HUB.server_address)}
     if os.environ.get("NETWORKRADAR_AGENT_ENABLED","0")!="1": return {"state":"DISABLED"}
@@ -8023,17 +8025,18 @@ def _main_inner():
         sys.exit(1)
 
     initialize_database()
-    # Optional remote-agent listener; it is inert unless explicitly enabled with TLS files.
-    try:
-        print("ENDPOINT AGENT HUB:", json.dumps(start_agent_hub()))
-    except Exception as _agent_exc:
-        print("ENDPOINT AGENT HUB STARTUP WARNING:", _clean(_agent_exc, 240))
     repair_dns_domain_classification()
     load_oui_cache()
     try:
         refresh_network_context()
     except Exception as e:
         print("NET CONTEXT WARNING:", _clean(e, 220))
+    # Network approval must be loaded before the optional management listener
+    # evaluates whether endpoint management is permitted on this network.
+    try:
+        print("ENDPOINT AGENT HUB:", json.dumps(start_agent_hub()))
+    except Exception as _agent_exc:
+        print("ENDPOINT AGENT HUB STARTUP WARNING:", _clean(_agent_exc, 240))
     print("DATABASE INITIALISED (serialized writer active).")
 
     web = start_web()
