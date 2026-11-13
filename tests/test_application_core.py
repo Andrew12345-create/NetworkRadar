@@ -66,8 +66,8 @@ class EndpointManagementAuthorizationTests(unittest.TestCase):
 class TSharkInterfaceSelectionTests(unittest.TestCase):
     def test_active_adapter_guid_beats_first_wifi_interface(self):
         interfaces = [
-            ("1", r"\\Device\\NPF_{11111111-1111-1111-1111-111111111111} (Wi-Fi)"),
-            ("2", r"\\Device\\NPF_{22222222-2222-2222-2222-222222222222} (Ethernet)"),
+            ("1", r"\Device\NPF_{11111111-1111-1111-1111-111111111111} (Wi-Fi)"),
+            ("2", r"\Device\NPF_{22222222-2222-2222-2222-222222222222} (Ethernet)"),
         ]
         selected = app._select_tshark_interface(
             interfaces,
