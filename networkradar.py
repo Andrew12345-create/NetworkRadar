@@ -1510,10 +1510,10 @@ def load_oui_cache():
         try:
             with DB_MANAGER.read() as conn:
                 rows = conn.execute(
-                    "SELECT prefix, organization, registry FROM oui_cache").fetchall()
+                    "SELECT prefix, organization, registry, updated_at FROM oui_cache").fetchall()
                 _OUI_MEM = {r[0]: r[1] for r in rows}
                 _OUI_META_MEM = {
-                    r[0]: {"organization": r[1], "registry": r[2] or ""}
+                    r[0]: {"organization": r[1], "registry": r[2] or "", "updated_at": r[3] or ""}
                     for r in rows
                 }
         except Exception:
