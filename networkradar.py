@@ -2013,6 +2013,7 @@ _IDENTITY_SOURCE_FAMILY = {
     "ieee oui": "mac_allocation", "mac analysis": "mac_properties",
     "hostname discovery": "name_resolution", "reverse dns": "name_resolution",
     "netbios": "windows_name_service", "dhcp": "dhcp",
+    "dhcp fingerprint": "dhcp",
     "mdns/dns-sd": "mdns", "ssdp/upnp": "upnp",
     "nmap os detection": "tcpip_fingerprint", "identity classifier": "heuristic_classifier",
     "tls certificate": "tls", "snmpv3": "snmp", "local adapter": "local_endpoint",
