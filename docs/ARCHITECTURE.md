@@ -78,7 +78,7 @@ and missing or malformed accuracy values are handled conservatively.
 The identity package parses the IEEE MA-L, MA-M and MA-S public registries and
 matches the most-specific assigned prefix (24, 28 or 36 bits). MA-M and MA-S
 are not treated as ordinary 24-bit OUIs. The device profile retains the
-assignment registry, prefix, prefix length and registrant as provenance.
+assignment registry, prefix, prefix length, record update timestamp and registrant as provenance.
 Locally administered and multicast MAC addresses are not attributed to a
 global IEEE registrant. The registrant is labelled as an address-block
 assignee, not asserted to be the device manufacturer; exact product identity
