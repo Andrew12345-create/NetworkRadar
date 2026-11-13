@@ -11,6 +11,7 @@ The dashboard markup lives in `index.html`; its responsive stylesheet and browse
 The `networkradar_modules` package contains components now used by the running application:
 
 - `identity.fusion` — evidence-weighted identity scoring, source-independence caps, freshness decay, conflict detection and conservative merge decisions.
+- `identity.dhcp` — conservative interpretation of DHCP vendor-class identifiers, hostnames and parameter-request lists. It produces explainable client-family/network-role hints and preserves PRL option names without treating overlapping option patterns as definitive OS or hardware identity.
 - `core.startup` — OS-managed single-instance locking and bind-first local-server binding. The application delegates its startup lock and server binding to this module.
 - `database.manager` — serialized SQLite writer queue, short-lived read connections, write batching and database-writer health state. The application uses this as its `DatabaseManager`.
 - `diagnostics.status` — normalises engine status records; the application imports this helper for engine-health reporting.
@@ -19,8 +20,9 @@ The `networkradar_modules` package contains components now used by the running a
 - `discovery.adapters` — pure helpers for MAC normalisation, Windows IPv4 interface selection, default-route metric selection and exact TShark interface matching.
 - `discovery.classification` — pure device-family classification using observed names, services, reported details, port observations and an explicitly supplied gateway address.
 - `discovery.probes` — reverse-DNS and NetBIOS name probes, SSDP discovery and same-host validation for UPnP description URLs. Redirects are rejected unless they remain on the same responding private host.
+- `discovery.mdns` — bounded active mDNS/DNS-SD PTR browsing and defensive parsing of PTR, SRV, TXT, A and AAAA records. It requests unicast replies, limits query/packet volume, binds to the selected local IPv4 where available, and never follows advertised URLs.
 
-The discovery package currently owns reusable collectors, parsers, selectors and classification logic. The higher-level inventory workflow remains in `networkradar.py`: it coordinates Nmap, ARP, local identity, SSDP/mDNS, deeper fingerprinting, identity assessment and database persistence. This is deliberate so each next extraction can be tested against the existing orchestration without changing its API or stored data shape.
+The discovery package currently owns reusable collectors, parsers, selectors and classification logic. During the first and every fifth inventory cycle, NetworkRadar combines passive TShark mDNS observations with an approval-gated, rate-bounded active DNS-SD browse. Active results are associated by responder IP and treated as device-reported service evidence, not proof of an exact hardware model. The higher-level inventory workflow remains in `networkradar.py`: it coordinates Nmap, ARP, local identity, SSDP/mDNS, deeper fingerprinting, identity assessment and database persistence. This is deliberate so each next extraction can be tested against the existing orchestration without changing its API or stored data shape.
 
 ## Application layers
 
@@ -39,7 +41,7 @@ The `last_authorized` field is maintained through the application's additive sch
 
 ## Identity fusion
 
-The main application's PHANTOM TRACK entry point delegates to `networkradar_modules.identity.fusion.score_evidence`. Evidence from one independence group is capped; stale evidence decays; conflicting strong identity attributes produce `CONFLICTING_IDENTITY`; locally administered MAC observations are not valid merge anchors; and only a `CONFIRMED_MATCH` outcome can be auto-merge eligible.
+The main application's PHANTOM TRACK entry point delegates to `networkradar_modules.identity.fusion.score_evidence`. DHCP interpretation is handled by `identity.dhcp`: explicit vendor-class tokens (for example Android DHCP, Microsoft, BusyBox/udhcp, dhcpcd, PXEClient and iPXE) create bounded, explainable hints. Parameter-request-list values are decoded and retained as observable features, but are not independently mapped to an operating system because common option combinations overlap across client implementations. DHCP values are client-supplied and spoofable; they never establish an exact hardware model. Evidence from one independence group is capped; stale evidence decays; conflicting strong identity attributes produce `CONFLICTING_IDENTITY`; locally administered MAC observations are not valid merge anchors; and only a `CONFIRMED_MATCH` outcome can be auto-merge eligible.
 
 Malformed timestamps are ignored as evidence. Materially future-dated observations receive no freshness credit.
 
@@ -58,3 +60,35 @@ The application creates local `data/` and `database/` directories. Runtime datab
 ## Testing boundaries
 
 The standard-library test suite covers isolated startup, database, identity, diagnostics, discovery parsing, adapter selection and classification behaviour, plus application-level regression checks. These tests do not establish that every API route, capture engine, Nmap/TShark integration, Windows remoting operation, or browser workflow is correct. Those require Windows integration and end-to-end tests.
+
+
+### Structured Nmap OS fingerprint evidence
+
+The deep Nmap service scan retains the highest-ranked `osmatch` together with
+its Nmap match accuracy and any associated OS class/CPE observations. The
+dashboard-facing `os_guess` remains a readable summary, while
+`nmap_os_fingerprint` preserves the structured evidence for downstream
+correlation. Nmap accuracy is explicitly a fingerprint-match score, not a
+calibrated probability. OS fingerprints do not identify an exact device model,
+and missing or malformed accuracy values are handled conservatively.
+
+
+### IEEE MAC address-block intelligence
+
+The identity package parses the IEEE MA-L, MA-M and MA-S public registries and
+matches the most-specific assigned prefix (24, 28 or 36 bits). MA-M and MA-S
+are not treated as ordinary 24-bit OUIs. The device profile retains the
+assignment registry, prefix, prefix length, record update timestamp and registrant as provenance.
+Locally administered and multicast MAC addresses are not attributed to a
+global IEEE registrant. The registrant is labelled as an address-block
+assignee, not asserted to be the device manufacturer; exact product identity
+must come from independent device-reported or authenticated inventory data.
+
+
+Device-category signatures are constrained to compatible evidence families.
+For example, IEEE address-block registrants can enrich NIC attribution but
+cannot independently satisfy product, OS, service-role or device-reported
+identity rules. Product signatures may use explicit Nmap product, SNMP,
+UPnP or DNS-SD product evidence; OS signatures use OS/passive TCP evidence;
+DHCP signatures use DHCP observations. This prevents a NIC vendor such as an
+adapter or chipset supplier from being mistaken for the device itself.
