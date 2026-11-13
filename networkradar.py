@@ -3772,11 +3772,13 @@ class DHCPEngine(threading.Thread):
                     DHCP_STATE["last_exit_code"] = self.proc.returncode
                     DHCP_STATE["last_stderr"] = tail[-700:]
                     DHCP_STATE["last_command"] = " ".join(cmd[:12])
+                diagnostic = (tail or
+                    "No diagnostic output captured. Check Npcap, "
+                    "interface selection and capture permissions.")
                 raise RuntimeError(
                     f"TShark DHCP startup failed; executable={TSHARK}; "
                     f"interface={self.iface}; exit_code={self.proc.returncode}; "
-                    f"stderr={tail or 'No diagnostic output captured. Check Npcap, '
-                    'interface selection and capture permissions.'}")
+                    f"stderr={diagnostic}")
             self.state(status="ONLINE", error="", last_error="", failure_streak=0,
                        last_started=now_text())
             try:
