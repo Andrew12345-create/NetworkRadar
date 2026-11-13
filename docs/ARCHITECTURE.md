@@ -60,3 +60,14 @@ The application creates local `data/` and `database/` directories. Runtime datab
 ## Testing boundaries
 
 The standard-library test suite covers isolated startup, database, identity, diagnostics, discovery parsing, adapter selection and classification behaviour, plus application-level regression checks. These tests do not establish that every API route, capture engine, Nmap/TShark integration, Windows remoting operation, or browser workflow is correct. Those require Windows integration and end-to-end tests.
+
+
+### Structured Nmap OS fingerprint evidence
+
+The deep Nmap service scan retains the highest-ranked `osmatch` together with
+its Nmap match accuracy and any associated OS class/CPE observations. The
+dashboard-facing `os_guess` remains a readable summary, while
+`nmap_os_fingerprint` preserves the structured evidence for downstream
+correlation. Nmap accuracy is explicitly a fingerprint-match score, not a
+calibrated probability. OS fingerprints do not identify an exact device model,
+and missing or malformed accuracy values are handled conservatively.
