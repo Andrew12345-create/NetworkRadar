@@ -42,7 +42,12 @@ def freshness(observed_at: Any, now: datetime, half_life_days: float = DEFAULT_H
     if half_life_days <= 0:
         raise ValueError("half_life_days must be positive")
     when = _parse_observed(observed_at)
-    days = max(0.0, (now.astimezone(timezone.utc) - when).total_seconds() / 86400.0)
+    current = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    age_seconds = (current.astimezone(timezone.utc) - when).total_seconds()
+    # Materially future-dated observations must not receive full freshness.
+    if age_seconds < -300:
+        return 0.0
+    days = max(0.0, age_seconds / 86400.0)
     return 0.5 ** (days / half_life_days)
 
 
@@ -71,7 +76,10 @@ def score_evidence(
 
     conflicts = []
     for kind, observations in by_kind.items():
-        values = {str(obs.get("value", "")).lower() for obs in observations}
+        values = {
+            str(obs.get("value", "")).strip().casefold()
+            for obs in observations if str(obs.get("value", "")).strip()
+        }
         if len(values) > 1:
             conflicts.append({"kind": kind, "values": sorted(values)})
 
@@ -82,7 +90,13 @@ def score_evidence(
             groups[local_group] = max(groups.get(local_group, 0.0), 0.05)
             continue
         strength = max(0.0, min(1.0, float(evidence.get("strength", 0.0) or 0.0)))
-        adjusted = strength * freshness(evidence.get("observed_at"), now, half_life_days)
+        try:
+            adjusted = strength * freshness(
+                evidence.get("observed_at"), now, half_life_days
+            )
+        except (TypeError, ValueError, OverflowError):
+            # Malformed timestamps are not usable identity evidence.
+            continue
         groups[group] = max(groups.get(group, 0.0), adjusted)
 
     total = min(1.0, sum(min(value, group_cap) for value in groups.values()))
