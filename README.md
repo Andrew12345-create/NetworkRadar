@@ -105,7 +105,7 @@ From the repository root:
 python -m unittest discover -s tests -v
 ```
 
-The suite includes isolated tests for startup, SQLite database management, identity, diagnostics, Nmap XML parsing, ARP parsing, adapter selection, device-family classification, mDNS/DNS-SD packet parsing and SSDP URL validation, plus application regression tests for identity scoring and network-approval freshness. IEEE MAC identity uses the MA-L, MA-M and MA-S public listings with longest-prefix matching; the assignee is not treated as definitive device-manufacturer evidence. Actual Windows discovery, packet capture, browser and remote-management behaviour still requires testing on a real Windows host.
+The suite includes isolated tests for startup, SQLite database management, identity, diagnostics, Nmap XML parsing, ARP parsing, adapter selection, device-family classification, mDNS/DNS-SD packet parsing and SSDP URL validation, plus application regression tests for identity scoring and network-approval freshness. IEEE MAC identity uses the MA-L, MA-M and MA-S public listings with longest-prefix matching; the assignee is not treated as definitive device-manufacturer evidence. Device-category rules also enforce source-family compatibility so a NIC registrant cannot, by itself, classify a router, phone or computer. Actual Windows discovery, packet capture, browser and remote-management behaviour still requires testing on a real Windows host.
 
 ## Security and authorised use
 
