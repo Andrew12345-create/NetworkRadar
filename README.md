@@ -25,7 +25,7 @@ The core application uses the Python standard library. Paramiko is optional and 
 3. Create and activate a virtual environment:
 
    ```powershell
-   py -3.10 -m venv .venv
+   py -3 -m venv .venv
    .\.venv\Scripts\Activate.ps1
    python -m pip install --upgrade pip
    ```
