@@ -191,6 +191,7 @@ except ImportError:
 from networkradar_modules import __version__ as APP_VERSION
 from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
 from networkradar_modules.identity.dhcp import analyse_dhcp_identity as _analyse_dhcp_identity
+from networkradar_modules.identity.oui import parse_ieee_registry, lookup_ieee_assignment
 from networkradar_modules.identity.fingerprints import (
     derive_identity as _derive_identity_core,
     dhcp_fingerprint as _dhcp_fingerprint_core,
@@ -1498,30 +1499,39 @@ OUI_FILES = {
 }
 _OUI_LOCK = threading.RLock()
 _OUI_MEM = {}
+_OUI_META_MEM = {}
 
 def load_oui_cache():
-    global _OUI_MEM
+    global _OUI_MEM, _OUI_META_MEM
     with _OUI_LOCK:
         if _OUI_MEM:
             return _OUI_MEM
         try:
             with DB_MANAGER.read() as conn:
-                _OUI_MEM = {r[0]: r[1] for r in conn.execute(
-                    "SELECT prefix, organization FROM oui_cache")}
+                rows = conn.execute(
+                    "SELECT prefix, organization, registry FROM oui_cache").fetchall()
+                _OUI_MEM = {r[0]: r[1] for r in rows}
+                _OUI_META_MEM = {
+                    r[0]: {"organization": r[1], "registry": r[2] or ""}
+                    for r in rows
+                }
         except Exception:
             _OUI_MEM = {}
+            _OUI_META_MEM = {}
         return _OUI_MEM
+
+def oui_lookup_details(mac):
+    props = mac_properties(mac)
+    if not props["valid"] or props["multicast"] or props["locally_administered"]:
+        return {}
+    load_oui_cache()
+    with _OUI_LOCK:
+        return lookup_ieee_assignment(mac, _OUI_META_MEM)
 
 def oui_lookup(mac):
     props = mac_properties(mac)
-    if not props["valid"] or props["multicast"] or props["locally_administered"]:
-        return "", props
-    cache = load_oui_cache()
-    for n in (9, 7, 6):
-        prefix = props["prefix"][:n]
-        if prefix in cache:
-            return cache[prefix], props
-    return "", props
+    details = oui_lookup_details(mac)
+    return details.get("organization", ""), props
 
 def update_oui_database(timeout=20):
     added = 0
@@ -1532,25 +1542,18 @@ def update_oui_database(timeout=20):
                 "User-Agent": f"NetworkRadar/{APP_VERSION}"})
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 raw = response.read(25 * 1024 * 1024).decode("utf-8", "replace")
-            parsed = {}
-            for line in raw.splitlines():
-                m = re.search(r"^\s*([0-9A-Fa-f-]{6,11})\s+\((?:hex|MA-L|MA-M|MA-S)\)\s+(.+)$", line, re.I)
-                if m:
-                    prefix = re.sub(r"[^0-9A-Fa-f]", "", m.group(1)).upper()
-                    org = _clean(m.group(2), 180)
-                    if len(prefix) in (6, 7, 9) and org:
-                        parsed[prefix] = org
+            parsed = parse_ieee_registry(raw, registry)
             if parsed:
                 def _w(conn, items=list(parsed.items()), reg=registry):
                     conn.executemany("""INSERT INTO oui_cache(prefix,organization,registry,updated_at)
                         VALUES(?,?,?,?) ON CONFLICT(prefix) DO UPDATE SET
                         organization=excluded.organization,registry=excluded.registry,
                         updated_at=excluded.updated_at""",
-                        [(k, v, reg, now_text()) for k, v in items])
-                DB_MANAGER.write(_w)
+                        [(k, v["organization"], reg, now_text()) for k, v in items])                DB_MANAGER.write(_w)
                 added += len(parsed)
                 with _OUI_LOCK:
                     _OUI_MEM.clear()
+                    _OUI_META_MEM.clear()
         except Exception as exc:
             errors.append(f"{registry}: {_clean(exc, 160)}")
     return {"updated": added, "errors": errors, "timestamp": now_text()}
@@ -1746,7 +1749,9 @@ def advanced_device_recognition(device):
                        ("device_name", "Discovered name"), ("model", "Reported model"),
                        ("reported_manufacturer", "Reported manufacturer")):
         add("reported", device.get(key, ""), label, 0.78 if key in ("hostname", "device_name") else 0.92)
-    add("oui", device.get("oui_manufacturer") or device.get("vendor", ""), "IEEE OUI allocation", 0.55)
+    oui_detail = device.get("oui_assignment") or {}
+    add("oui", oui_detail.get("organization") or device.get("oui_manufacturer") or device.get("vendor", ""),
+        "IEEE MAC address-block registrant", 0.55)
     add("os", device.get("os_guess", ""), "Nmap OS fingerprint", 0.82)
     passive = device.get("passive_tcp") or {}
     add("tcpip", passive.get("signature", ""), "Passive TCP SYN fingerprint", 0.55)
@@ -1841,6 +1846,7 @@ def advanced_device_recognition(device):
         "model": reported_model if reported_model and not _placeholder(reported_model) else "",
         "manufacturer": reported_maker if reported_maker and not _placeholder(reported_maker) else "",
         "nic_manufacturer": _clean(device.get("oui_manufacturer") or device.get("vendor", ""), 160),
+        "nic_address_block_registrant": oui_detail,
         "evidence": facts, "matches": matches,
         "passive_tcp_os_hint": (device.get("passive_tcp") or {}).get("os_family_hint", ""),
         "alternatives": [{"category": x[1], "confidence": x[0], "source_families": x[2]} for x in ranked[1:4]],
@@ -1863,9 +1869,12 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
     vendor = device.get("vendor", "")
     if mac:
         org, props = oui_lookup(mac)
+        assignment = oui_lookup_details(mac)
+        if assignment:
+            device["oui_assignment"] = assignment
         if org:
-            device["oui_manufacturer"] = org
-            evidence.append(("IEEE OUI", "NIC manufacturer", org, 58, "OBSERVED"))
+            device["oui_manufacturer"] = org  # legacy DB/API field; see oui_assignment for precise meaning
+            evidence.append(("IEEE MAC registry", "NIC address-block registrant", org, 58, "OBSERVED"))
         if props["locally_administered"]:
             evidence.append(("MAC analysis", "MAC address type",
                              "Locally administered/randomisable MAC", 65, "OBSERVED"))
