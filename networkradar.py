@@ -3333,8 +3333,12 @@ def _select_tshark_interface(interfaces, *, preferred="", primary_guid="",
             if guid in desc_guid:
                 return str(idx)
 
-    names = [str(x).strip().casefold() for x in
-             (primary_name, primary_description) if str(x or "").strip()]
+    names = [
+        str(x).strip().casefold()
+        for x in (primary_name, primary_description)
+        if str(x or "").strip()
+        and str(x).strip().casefold() not in {"manual override", "no active adapter"}
+    ]
     for name in names:
         for idx, desc in interfaces:
             if name in str(desc).casefold():
