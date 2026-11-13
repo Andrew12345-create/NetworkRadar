@@ -122,7 +122,7 @@ The suite includes isolated tests for startup, SQLite database management, ident
 - `index.html` — dashboard markup and page structure. The page uses external CSS/JS assets and contains no inline style attributes.
 - `networkradar.css` — standalone responsive dashboard stylesheet.
 - `dashboard.js` — standalone dashboard client and interactions.
-- `networkradar_modules/` — reusable identity, startup, database, diagnostics and discovery components. Discovery modules cover Nmap XML/scanning, ARP parsing, adapter selection and evidence-based device-family classification.
+- `networkradar_modules/` — reusable identity, startup, database, diagnostics and discovery components. Discovery modules cover Nmap XML/scanning, ARP parsing, adapter selection, evidence-based device-family classification, reverse-DNS/NetBIOS probes and SSDP/UPnP discovery.
 - `migrations/` — additive database schema migrations.
 - `tests/` — unit and application regression tests.
 - `docs/` — architecture and audit notes.
