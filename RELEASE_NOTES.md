@@ -15,6 +15,8 @@ This file records the current repository snapshot's declared application version
 - Added a row-count check so a missing current network profile cannot be reported as successfully authorised.
 - Made `networkradar_modules/__init__.py` the single source of the application version.
 - Added the optional SSH dependency manifest referenced by the application.
+- Extracted the dashboard stylesheet and JavaScript from the Python monolith into `networkradar.css` and `dashboard.js`; the existing local asset routes now serve real files instead of returning missing-asset responses or injecting a 56 KB inline script.
+- Consolidated repeated CSS foundation variables and duplicate mobile rules, then formatted the stylesheet into readable sections without changing the visual design tokens.
 - Updated installation, data-safety, version and architecture documentation to match the actual repository layout.
 - Added application-level regression tests for identity scoring and approval freshness.
 
