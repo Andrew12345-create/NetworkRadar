@@ -1723,6 +1723,11 @@ _RECOGNITION_RULES = [
     ("Apple computer", 0.91, "reported", (r"macbook", r"imac", r"mac mini", r"macos", r"darwin")),
     ("Apple mobile device", 0.91, "reported", (r"iphone", r"ipad", r"ios device", r"apple mobile")),
     ("Android mobile device", 0.88, "reported", (r"android", r"pixel [0-9]", r"samsung galaxy", r"oneplus", r"xiaomi", r"redmi", r"oppo", r"vivo")),
+    ("Android mobile device", 0.78, "dhcp", (r"android-dhcp", r"android mobile client")),
+    ("Windows computer", 0.76, "dhcp", (r"\\bmsft\\s*\\d", r"microsoft dhcp client")),
+    ("Embedded Linux / IoT", 0.78, "dhcp", (r"\\budhcp\\b", r"\\bbusybox\\b", r"embedded linux dhcp client")),
+    ("Unix-like / embedded client", 0.66, "dhcp", (r"\\bdhcpcd\\b", r"dhcpcd-based client")),
+    ("Network boot client", 0.84, "dhcp", (r"\\bpxeclient\\b", r"\\bipxe\\b", r"\\bhttpclient\\b")),
     ("Smart-home / IoT", 0.88, "service", (r"home assistant", r"tasmota", r"shelly", r"tuya", r"zigbee", r"zwave", r"_hap\._tcp")),
     ("UPS / power equipment", 0.91, "reported", (r"apc ups", r"eaton ups", r"powerware", r"ups network management")),
 ]
@@ -1887,11 +1892,9 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
             dhcp_rows = _recent_dhcp_evidence(conn, device)
     except Exception:
         pass
-    device["dhcp_identity"] = [
-        {"hostname": r[0] or "", "vendor_class": r[1] or "",
-         "parameter_request_list": r[2] or "", "client_identifier": r[3] or ""}
-        for r in dhcp_rows]
+    device["dhcp_identity"] = []
     dhcp_hints = {}
+    dhcp_profiles = []
     for row in dhcp_rows:
         hn, vc, prl, cid, _ = row
         if hn:
@@ -1905,11 +1908,20 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
         analysis = _analyse_dhcp_identity(
             vendor_class=vc, hostname=hn, parameter_request_list=prl,
             client_identifier=cid)
+        identity_row = {"hostname": hn, "vendor_class": vc,
+                        "parameter_request_list": prl, "client_identifier": cid,
+                        "parameter_request_list_names":
+                            analysis["fingerprint"]["parameter_request_list_names"]}
+        device["dhcp_identity"].append(identity_row)
+        for feature in analysis.get("features", []):
+            if feature not in dhcp_profiles:
+                dhcp_profiles.append(feature)
         for item in analysis.get("hints", []):
             key = (item.get("category", ""), item.get("attribute", "client_family"))
             if key not in dhcp_hints or int(item.get("confidence", 0)) > int(dhcp_hints[key].get("confidence", 0)):
                 dhcp_hints[key] = item
     device["dhcp_intelligence"] = list(dhcp_hints.values())
+    device["dhcp_profile_features"] = dhcp_profiles
     for item in device["dhcp_intelligence"]:
         attr = "DHCP network role hint" if item.get("attribute") == "network_role" else "DHCP client-family hint"
         evidence.append(("DHCP fingerprint", attr,
