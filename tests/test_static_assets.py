@@ -21,14 +21,23 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertGreater(js.stat().st_size, 10000)
 
     def test_html_references_both_external_assets(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
         source = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
         self.assertIn(
-            'href="/assets/networkradar.css?v={APP_VERSION}"', source
+            'href="/assets/networkradar.css?v={APP_VERSION}"', html
         )
         self.assertIn(
-            'src="/assets/dashboard.js?v={APP_VERSION}" defer', source
+            'src="/assets/dashboard.js?v={APP_VERSION}" defer', html
         )
+        self.assertNotIn("<style", html.lower())
+        self.assertNotRegex(html, r"<script(?![^>]*\\bsrc=)")
+        self.assertNotIn("WEB_PAGE", source)
         self.assertNotIn("DASHBOARD_JS_BUNDLED", source)
+
+    def test_dashboard_html_is_a_real_nonempty_asset(self):
+        html = ROOT / "index.html"
+        self.assertTrue(html.is_file())
+        self.assertGreater(html.stat().st_size, 10000)
 
     def test_server_has_routes_for_both_assets(self):
         source = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
