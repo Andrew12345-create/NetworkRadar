@@ -35,7 +35,7 @@ Malformed timestamps are ignored as evidence. Materially future-dated observatio
 
 ## Local API and remote management
 
-The main dashboard server is configured for loopback. Its request handler validates the Host header and, when present, the Origin header. The optional agent hub is a separate TLS listener, disabled unless explicitly enabled and configured with a certificate and private key.
+The main dashboard server is configured for loopback. Its request handler validates the Host header and, when present, the Origin header. The optional agent hub is a separate TLS listener, disabled unless explicitly enabled and configured with a certificate and private key. Its enrolment response provides a per-agent derived HMAC key; the server-wide pepper is never sent to endpoints. Enrolment, command polling and command queuing are blocked unless the current network profile is authorised.
 
 The endpoint-agent hub code is present, but this repository snapshot does not include a separately packaged endpoint-agent client/installer. Treat the client/server lifecycle as incomplete until the client is added, its certificate-pinning and request-signing protocol are documented, and the complete enrol/report/command/revocation flow is tested.
 
