@@ -203,6 +203,10 @@ from networkradar_modules.discovery.adapters import (
     _select_ipv4_interface_rows, _select_tshark_interface,
 )
 from networkradar_modules.discovery.classification import infer_type as _classify_device_type
+from networkradar_modules.discovery.probes import (
+    is_same_private_http_host, reverse_dns as _reverse_dns,
+    netbios_name as _netbios_name, ssdp_scan as _ssdp_scan,
+)
 
 def _score_identity_evidence(candidate, *, now=None, thresholds=None,
                               half_life_days=30.0, group_cap=0.45,
@@ -1352,88 +1356,16 @@ def local_identity():
     return ident
 
 def reverse_dns(ip):
-    try:
-        name, _, _ = socket.gethostbyaddr(ip)
-        name = _clean(name.rstrip("."))
-        if name and name != ip:
-            return name
-    except (OSError, socket.timeout):
-        pass
-    return ""
+    return _reverse_dns(ip)
 
 def netbios_name(ip):
-    try:
-        r = subprocess.run(["nbtstat", "-A", ip], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=5)
-        for line in (r.stdout or "").splitlines():
-            m = re.match(r"^\s*([^\s]+)\s+<([0-9A-Fa-f]{2})>\s+(UNIQUE|GROUP)", line)
-            if m and m.group(2).upper() == "00" and m.group(3).upper() == "UNIQUE":
-                c = _clean(m.group(1))
-                if c and c.upper() not in ("WORKGROUP", "IS~"):
-                    return c
-    except Exception:
-        pass
-    return ""
+    return _netbios_name(ip)
 
 def _same_private_host(src_ip, url):
-    try:
-        p = urllib.parse.urlparse(url)
-        t = p.hostname
-        if not t:
-            return False
-        tip = ipaddress.ip_address(t)
-        sip = ipaddress.ip_address(src_ip)
-        return tip == sip and tip.is_private and p.scheme.lower() == "http"
-    except ValueError:
-        return False
+    return is_same_private_http_host(src_ip, url)
 
 def ssdp_scan(timeout=2.0):
-    found = {}
-    msg = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
-           'MAN: "ssdp:discover"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n').encode()
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    s.settimeout(0.25)
-    try:
-        s.sendto(msg, ("239.255.255.250", 1900))
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                pkt, addr = s.recvfrom(8192)
-            except socket.timeout:
-                continue
-            ip = addr[0]
-            h = {}
-            for line in pkt.decode("utf-8", errors="replace").splitlines()[1:]:
-                if ":" in line:
-                    k, v = line.split(":", 1)
-                    h[k.strip().lower()] = v.strip()
-            loc = h.get("location", "")
-            if not loc or not _same_private_host(ip, loc):
-                continue
-            meta = {"ssdp_server": _clean(h.get("server", "")),
-                    "usn": _clean(h.get("usn", ""))}
-            try:
-                req = urllib.request.Request(
-                    loc, headers={"User-Agent": f"NR/{APP_VERSION}"})
-                with urllib.request.urlopen(req, timeout=2) as r:
-                    xml = r.read(256 * 1024)
-                root = ET.fromstring(xml)
-                for el in root.iter():
-                    tag = el.tag.split("}")[-1].lower()
-                    val = _clean(el.text or "")
-                    if tag in ("friendlyname", "manufacturer", "modelname",
-                               "modelnumber", "devicetype", "serialnumber"):
-                        meta[tag] = val
-            except Exception:
-                pass
-            found[ip] = meta
-    finally:
-        s.close()
-    return found
-
-# ============================================================
-# DISCOVERY + IDENTIFICATION (mostly preserved from 8.1.0)
-# ============================================================
+    return _ssdp_scan(timeout=timeout, app_version=APP_VERSION)
 
 def discover_devices():
     """Run the authorised-network discovery scan through the modular Nmap engine."""
