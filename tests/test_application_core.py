@@ -48,6 +48,21 @@ class ApplicationIdentityIntegrationTests(unittest.TestCase):
         self.assertNotEqual(outcome, "CONFIRMED_MATCH")
 
 
+class EndpointManagementAuthorizationTests(unittest.TestCase):
+    def test_enrolment_and_commands_blocked_on_unauthorised_network(self):
+        original = app.is_authorized
+        app.is_authorized = lambda: False
+        try:
+            with self.assertRaisesRegex(RuntimeError, "not authorised"):
+                app.create_agent_enrollment_token()
+            with self.assertRaisesRegex(ValueError, "not authorised"):
+                app.queue_agent_command(
+                    "nr-" + "a" * 20, "refresh_inventory"
+                )
+        finally:
+            app.is_authorized = original
+
+
 class NetworkApprovalFreshnessTests(unittest.TestCase):
     def test_recent_approval_is_fresh(self):
         now = datetime(2026, 1, 1, 12, 0, 0)
