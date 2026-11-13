@@ -4,6 +4,7 @@ This file records the current repository snapshot's declared application version
 
 ## Fixes in this audit branch
 
+- Corrected primary network adapter selection to use the lowest effective Windows default-route metric, and bound TShark capture to that adapter by GUID/name/description. This prevents multi-adapter and hotspot sessions from silently capturing a different interface.
 - Connected the production PHANTOM TRACK scorer to the tested `networkradar_modules.identity.fusion` implementation. The previous embedded scorer ignored conflict kinds and auto-merge policy, always reported `auto_merge_allowed: false`, and iterated thresholds in a way that could downgrade a confirmed match to a weaker label.
 - Restored strong-identity conflict detection and the intended rule that only `CONFIRMED_MATCH` can be auto-merge eligible.
 - Hardened identity evidence handling: blank values no longer create false conflicts, malformed timestamps are ignored, and materially future-dated evidence receives no freshness credit.
