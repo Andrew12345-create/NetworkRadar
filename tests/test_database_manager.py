@@ -82,10 +82,13 @@ class DatabaseManagerTests(unittest.TestCase):
         )
         self.assertTrue(self.manager.flush(timeout=5))
         self.assertTrue(self.manager.stop(timeout=5))
-        with sqlite3.connect(self.db_path) as conn:
+        conn = sqlite3.connect(self.db_path)
+        try:
             self.assertEqual(conn.execute(
                 "SELECT value FROM sample"
             ).fetchone()[0], 7)
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":
