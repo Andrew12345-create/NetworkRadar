@@ -3,7 +3,7 @@ from __future__ import annotations
 
 _RULE_FAMILIES = {
     "service": frozenset({"service", "mdns", "upnp", "snmp"}),
-    "product": frozenset({"product"}),
+    "product": frozenset({"product", "snmp", "upnp", "mdns"}),
     "os": frozenset({"os", "tcpip"}),
     "reported": frozenset({"reported", "mdns", "upnp"}),
     "dhcp": frozenset({"dhcp"}),
