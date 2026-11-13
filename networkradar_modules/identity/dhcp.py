@@ -24,14 +24,6 @@ _OPTION_NAMES = {
     119: "domain_search", 121: "classless_static_routes",
     125: "vendor_identifying_information", 252: "proxy_autodiscovery",
 }
-_ARCH_NAMES = {
-    0: "Intel x86 BIOS", 1: "NEC/PC98", 2: "EFI Itanium",
-    3: "DEC Alpha", 4: "Arc x86", 5: "Intel Lean Client",
-    6: "EFI IA32", 7: "EFI BC", 8: "EFI Xscale", 9: "EFI x86-64",
-    10: "EFI ARM32", 11: "EFI ARM64",
-}
-
-
 def parse_parameter_request_list(value: Any) -> list[int]:
     """Parse a TShark-rendered option 55 list without accepting arbitrary ints."""
     if value is None:
@@ -112,9 +104,9 @@ def analyse_dhcp_identity(
     option_names = [_OPTION_NAMES.get(number, f"option_{number}") for number in options]
     features = []
     if 93 in option_set:
-        features.append("PXE client architecture requested")
+        features.append("Option 93 appears in the parameter-request list")
     if 97 in option_set:
-        features.append("PXE client machine identifier present")
+        features.append("Option 97 appears in the parameter-request list")
     if 60 in option_set:
         features.append("Vendor class option requested")
     if 77 in option_set:
