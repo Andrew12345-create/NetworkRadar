@@ -213,6 +213,7 @@ from networkradar_modules.discovery.probes import (
     is_same_private_http_host, reverse_dns as _reverse_dns,
     netbios_name as _netbios_name, ssdp_scan as _ssdp_scan,
 )
+from networkradar_modules.discovery.mdns import discover_mdns as _discover_mdns
 
 def _score_identity_evidence(candidate, *, now=None, thresholds=None,
                               half_life_days=30.0, group_cap=0.45,
@@ -1372,6 +1373,19 @@ def _same_private_host(src_ip, url):
 
 def ssdp_scan(timeout=2.0):
     return _ssdp_scan(timeout=timeout, app_version=APP_VERSION)
+
+def mdns_active_snapshot(duration=2.0):
+    """Perform a small authorised DNS-SD browse on the selected local IPv4."""
+    if not is_authorized():
+        return []
+    try:
+        local = local_identity()
+        return _discover_mdns(
+            duration=duration,
+            interface_ip=str(local.get("ip", "") or ""),
+        )
+    except Exception:
+        return []
 
 def discover_devices():
     """Run the authorised-network discovery scan through the modular Nmap engine."""
@@ -7074,6 +7088,11 @@ def _main_inner():
                             mdns_rows = mdns_passive_snapshot(duration=2)
                         except Exception:
                             mdns_rows = []
+                        # Active DNS-SD browsing is approval-gated and rate-bounded.
+                        try:
+                            mdns_rows.extend(mdns_active_snapshot(duration=2.0))
+                        except Exception:
+                            pass
                     devices = enrich_devices(devices, deep=deep, mdns_rows=mdns_rows)
                     # Keep Phantom Track in step with the completed inventory run.
                     # Offline devices are not re-observed; their anchors remain historical.
