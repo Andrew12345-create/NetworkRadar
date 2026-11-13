@@ -203,7 +203,7 @@ from networkradar_modules.core.startup import (
 )
 from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
-from networkradar_modules.discovery.nmap import run_nmap_discovery
+from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
 from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
 from networkradar_modules.discovery.adapters import (
     _norm_mac, _is_real_mac, _select_primary_adapter,
@@ -6837,11 +6837,13 @@ def deep_fingerprint(devices):
             # A host block with an explicit ports element is a completed result even if empty.
             if ports_node is None: continue
             dev["_port_scan_complete"] = True
-            osms = host.findall("./os/osmatch")
-            if osms:
-                best = max(osms, key=lambda m: int(m.get("accuracy", "0")))
-                name = _clean(best.get("name", "")); acc = int(best.get("accuracy", "0"))
-                if name: dev["os_guess"] = f"{name} ({acc}% Nmap)"
+            os_fingerprint = best_os_match(host)
+            if os_fingerprint:
+                dev["nmap_os_fingerprint"] = os_fingerprint
+                name = _clean(os_fingerprint.get("name", ""))
+                acc = os_fingerprint.get("accuracy", 0)
+                if name:
+                    dev["os_guess"] = f"{name} ({acc}% Nmap match accuracy)"
             for port in ports_node.findall("./port"):
                 st = port.find("state")
                 if st is None or st.get("state") != "open": continue
