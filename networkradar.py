@@ -1823,8 +1823,14 @@ def derive_identity(device):
     mac = (device.get("mac") or "").replace("-", ":").upper()
     if re.fullmatch(r"[0-9A-F]{2}(?::[0-9A-F]{2}){5}", mac):
         first = int(mac.split(":")[0], 16)
-        basis = ("MAC (locally administered)" if first & 0x02 else "MAC")
-        key = f"mac:{mac}"
+        if first & 0x02:
+            # Randomised/locally administered MACs are observations, not durable
+            # identity anchors. Keep identity scoped to the current IP instead.
+            basis = "IP fallback (locally administered MAC ignored)"
+            key = f"ip:{device['ip']}"
+        else:
+            basis = "MAC"
+            key = f"mac:{mac}"
     else:
         basis = "IP fallback"
         key = f"ip:{device['ip']}"
