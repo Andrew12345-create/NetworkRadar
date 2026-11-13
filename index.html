@@ -21,7 +21,7 @@
 </nav><div id="navBackdrop" aria-hidden="true" onclick="closeNavigation()"></div>
 <main>
 <div class="meta" id="cmd">LOCAL · <span id="network">...</span> · <span id="updated">—</span></div>
-<section class="card mb-14"><div class="row-between"><div><div class="label">ENGINE</div><strong id="jobPhase">Init</strong><div class="hint" id="jobMessage">—</div></div><div style="font-size:22px;font-weight:800" id="jobPercent">0%</div></div><div style="height:9px;background:#07111f;border:1px solid var(--line);border-radius:99px;overflow:hidden;margin-top:12px"><div id="jobBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2689ee,#39d6b0);transition:width .35s ease"></div></div></section>
+<section class="card mb-14"><div class="row-between"><div><div class="label">ENGINE</div><strong id="jobPhase">Init</strong><div class="hint" id="jobMessage">—</div></div><div id="jobPercent" class="headline-number">0%</div></div><div class="progress-track"><div id="jobBar" class="progress-fill"></div></div></section>
 <div class="grid">
 <div class="card"><div class="label">Devices online</div><div class="value" id="online">—</div><div class="hint" id="deviceHint">—</div></div>
 <div class="card"><div class="label">Historical</div><div class="value" id="historical">—</div><div class="hint">SQLite</div></div>
@@ -47,7 +47,7 @@
 <div class="profileitem"><div class="label">CONFIDENCE</div><div class="value" id="fpConf">—</div></div>
 </div>
 <div class="hint my-12" id="networkWarning">Loading...</div>
-<button id="authorizeNetwork" onclick="authorizeCurrentNetwork()" style="display:none">AUTHORISE THIS NETWORK</button>
+<button id="authorizeNetwork" onclick="authorizeCurrentNetwork()" class="is-hidden">AUTHORISE THIS NETWORK</button>
 </section>
 </div>
 <section id="devices" class="section card">
@@ -166,12 +166,12 @@ This terminal runs with the permissions of the SSH account you authenticate as.<
 <section class="section card" id="commandCenter"><div class="row-between"><div><h2>NETWORKRADAR COMMAND · MANAGED ENDPOINTS</h2><div class="hint">Explicitly enrolled devices only. No silent access, arbitrary shell or hidden remote control.</div></div><button onclick="createAgentToken()">GENERATE ENROLMENT TOKEN</button></div>
 <div class="notice">Remote agent communications require TLS with certificate pinning. The agent hub is disabled by default. Configure its TLS certificate and explicitly enable it before enrolling another computer. Restart, shutdown, workstation lock and service restart require separate confirmation.</div>
 <div class="grid mt-12"><div class="card"><div class="label">Managed endpoints</div><div class="value" id="agentManaged">0</div></div><div class="card"><div class="label">Recently online</div><div class="value" id="agentOnline">0</div></div><div class="card"><div class="label">Queued actions</div><div class="value" id="agentQueued">0</div></div><div class="card"><div class="label">Agent hub</div><div class="value text-18" id="agentHubState">DISABLED</div></div></div>
-<div id="agentTokenBox" class="profileitem" style="display:none;margin:12px 0"><div class="label">Single-use enrolment token · expires in 15 minutes</div><div class="mono text-18 wrap-anywhere" id="agentToken"></div><div class="hint">Copy this token to the target computer. It can enrol one agent once.</div></div>
+<div id="agentTokenBox" class="profileitem is-hidden-spaced"><div class="label">Single-use enrolment token · expires in 15 minutes</div><div class="mono text-18 wrap-anywhere" id="agentToken"></div><div class="hint">Copy this token to the target computer. It can enrol one agent once.</div></div>
 <div class="scroll"><table><thead><tr><th>DEVICE</th><th>PLATFORM</th><th>STATUS</th><th>LAST SEEN</th><th>CPU</th><th>RAM</th><th>IP</th><th>CONTROLS</th></tr></thead><tbody id="agentRows"><tr><td colspan="8">No endpoints enrolled.</td></tr></tbody></table></div>
 <h2 class="mt-20">COMMAND AUDIT</h2><div class="scroll"><table><thead><tr><th>TIME</th><th>DEVICE ID</th><th>ACTOR</th><th>ACTION</th><th>OUTCOME</th><th>DETAILS</th></tr></thead><tbody id="agentAuditRows"><tr><td colspan="6">No remote-management actions.</td></tr></tbody></table></div>
 <h2 class="mt-20">LATEST COMMAND OUTPUT</h2><div class="hint">Process/service listings and action results returned by enrolled agents appear here.</div><div class="scroll"><table><thead><tr><th>COMMAND</th><th>DEVICE</th><th>ACTION</th><th>STATUS</th><th>COMPLETED</th></tr></thead><tbody id="agentResultRows"><tr><td colspan="5">No command results.</td></tr></tbody></table></div><pre id="agentCommandOutput" class="profileitem pre-scroll-320">Select a completed command to inspect its result.</pre></section>
 </main>
-<div id="toast" style="display:none;position:fixed;right:20px;bottom:20px;z-index:100;background:#153d35;color:#d8fff0;border:1px solid #35d39a;padding:12px 18px;border-radius:10px"></div>
+<div id="toast" class="toast"></div>
 <div id="deviceModal" class="modal" onclick="if(event.target===this)closeDevice()"><div class="modalbox"><div class="modalhead"><div><div class="sub">DEVICE</div><h2 id="modalTitle">Device</h2></div><button class="secondary" onclick="closeDevice()">CLOSE</button></div><div id="modalContent" class="modalcontent">Loading...</div></div></div>
 <script src="/assets/dashboard.js?v={APP_VERSION}" defer></script>
 </body></html>
