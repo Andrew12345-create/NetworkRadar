@@ -3326,7 +3326,8 @@ def _select_tshark_interface(interfaces, *, preferred="", primary_guid="",
             + pref[:160]
         )
 
-    guid = re.sub(r"[^0-9a-f]", "", str(primary_guid).casefold())
+    guid_raw = str(primary_guid or "").strip().strip("{}").replace("-", "").casefold()
+    guid = guid_raw if re.fullmatch(r"[0-9a-f]{32}", guid_raw) else ""
     if guid:
         for idx, desc in interfaces:
             desc_guid = re.sub(r"[^0-9a-f]", "", str(desc).casefold())
