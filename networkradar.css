@@ -1,26 +1,37 @@
 :root {
   color-scheme:dark;
-  --bg:#07101d;
-  --panel:#0d1a2b;
-  --panel2:#10233a;
-  --line:#203b57;
-  --text:#edf5ff;
-  --muted:#91a9c2;
-  --blue:#56b2ff;
-  --cyan:#55e0d0;
-  --green:#45d6a0;
-  --amber:#ffc66d;
-  --red:#ff7185;
-  --shadow:0 18px 44px #0005
+  --bg:#07111f;
+  --panel:#0c1b2d;
+  --panel2:#10253c;
+  --line:#25435f;
+  --text:#eef6ff;
+  --muted:#93abc3;
+  --blue:#55aaff;
+  --cyan:#5ce4dc;
+  --green:#4de0ad;
+  --amber:#ffc66e;
+  --red:#ff7188;
+  --shadow:0 18px 52px #0006;
+  --sidebar-width:272px;
+  --sidebar-collapsed:78px;
+  --header-height:78px;
+  --radius-lg:18px;
+  --radius-md:13px;
+  --focus:0 0 0 3px #55aaff35;
+  --nr-ease:cubic-bezier(.2,.75,.25,1);
 }
 * {
   box-sizing:border-box
 }
 body {
   margin:0;
-  background:radial-gradient(ellipse at 12% -10%,#16436a 0,transparent 34%),radial-gradient(ellipse at 95% 8%,#123b43 0,transparent 25%),var(--bg);
+  min-height:100vh;
+  min-width:320px;
+  overflow-x:hidden;
+  background:radial-gradient(ellipse at 12% 0%,#123d65 0,transparent 32%),radial-gradient(ellipse at 88% 8%,#0c4b4c 0,transparent 23%),linear-gradient(160deg,#07111f,#091827 58%,#07111f);
+  background-attachment:fixed;
   color:var(--text);
-  font:14px/1.55 "Segoe UI Variable","Segoe UI",Arial,sans-serif
+  font:14px/1.55 "Segoe UI Variable","Segoe UI",Arial,sans-serif;
 }
 header {
   padding:22px clamp(18px,4vw,64px) 18px;
@@ -93,17 +104,9 @@ button.secondary {
   border:1px solid #31516e
 }
 /* 11.0.2 navigation: persistent desktop sidebar + searchable mobile drawer */
-:root {
-  --sidebar-width:264px;
-  --sidebar-collapsed:76px;
-  --header-height:82px
-}
 html {
   scroll-behavior:smooth;
-  scroll-padding-top:calc(var(--header-height) + 18px)
-}
-body {
-  min-height:100vh
+  scroll-padding-top:calc(var(--header-height) + 18px);
 }
 header {
   position:sticky;
@@ -602,9 +605,6 @@ input,select,textarea {
   overflow-wrap:anywhere;
   margin-top:5px
 }
-.clickrow {
-  cursor:pointer
-}
 .clickrow:hover {
   background:#173653!important
 }
@@ -858,20 +858,6 @@ th {
     padding:9px 11px
   }
 }
-@media(max-width:420px) {
-  .grid {
-    grid-template-columns:1fr 1fr
-  }
-  .profilegrid {
-    grid-template-columns:1fr
-  }
-  .label {
-    font-size:9px
-  }
-  button {
-    padding:9px 11px
-  }
-}
 @media(prefers-reduced-motion:reduce) {
   *,*::before,*::after {
     scroll-behavior:auto!important;
@@ -883,29 +869,6 @@ th {
    NETWORKRADAR 12.0 — NEXUS DESIGN SYSTEM
    Local-first security operations · responsive layout · accessible UI
    ================================================================ */
-:root {
-  --bg:#07111f;
-  --panel:#0c1b2d;
-  --panel2:#10253c;
-  --line:#25435f;
-  --text:#eef6ff;
-  --muted:#93abc3;
-  --blue:#55aaff;
-  --cyan:#5ce4dc;
-  --green:#4de0ad;
-  --amber:#ffc66e;
-  --red:#ff7188;
-  --shadow:0 18px 52px #0006;
-  --sidebar-width:270px;
-  --sidebar-collapsed:78px;
-  --radius-lg:18px;
-  --radius-md:13px;
-  --focus:0 0 0 3px #55aaff35;
-}
-body {
-  background:radial-gradient(ellipse at 12% 0%,#123d65 0,transparent 32%),radial-gradient(ellipse at 88% 8%,#0c4b4c 0,transparent 23%),linear-gradient(160deg,#07111f,#091827 58%,#07111f);
-  background-attachment:fixed
-}
 header {
   background:#081827eF;
   border-bottom:1px solid #3a638255;
@@ -1260,22 +1223,9 @@ tbody tr:hover {
 }
 /* ================================================================
    NETWORKRADAR 12.0.2 — SIDEBAR + RESPONSIVE LAYOUT HOTFIX
-   Fixes the previous `main { margin:auto }` cascade overriding the
-   navigation offsets. Keep this block last in the stylesheet.
+   Resolves the legacy `main { margin:auto }` cascade and defines the final
+   desktop and mobile navigation offsets.
    ================================================================ */
-:root {
-  --sidebar-width:272px;
-  --sidebar-collapsed:78px;
-  --header-height:78px;
-  --nr-ease:cubic-bezier(.2,.75,.25,1);
-}
-html {
-  scroll-padding-top:calc(var(--header-height) + 18px)
-}
-body {
-  min-width:320px;
-  overflow-x:hidden
-}
 header {
   box-sizing:border-box;
   width:calc(100% - var(--sidebar-width));
