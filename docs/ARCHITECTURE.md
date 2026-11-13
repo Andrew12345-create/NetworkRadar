@@ -18,6 +18,7 @@ The `networkradar_modules` package contains components now used by the running a
 - `discovery.arp` — local ARP cache collection and Windows-style ARP output parsing.
 - `discovery.adapters` — pure helpers for MAC normalisation, Windows IPv4 interface selection, default-route metric selection and exact TShark interface matching.
 - `discovery.classification` — pure device-family classification using observed names, services, reported details, port observations and an explicitly supplied gateway address.
+- `discovery.probes` — reverse-DNS and NetBIOS name probes, SSDP discovery and same-host validation for UPnP description URLs. Redirects are rejected unless they remain on the same responding private host.
 
 The discovery package currently owns reusable collectors, parsers, selectors and classification logic. The higher-level inventory workflow remains in `networkradar.py`: it coordinates Nmap, ARP, local identity, SSDP/mDNS, deeper fingerprinting, identity assessment and database persistence. This is deliberate so each next extraction can be tested against the existing orchestration without changing its API or stored data shape.
 
