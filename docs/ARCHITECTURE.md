@@ -4,6 +4,8 @@
 
 The current runtime is centred on `networkradar.py`, which contains the application lifecycle, database manager, schema setup, network-context detection, discovery orchestration, passive capture engines, intelligence workflows, local HTTP API and dashboard. It is still a large monolithic file; a complete extraction into smaller services has **not** been completed.
 
+The dashboard markup now lives in `index.html`; the responsive stylesheet and browser client live in `networkradar.css` and `dashboard.js`. The Python server reads the HTML template, substitutes the application version and serves the three assets locally. This keeps presentation and browser code out of the main Python file.
+
 The dashboard's HTML template remains in the Python runtime, while its responsive stylesheet and browser client are standalone `networkradar.css` and `dashboard.js` files. The local HTTP server serves both through `/assets/` routes with no-store caching. This keeps presentation and browser behaviour out of the Python application source and makes each asset independently testable.
 
 The `networkradar_modules` package contains reusable components:
