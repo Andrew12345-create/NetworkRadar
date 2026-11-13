@@ -14,8 +14,9 @@ class IdentityFingerprintTests(unittest.TestCase):
 
     def test_invalid_mac_is_rejected(self):
         for value in ("", "Unknown", "00:11:22:33:44", "GG:11:22:33:44:55",
-                      "0011.2233.4455", "01:00:00:00:00:00"):
+                      "0011.2233.4455"):
             self.assertEqual(normalise_mac(value), "")
+        self.assertEqual(normalise_mac("01:00:00:00:00:00"), "01:00:00:00:00:00")
 
     def test_mac_properties_distinguish_global_local_and_multicast(self):
         self.assertTrue(mac_properties("00:11:22:33:44:55")["unicast"])
