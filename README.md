@@ -105,7 +105,7 @@ From the repository root:
 python -m unittest discover -s tests -v
 ```
 
-The suite includes isolated tests for startup/identity/diagnostic helpers and integration regression tests for the application identity scorer and network-approval freshness policy. Windows-specific discovery, packet capture, browser and remote-management behaviour still requires testing on a real Windows host.
+The suite includes isolated tests for startup, SQLite database management, identity, diagnostics, Nmap XML parsing, ARP parsing, adapter selection and device-family classification, plus application regression tests for identity scoring and network-approval freshness. Actual Windows discovery, packet capture, browser and remote-management behaviour still requires testing on a real Windows host.
 
 ## Security and authorised use
 
@@ -122,7 +122,7 @@ The suite includes isolated tests for startup/identity/diagnostic helpers and in
 - `index.html` — dashboard markup and page structure. The page uses external CSS/JS assets and contains no inline style attributes.
 - `networkradar.css` — standalone responsive dashboard stylesheet.
 - `dashboard.js` — standalone dashboard client and interactions.
-- `networkradar_modules/` — reusable identity, startup and diagnostics components.
+- `networkradar_modules/` — reusable identity, startup, database, diagnostics and discovery components. Discovery modules cover Nmap XML/scanning, ARP parsing, adapter selection and evidence-based device-family classification.
 - `migrations/` — additive database schema migrations.
 - `tests/` — unit and application regression tests.
 - `docs/` — architecture and audit notes.
