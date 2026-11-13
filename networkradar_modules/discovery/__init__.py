@@ -9,6 +9,7 @@ from .nmap import parse_nmap_xml, run_nmap_discovery
 from .probes import (
     is_same_private_http_host, netbios_name, reverse_dns, ssdp_scan,
 )
+from .mdns import build_ptr_query, discover_mdns, parse_mdns_packet
 
 __all__ = [
     "_is_real_mac", "_norm_mac", "_select_ipv4_interface_rows",
@@ -16,4 +17,5 @@ __all__ = [
     "parse_arp_output", "read_arp_cache", "infer_type",
     "parse_nmap_xml", "run_nmap_discovery", "is_same_private_http_host",
     "netbios_name", "reverse_dns", "ssdp_scan",
+    "build_ptr_query", "discover_mdns", "parse_mdns_packet",
 ]
