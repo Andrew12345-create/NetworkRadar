@@ -190,81 +190,11 @@ except ImportError:
 # The package metadata is the single source of the application version.
 from networkradar_modules import __version__ as APP_VERSION
 from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
-
-class StartupError(RuntimeError):
-    pass
-
-_NR_LOCK_HANDLE = None
-_NR_LOCK_GUARD = threading.Lock()
-
-def _legacy_pid_is_alive(raw):
-    """Deprecated PID-file probe; OS byte-range locking is authoritative.
-
-    A PID is not a process identity: Windows and Unix routinely reuse PIDs.
-    Treating a stale PID file as proof of a live NetworkRadar instance can
-    prevent startup indefinitely when an unrelated process reuses that PID.
-    The exclusive OS lock below safely detects a concurrently running instance
-    and is automatically released when its process exits.
-    """
-    return None
-
-def _acquire_os_lock(path):
-    global _NR_LOCK_HANDLE
-    with _NR_LOCK_GUARD:
-        if _NR_LOCK_HANDLE is not None: return
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        handle = open(path, "a+b")
-        try:
-            # PID files are not reliable process identities because PIDs are
-            # reused. The OS-managed exclusive lock below is authoritative.
-            handle.seek(0, os.SEEK_END)
-            if handle.tell() == 0: handle.write(b"\0"); handle.flush()
-            handle.seek(0)
-            if os.name == "nt":
-                import msvcrt
-                try: msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                except OSError as exc: raise StartupError("Another NetworkRadar instance holds the startup lock.") from exc
-            else:
-                import fcntl
-                try: fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except OSError as exc: raise StartupError("Another NetworkRadar instance holds the startup lock.") from exc
-            handle.seek(0); handle.truncate(); handle.write(f"pid={os.getpid()}\n".encode("ascii")); handle.flush()
-            _NR_LOCK_HANDLE = handle
-        except Exception:
-            handle.close(); raise
-
-def _release_os_lock():
-    global _NR_LOCK_HANDLE
-    with _NR_LOCK_GUARD:
-        h, _NR_LOCK_HANDLE = _NR_LOCK_HANDLE, None
-        if h is None: return
-        try:
-            if os.name == "nt":
-                import msvcrt
-                h.seek(0); msvcrt.locking(h.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(h.fileno(), fcntl.LOCK_UN)
-        finally: h.close()
-
-class _LocalOnlyHTTPServer(ThreadingHTTPServer):
-    allow_reuse_address = False
-    daemon_threads = True
-    block_on_close = False
-
-def bind_local_server(handler, host, requested_port, allow_alternate=False, search_span=20):
-    if not (1 <= int(requested_port) <= 65535): raise StartupError(f"Invalid TCP port: {requested_port}")
-    ports = [int(requested_port)]
-    if allow_alternate: ports.extend(range(int(requested_port)+1, min(65536, int(requested_port)+search_span+1)))
-    last = None
-    for port in ports:
-        try:
-            server = _LocalOnlyHTTPServer((host, port), handler)
-            return server, int(server.server_address[1])
-        except OSError as exc: last = exc
-    msg = f"{host}:{requested_port} could not be bound ({last})."
-    msg += f" Tried next {search_span} ports." if allow_alternate else " Choose another port with NETWORKRADAR_PORT or explicitly use --allow-alt-port."
-    raise StartupError(msg) from last
+from networkradar_modules.core.startup import (
+    StartupError, acquire_instance_lock as _acquire_instance_lock,
+    release_instance_lock as _release_instance_lock, bind_local_server,
+)
+from networkradar_modules.diagnostics.status import engine_record
 
 def _score_identity_evidence(candidate, *, now=None, thresholds=None,
                               half_life_days=30.0, group_cap=0.45,
@@ -287,14 +217,6 @@ def _score_identity_evidence(candidate, *, now=None, thresholds=None,
         conflict_kinds=frozenset(conflict_kinds),
         local_group=local_group,
     )
-
-def engine_record(name, reported_status, *, last_error="", configured=True, details=None):
-    raw = str(reported_status or "UNKNOWN").upper()
-    if not configured: state = "NOT_CONFIGURED"
-    elif raw in {"RUNNING", "OBSERVING"}: state = "DEGRADED" if last_error else "ONLINE"
-    elif raw in {"ONLINE", "DEGRADED", "FAILED", "STOPPED", "STARTING", "DISABLED", "NOT_CONFIGURED"}: state = raw
-    else: state = "UNKNOWN"
-    return {"engine": str(name), "status": state, "reported_status": raw, "last_error": str(last_error or "")[:500], "details": details or {}}
 
 
 ROOT = Path(__file__).resolve().parent
@@ -452,12 +374,12 @@ def update_job(**kw):
 
 def acquire_instance_lock():
     try:
-        _acquire_os_lock(LOCK_FILE)
+        _acquire_instance_lock(LOCK_FILE)
     except StartupError as exc:
         raise RuntimeError(str(exc)) from exc
 
 def release_instance_lock():
-    _release_os_lock()
+    _release_instance_lock()
 
 def _port_available(host, port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
