@@ -52,6 +52,23 @@ The core application uses the Python standard library. Paramiko is optional and 
 
 The dashboard opens at **http://127.0.0.1:8766** by default.
 
+## Packet-capture interface selection
+
+NetworkRadar first identifies the active Windows adapter using route metrics, then matches that adapter to TShark by interface GUID/name/description. This avoids silently capturing on a different Wi-Fi or Ethernet adapter when several are present.
+
+To inspect TShark's interface list:
+
+```powershell
+tshark -D
+```
+
+If automatic matching cannot identify the active adapter, set the TShark interface number (or a matching displayed name) for the current PowerShell session:
+
+```powershell
+$env:NETWORKRADAR_TSHARK_INTERFACE = "3"
+.\NetworkRadar.ps1
+```
+
 ## Port configuration
 
 Set a specific port for the current PowerShell session:
