@@ -56,17 +56,4 @@ def infer_type(device, ssdp=None, *, gateway_ip=""):
         return "Network service host (type unconfirmed)"
     return "Unclassified network device"
 
-# ============================================================
-# RADAR IDENTITY (preserved from 8.1.0)
-# ============================================================
-
-OUI_DIR = DATA / "fingerprints"
-OUI_DIR.mkdir(parents=True, exist_ok=True)
-OUI_FILES = {
-    "MA-L": "https://standards-oui.ieee.org/oui/oui.txt",
-    "MA-M": "https://standards-oui.ieee.org/oui28/mam.txt",
-    "MA-S": "https://standards-oui.ieee.org/oui36/oui36.txt",
-}
-_OUI_LOCK = threading.RLock()
-_OUI_MEM = {}
 
