@@ -186,8 +186,10 @@ try:
     import paramiko
 except ImportError:
     paramiko = None
-# 8.5.0: keep the distribution genuinely single-file. These implementations
-# are embedded here so a copied networkradar.py has no private-package imports.
+
+# The identity engine is a maintained package module and is covered by tests.
+from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
+
 class StartupError(RuntimeError):
     pass
 
@@ -263,29 +265,27 @@ def bind_local_server(handler, host, requested_port, allow_alternate=False, sear
     msg += f" Tried next {search_span} ports." if allow_alternate else " Choose another port with NETWORKRADAR_PORT or explicitly use --allow-alt-port."
     raise StartupError(msg) from last
 
-def _score_identity_evidence(candidate, *, now=None, thresholds=None, half_life_days=30.0, group_cap=0.45, auto_merge=frozenset(), conflict_kinds=frozenset(), local_group="oui_local"):
-    # Evidence fusion is intentionally conservative; callers must supply evidence
-    # that actually compares two identities, not the union of both inventories.
-    from datetime import datetime as _dt, timezone as _tz
-    now = now or _dt.now(_tz.utc)
-    thresholds = thresholds or {"CONFIRMED_MATCH": .85, "STRONG_MATCH": .70, "POSSIBLE_MATCH": .50, "WEAK_MATCH": .30}
-    groups = {}
-    for item in candidate or []:
-        group = str(item.get("independence_group", "unknown"))
-        if group == local_group: continue
-        try:
-            raw = str(item.get("observed_at") or "")
-            when = _dt.fromisoformat(raw.replace("Z", "+00:00"))
-            if when.tzinfo is None: when = when.replace(tzinfo=_tz.utc)
-            age = max(0.0, (now - when.astimezone(_tz.utc)).total_seconds()/86400.0)
-            strength = max(0.0, min(1.0, float(item.get("strength", 0)))) * (0.5 ** (age/half_life_days))
-        except Exception: continue
-        groups[group] = max(groups.get(group, 0.0), strength)
-    total = min(1.0, sum(min(v, group_cap) for v in groups.values()))
-    outcome = "NEW_IDENTITY"
-    for label in ("CONFIRMED_MATCH", "STRONG_MATCH", "POSSIBLE_MATCH", "WEAK_MATCH"):
-        if total >= thresholds[label]: outcome = label; break
-    return outcome, total, {"total": round(total,4), "groups": {k: round(v,4) for k,v in groups.items()}, "auto_merge_allowed": False, "requires_manual_review": outcome not in ("NEW_IDENTITY", "UNKNOWN"), "local_mac_present": False}
+def _score_identity_evidence(candidate, *, now=None, thresholds=None,
+                              half_life_days=30.0, group_cap=0.45,
+                              auto_merge=frozenset({"CONFIRMED_MATCH"}),
+                              conflict_kinds=frozenset({"hostname", "client_id", "oui_global"}),
+                              local_group="oui_local"):
+    """Use the tested PHANTOM TRACK scorer; keep the legacy call signature."""
+    return _modular_score_evidence(
+        candidate,
+        now=now,
+        thresholds=thresholds or {
+            "CONFIRMED_MATCH": 0.85,
+            "STRONG_MATCH": 0.70,
+            "POSSIBLE_MATCH": 0.50,
+            "WEAK_MATCH": 0.30,
+        },
+        half_life_days=half_life_days,
+        group_cap=group_cap,
+        auto_merge=frozenset(auto_merge),
+        conflict_kinds=frozenset(conflict_kinds),
+        local_group=local_group,
+    )
 
 def engine_record(name, reported_status, *, last_error="", configured=True, details=None):
     raw = str(reported_status or "UNKNOWN").upper()
@@ -1356,6 +1356,32 @@ def detect_network():
         },
     }
 
+def _profile_authorization_fresh(profile, now=None):
+    """Approval expires from last_authorized, never from routine last_seen updates."""
+    raw = str(profile.get("last_authorized") or "").strip()
+    if not raw:
+        return False, "No successful approval timestamp is recorded. Re-approve this network."
+    try:
+        approved_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if approved_at.tzinfo is not None:
+            approved_at = approved_at.astimezone().replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return False, "The network approval timestamp is invalid. Re-approve this network."
+
+    current = now or datetime.now()
+    if current.tzinfo is not None:
+        current = current.astimezone().replace(tzinfo=None)
+    age = current - approved_at
+    if age < timedelta(minutes=-5):
+        return False, "The network approval timestamp is in the future. Re-approve this network."
+    if age > timedelta(days=PROFILE_MAX_AGE_DAYS):
+        return False, (
+            f"Network approval expired ({age.days} days > {PROFILE_MAX_AGE_DAYS}). "
+            "Re-approve required."
+        )
+    return True, "Approval is within the configured freshness period."
+
+
 def _authz_decision(detected, profiles):
     """Single authoritative decision. Closes D1."""
     fp = detected.get("fingerprint") or ""
@@ -1371,26 +1397,34 @@ def _authz_decision(detected, profiles):
             f"Fingerprint confidence {weight:.0%} < {MIN_FP_CONFIDENCE:.0%}.",
             "Active discovery disabled until confidence improves."], None
 
-    match = next((p for p in profiles if p.get("fingerprint") == fp), None)
-    if not match:
+    matches = [p for p in profiles if p.get("fingerprint") == fp]
+    if not matches:
         return False, "NOT_AUTHORISED", [
             "No network profile matches the current fingerprint."], None
-    pid = match.get("id") or match.get("network") or "?"
-    if not match.get("approved"):
+
+    approved_matches = [p for p in matches if p.get("approved")]
+    if not approved_matches:
+        pid = matches[0].get("id") or matches[0].get("network") or "?"
         return False, "NOT_AUTHORISED", [
             f"Profile {pid} exists but approved != True."], pid
-    last = match.get("last_seen")
-    if last:
-        try:
-            age = datetime.now() - datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
-            if age.days > PROFILE_MAX_AGE_DAYS:
-                return False, "INDETERMINATE", [
-                    f"Profile {pid} stale ({age.days} days > {PROFILE_MAX_AGE_DAYS}). "
-                    "Re-approve required."], pid
-        except (ValueError, TypeError):
-            pass
+
+    fresh_matches = []
+    stale_reason = ""
+    for profile in approved_matches:
+        fresh, reason = _profile_authorization_fresh(profile)
+        if fresh:
+            fresh_matches.append(profile)
+        elif not stale_reason:
+            stale_reason = reason
+    if not fresh_matches:
+        pid = approved_matches[0].get("id") or approved_matches[0].get("network") or "?"
+        return False, "INDETERMINATE", [stale_reason or
+            "Network approval is stale or invalid. Re-approve required."], pid
+
+    match = fresh_matches[0]
+    pid = match.get("id") or match.get("network") or "?"
     return True, "AUTHORISED", [
-        f"Profile {pid} approved; weight {weight:.0%}; class {fp_class}."], pid
+        f"Profile {pid} approved recently; weight {weight:.0%}; class {fp_class}."], pid
 
 def refresh_network_context():
     detected = detect_network()
@@ -1438,11 +1472,12 @@ def refresh_network_context():
               detected.get("dns_servers", ""), detected.get("bssid", ""),
               int(detected.get("confidence", 0))))
         rows = conn.execute(
-            "SELECT network, approved, last_seen, fingerprint "
+            "SELECT network, approved, last_seen, last_authorized, fingerprint "
             "FROM network_profiles WHERE fingerprint=?",
             (detected.get("fingerprint", ""),)).fetchall()
         return [{"id": r[0], "approved": bool(r[1]),
-                 "last_seen": r[2], "fingerprint": r[3]} for r in rows]
+                 "last_seen": r[2], "last_authorized": r[3],
+                 "fingerprint": r[4]} for r in rows]
 
     profiles = DB_MANAGER.write(_persist) if detected.get("fingerprint") else []
     authorised, decision, reasons, pid = _authz_decision(detected, profiles)
@@ -1490,9 +1525,11 @@ def authorize_current(actor="local-user"):
             "Improve evidence (connect through the gateway, run a fresh scan, "
             "confirm DNS) before approving.")
     def _w(conn):
-        conn.execute("UPDATE network_profiles SET approved=1, last_seen=?, "
-                     "last_authorized=? WHERE fingerprint=?",
-                     (now_text(), now_text(), fp))
+        cur = conn.execute("UPDATE network_profiles SET approved=1, last_seen=?, "
+                           "last_authorized=? WHERE fingerprint=?",
+                           (now_text(), now_text(), fp))
+        if cur.rowcount < 1:
+            raise RuntimeError("The current network profile no longer exists. Refresh network detection and try again.")
         conn.execute(
             "INSERT INTO network_approval_history(timestamp, fingerprint, "
             "network, action, actor, reason) VALUES (?, ?, ?, 'APPROVED', ?, ?)",
