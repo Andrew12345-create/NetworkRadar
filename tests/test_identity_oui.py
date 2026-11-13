@@ -41,12 +41,13 @@ class IEEERegistryTests(unittest.TestCase):
         assignments = {
             "001122": {"organization": "Large Example", "registry": "MA-L"},
             "0011223": {"organization": "Medium Example", "registry": "MA-M"},
-            "0011223A4": {"organization": "Small Example", "registry": "MA-S"},
+            "0011223A4": {"organization": "Small Example", "registry": "MA-S", "updated_at": "2026-11-13 10:00:00"},
         }
         result = lookup_ieee_assignment("00:11:22:3A:4B:5C", assignments)
         self.assertEqual(result["organization"], "Small Example")
         self.assertEqual(result["registry"], "MA-S")
         self.assertEqual(result["prefix_bits"], 36)
+        self.assertEqual(result["updated_at"], "2026-11-13 10:00:00")
         self.assertIn("not proof", result["interpretation"])
 
     def test_ma_m_and_ma_s_are_not_mislabelled_as_oui(self):
