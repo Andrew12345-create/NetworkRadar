@@ -76,6 +76,15 @@ class TSharkInterfaceSelectionTests(unittest.TestCase):
         )
         self.assertEqual(selected, "2")
 
+    def test_invalid_guid_falls_back_to_active_adapter_name(self):
+        interfaces = [("1", "Wi-Fi"), ("2", "Ethernet")]
+        self.assertEqual(
+            app._select_tshark_interface(
+                interfaces, primary_guid="N/A", primary_name="Ethernet"
+            ),
+            "2",
+        )
+
     def test_preferred_interface_overrides_active_adapter(self):
         interfaces = [("1", "Wi-Fi"), ("2", "Ethernet")]
         self.assertEqual(
