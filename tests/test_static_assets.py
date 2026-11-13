@@ -1,5 +1,6 @@
 """Static asset packaging regression tests."""
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,9 +31,12 @@ class DashboardAssetTests(unittest.TestCase):
             'src="/assets/dashboard.js?v={APP_VERSION}" defer', html
         )
         self.assertNotIn("<style", html.lower())
-        self.assertNotRegex(html, r"<script(?![^>]*\\bsrc=)")
+        script_tags = re.findall(r"<script\\b[^>]*>", html, flags=re.IGNORECASE)
+        self.assertTrue(script_tags)
+        self.assertTrue(all(re.search(r"\\bsrc=", tag, flags=re.IGNORECASE) for tag in script_tags))
         self.assertNotIn("WEB_PAGE", source)
         self.assertNotIn("DASHBOARD_JS_BUNDLED", source)
+        self.assertIn('(ROOT / "index.html").read_text(encoding="utf-8")', source)
 
     def test_dashboard_html_is_a_real_nonempty_asset(self):
         html = ROOT / "index.html"
