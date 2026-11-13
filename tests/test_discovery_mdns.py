@@ -57,7 +57,7 @@ class MdnsPacketTests(unittest.TestCase):
     def test_parses_compressed_owner_name(self):
         question = dns_name("_ipp._tcp.local") + struct.pack("!HH", 12, 1)
         target = dns_name("Office Printer._ipp._tcp.local")
-        answer = b"\\xc0\\x0c" + struct.pack("!HHIH", 12, 1, 120, len(target)) + target
+        answer = b"\xc0\x0c" + struct.pack("!HHIH", 12, 1, 120, len(target)) + target
         packet = struct.pack("!HHHHHH", 0, 0x8400, 1, 1, 0, 0) + question + answer
         parsed = parse_mdns_packet(packet)
         self.assertEqual(len(parsed), 1)
