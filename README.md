@@ -125,3 +125,7 @@ The suite includes isolated tests for startup/identity/diagnostic helpers and in
 - `docs/` — architecture and audit notes.
 
 See [Architecture](docs/ARCHITECTURE.md), [Release Notes](RELEASE_NOTES.md), and [Audit History](AUDIT_AND_TEST_RESULTS.md).
+
+## License
+
+No license file has been selected yet. Public visibility on GitHub does not by itself grant permission to copy, modify or redistribute this project. Add an explicit license before presenting NetworkRadar as an open-source release.
