@@ -190,6 +190,7 @@ except ImportError:
 # The package metadata is the single source of the application version.
 from networkradar_modules import __version__ as APP_VERSION
 from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
+from networkradar_modules.identity.dhcp import analyse_dhcp_identity as _analyse_dhcp_identity
 from networkradar_modules.identity.fingerprints import (
     derive_identity as _derive_identity_core,
     dhcp_fingerprint as _dhcp_fingerprint_core,
@@ -1641,20 +1642,25 @@ def _classify_from_signatures(device, dhcp_rows):
             candidates.append((category, score, why))
 
     for row in dhcp_rows:
-        vc = (row[1] or "").lower()
-        prl = (row[2] or "").strip()
-        if "android" in vc or "android" in (row[0] or "").lower():
-            candidates.append(("Android/mobile device", 76, "DHCP vendor class / hostname"))
-        if "msft" in vc or "microsoft" in vc:
-            candidates.append(("Windows computer", 74, "DHCP vendor class"))
-        if any(x in vc for x in ("udhcp", "busybox", "openwrt", "udhcpd")):
-            candidates.append(("Embedded Linux / IoT", 68, "DHCP vendor class"))
-        if prl:
-            opts = {x.strip() for x in prl.split(",") if x.strip().isdigit()}
-            if {1, 3, 6, 15, 119, 252}.issubset(opts):
-                candidates.append(("Windows-compatible network client", 60, "DHCP parameter-request-list pattern"))
-            elif {1, 3, 6, 12, 15, 28, 42}.issubset(opts):
-                candidates.append(("Unix-like network client", 58, "DHCP parameter-request-list pattern"))
+        hn, vc, prl = (row[0] or ""), (row[1] or ""), (row[2] or "")
+        dhcp_analysis = _analyse_dhcp_identity(
+            vendor_class=vc, hostname=hn, parameter_request_list=prl,
+            client_identifier=row[3] if len(row) > 3 else "")
+        for item in dhcp_analysis.get("hints", []):
+            category = item.get("category", "")
+            confidence = int(item.get("confidence", 0) or 0)
+            reason = item.get("reason", "DHCP fingerprint")
+            mapped = {
+                "Android mobile client": "Android/mobile device",
+                "Microsoft DHCP client": "Windows-compatible network client",
+                "Embedded Linux DHCP client": "Embedded Linux / IoT",
+                "dhcpcd-based client": "Unix-like network client candidate",
+                "Mobile device candidate": "Mobile device candidate",
+                "Printer candidate": "Printer candidate",
+                "Network infrastructure candidate": "Network infrastructure candidate",
+            }.get(category, category)
+            if mapped:
+                candidates.append((mapped, min(78, confidence), reason))
 
     mdns_rules = [
         (("_ipp._tcp", "_printer._tcp", "_pdl-datastream._tcp"), "Printer", 82, "mDNS/DNS-SD printing service"),
@@ -1757,6 +1763,9 @@ def advanced_device_recognition(device):
     for row in device.get("dhcp_identity", []) or []:
         add("dhcp", " ".join(str(row.get(k, "")) for k in ("vendor_class", "hostname", "parameter_request_list")),
             "DHCP client fingerprint", 0.72)
+    for item in device.get("dhcp_intelligence", []) or []:
+        add("dhcp", item.get("category", "") + " " + item.get("reason", ""),
+            "Interpreted DHCP fingerprint", min(0.78, float(item.get("confidence", 0) or 0) / 100.0))
 
     searchable = " | ".join(x["value"] for x in facts).lower()
     ports = {int(x) for x in device.get("port_numbers", []) if str(x).isdigit()}
@@ -1882,6 +1891,7 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
         {"hostname": r[0] or "", "vendor_class": r[1] or "",
          "parameter_request_list": r[2] or "", "client_identifier": r[3] or ""}
         for r in dhcp_rows]
+    dhcp_hints = {}
     for row in dhcp_rows:
         hn, vc, prl, cid, _ = row
         if hn:
@@ -1892,6 +1902,19 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
             evidence.append(("DHCP", "Parameter request list", prl, 58, "OBSERVED"))
         if cid:
             evidence.append(("DHCP", "Client identifier", cid, 55, "OBSERVED"))
+        analysis = _analyse_dhcp_identity(
+            vendor_class=vc, hostname=hn, parameter_request_list=prl,
+            client_identifier=cid)
+        for item in analysis.get("hints", []):
+            key = (item.get("category", ""), item.get("attribute", "client_family"))
+            if key not in dhcp_hints or int(item.get("confidence", 0)) > int(dhcp_hints[key].get("confidence", 0)):
+                dhcp_hints[key] = item
+    device["dhcp_intelligence"] = list(dhcp_hints.values())
+    for item in device["dhcp_intelligence"]:
+        attr = "DHCP network role hint" if item.get("attribute") == "network_role" else "DHCP client-family hint"
+        evidence.append(("DHCP fingerprint", attr,
+                         item.get("category", "") + ": " + item.get("reason", ""),
+                         int(item.get("confidence", 0)), "INFERRED"))
     if dhcp_rows:
         signatures = sorted({dhcp_fingerprint(row[1] or "", row[2] or "")
                              for row in dhcp_rows if row[1] or row[2]})
