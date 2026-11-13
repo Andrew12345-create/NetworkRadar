@@ -1,10 +1,9 @@
 name: NetworkRadar tests
 
 on:
-  push:
-    branches: [main, "audit/**"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
