@@ -1209,7 +1209,8 @@ def detect_network():
             if net.num_addresses > 4096:
                 raise RuntimeError(f"Manual network {net} too large.")
             return {"network": str(net), "ip": "", "gateway": "",
-                    "interface": "Manual override", "prefix": net.prefixlen,
+                    "interface": "Manual override", "interface_description": "",
+                    "interface_guid": "", "prefix": net.prefixlen,
                     "ssid": "", "bssid": "", "mode": "MANUAL",
                     "dns_servers": "", "adapter_mac": "",
                     "gateway_mac": "", "fingerprint": "", "fingerprint_raw": "",
@@ -1223,7 +1224,7 @@ def detect_network():
             raise RuntimeError("NETWORKRADAR_NETWORK invalid CIDR")
 
     adapters_raw = _ps(
-        "Get-NetAdapter | Select-Object Name,InterfaceIndex,InterfaceDescription,"
+        "Get-NetAdapter | Select-Object Name,InterfaceIndex,InterfaceDescription,InterfaceGuid,"
         "MacAddress,Status,MediaType | ConvertTo-Json -Depth 3")
     ip_raw = _ps(
         "Get-NetIPAddress -AddressFamily IPv4 | "
@@ -1271,7 +1272,10 @@ def detect_network():
         ip_r = ips_by_idx.get(idx) or {}
         ip_val = ip_r.get("IPAddress")
         pfx = ip_r.get("PrefixLength")
-        adapters.append({"idx": idx, "name": name, "status": status,
+        adapters.append({"idx": idx, "name": name,
+                         "description": str(a.get("InterfaceDescription") or ""),
+                         "guid": str(a.get("InterfaceGuid") or ""),
+                         "status": status,
                          "mac": mac_val if _is_real_mac(mac_val) else "",
                          "ip": ip_val, "prefix": pfx})
 
@@ -1280,7 +1284,8 @@ def detect_network():
 
     if primary is None:
         return {"network": "", "ip": "", "gateway": "",
-                "interface": "No active adapter", "prefix": None,
+                "interface": "No active adapter", "interface_description": "",
+                "interface_guid": "", "prefix": None,
                 "ssid": "", "bssid": "", "mode": "AUTO",
                 "dns_servers": "", "adapter_mac": "", "gateway_mac": "",
                 "fingerprint": "", "fingerprint_raw": "",
@@ -1345,6 +1350,8 @@ def detect_network():
         "ip": primary["ip"] or "",
         "gateway": gateway_val,
         "interface": primary["name"],
+        "interface_description": primary.get("description", ""),
+        "interface_guid": primary.get("guid", ""),
         "prefix": int(primary["prefix"]) if isinstance(primary["prefix"], int) else None,
         "ssid": ssid,
         "bssid": bssid,
@@ -3304,6 +3311,61 @@ def match_threats(conn, domain="", observed_ip="", client_ip="",
 # CAPTURE ENGINES
 # ============================================================
 
+def _select_tshark_interface(interfaces, *, preferred="", primary_guid="",
+                             primary_name="", primary_description=""):
+    """Prefer the exact active Windows adapter, not the first Wi-Fi-looking device."""
+    if preferred:
+        pref = str(preferred).strip().strip('"')
+        for idx, desc in interfaces:
+            if pref.casefold() == str(idx).casefold() or pref.casefold() in str(desc).casefold():
+                return str(idx)
+        if pref.startswith(r"\\Device\\NPF_"):
+            return pref
+        raise RuntimeError(
+            "Configured NETWORKRADAR_TSHARK_INTERFACE was not found by TShark -D: "
+            + pref[:160]
+        )
+
+    guid = re.sub(r"[^0-9a-f]", "", str(primary_guid).casefold())
+    if guid:
+        for idx, desc in interfaces:
+            desc_guid = re.sub(r"[^0-9a-f]", "", str(desc).casefold())
+            if guid in desc_guid:
+                return str(idx)
+
+    names = [str(x).strip().casefold() for x in
+             (primary_name, primary_description) if str(x or "").strip()]
+    for name in names:
+        for idx, desc in interfaces:
+            if name in str(desc).casefold():
+                return str(idx)
+
+    if names:
+        raise RuntimeError(
+            "The active Windows network adapter was not found in TShark -D. "
+            "Set NETWORKRADAR_TSHARK_INTERFACE to the correct TShark interface; "
+            "NetworkRadar will not silently capture another adapter."
+        )
+
+    wifi = [(idx, desc) for idx, desc in interfaces
+            if re.search(r"\\b(wi[ -]?fi|wireless|802\\.11)\\b", desc, re.IGNORECASE)
+            and not re.search(r"loopback|virtualbox|vmware", desc, re.IGNORECASE)]
+    if wifi:
+        return str(wifi[0][0])
+    ethernet = [(idx, desc) for idx, desc in interfaces
+                if re.search(r"\\bethernet\\b", desc, re.IGNORECASE)
+                and not re.search(r"loopback|virtualbox|vmware", desc, re.IGNORECASE)]
+    if ethernet:
+        return str(ethernet[0][0])
+    physical = [(idx, desc) for idx, desc in interfaces
+                if not re.search(r"loopback|virtualbox|vmware|bluetooth|npcap loopback", desc, re.IGNORECASE)]
+    if physical:
+        return str(physical[0][0])
+    raise RuntimeError(
+        "No usable TShark interface found. Check Npcap and set NETWORKRADAR_TSHARK_INTERFACE."
+    )
+
+
 def choose_iface():
     """Select a real TShark interface; prefer the active Wi-Fi adapter.
 
@@ -3321,30 +3383,15 @@ def choose_iface():
         m = re.match(r"\s*(\d+)\.\s*(.*)", line)
         if m:
             interfaces.append((m.group(1), m.group(2).strip()))
-    if PREFERRED_INTERFACE:
-        pref = PREFERRED_INTERFACE.strip().strip('"')
-        for idx, desc in interfaces:
-            if pref.casefold() == idx.casefold() or pref.casefold() in desc.casefold():
-                return idx
-        # Preserve support for explicit Npcap device paths and TShark aliases.
-        if pref.startswith(r"\Device\NPF_"):
-            return pref
-        raise RuntimeError("Configured NETWORKRADAR_TSHARK_INTERFACE was not found by TShark -D: " + pref[:160])
-    wifi = [(idx, desc) for idx, desc in interfaces
-            if re.search(r"\b(wi[ -]?fi|wireless|802\.11)\b", desc, re.IGNORECASE)
-            and not re.search(r"loopback|virtualbox|vmware", desc, re.IGNORECASE)]
-    if wifi:
-        return wifi[0][0]
-    ethernet = [(idx, desc) for idx, desc in interfaces
-                 if re.search(r"\bethernet\b", desc, re.IGNORECASE)
-                 and not re.search(r"loopback|virtualbox|vmware", desc, re.IGNORECASE)]
-    if ethernet:
-        return ethernet[0][0]
-    physical = [(idx, desc) for idx, desc in interfaces
-                if not re.search(r"loopback|virtualbox|vmware|bluetooth|npcap loopback", desc, re.IGNORECASE)]
-    if physical:
-        return physical[0][0]
-    raise RuntimeError("No usable TShark interface found. Check Npcap and set NETWORKRADAR_TSHARK_INTERFACE.")
+    with NET_LOCK:
+        primary = dict(NET_CTX)
+    return _select_tshark_interface(
+        interfaces,
+        preferred=PREFERRED_INTERFACE,
+        primary_guid=primary.get("interface_guid", ""),
+        primary_name=primary.get("interface", ""),
+        primary_description=primary.get("interface_description", ""),
+    )
 
 def domain_heuristics(domain):
     return []
