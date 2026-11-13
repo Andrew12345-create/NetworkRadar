@@ -54,6 +54,16 @@ class MdnsPacketTests(unittest.TestCase):
         self.assertEqual(parsed[2]["value"], ["rp=print"])
         self.assertEqual(parsed[3]["value"], "192.168.1.20")
 
+    def test_parses_compressed_owner_name(self):
+        question = dns_name("_ipp._tcp.local") + struct.pack("!HH", 12, 1)
+        target = dns_name("Office Printer._ipp._tcp.local")
+        answer = b"\\xc0\\x0c" + struct.pack("!HHIH", 12, 1, 120, len(target)) + target
+        packet = struct.pack("!HHHHHH", 0, 0x8400, 1, 1, 0, 0) + question + answer
+        parsed = parse_mdns_packet(packet)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["name"], "_ipp._tcp.local")
+        self.assertEqual(parsed[0]["value"], "Office Printer._ipp._tcp.local")
+
     def test_rejects_query_and_malformed_packets(self):
         self.assertEqual(parse_mdns_packet(build_ptr_query("_ipp._tcp.local")), [])
         self.assertEqual(parse_mdns_packet(b"short"), [])
