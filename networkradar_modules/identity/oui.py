@@ -62,7 +62,7 @@ def parse_ieee_registry(raw: str, registry: str) -> dict[str, dict[str, str]]:
     expected = {"MA-L": 6, "MA-M": 7, "MA-S": 9}[registry]
     for line in text.splitlines():
         match = re.match(
-            r"^\s*([0-9A-Fa-f-]{6,11})\s+\((?:hex|MA-L|MA-M|MA-S)\)\s+(.+?)\s*$",
+            r"^\s*([0-9A-Fa-f-]{6,13})\s+\((?:hex|MA-L|MA-M|MA-S)\)\s+(.+?)\s*$",
             line,
             re.IGNORECASE,
         )
