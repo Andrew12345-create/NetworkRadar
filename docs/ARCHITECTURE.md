@@ -15,7 +15,7 @@ This distinction is intentional: a module existing in the repository does not me
 ## Application layers
 
 1. **Runtime and persistence** — application configuration, SQLite database manager, schema compatibility and append-only observations.
-2. **Network context and authorisation** — adapter, subnet, gateway and network-fingerprint detection; active discovery and management are gated by a matching approved profile.
+2. **Network context and authorisation** — adapter, subnet, gateway and network-fingerprint detection; active discovery and management are gated by a matching approved profile. When multiple adapters have default routes, the adapter with the lowest effective route metric is selected.
 3. **Discovery and observation** — Nmap inventory, DNS/DHCP/ARP capture and supplementary local-network observations.
 4. **Identity and intelligence** — device identity evidence, continuity, behaviour, exposure observations, alert correlation and investigations.
 5. **Management integrations** — optional SSH sessions, agentless Windows management and an opt-in TLS agent hub.
@@ -35,7 +35,7 @@ Malformed timestamps are ignored as evidence. Materially future-dated observatio
 
 ## Local API and remote management
 
-The main dashboard server is configured for loopback. Its request handler validates the Host header and, when present, the Origin header. The optional agent hub is a separate TLS listener, disabled unless explicitly enabled and configured with a certificate and private key. Its enrolment response provides a per-agent derived HMAC key; the server-wide pepper is never sent to endpoints. Enrolment, command polling and command queuing are blocked unless the current network profile is authorised.
+The packet-capture interface selector now matches the selected Windows adapter by interface GUID, then adapter name/description, rather than blindly selecting the first Wi-Fi device. An explicit TShark interface override remains available. The main dashboard server is configured for loopback. Its request handler validates the Host header and, when present, the Origin header. The optional agent hub is a separate TLS listener, disabled unless explicitly enabled and configured with a certificate and private key. Its enrolment response provides a per-agent derived HMAC key; the server-wide pepper is never sent to endpoints. Enrolment, command polling and command queuing are blocked unless the current network profile is authorised.
 
 The endpoint-agent hub code is present, but this repository snapshot does not include a separately packaged endpoint-agent client/installer. Treat the client/server lifecycle as incomplete until the client is added, its certificate-pinning and request-signing protocol are documented, and the complete enrol/report/command/revocation flow is tested.
 
