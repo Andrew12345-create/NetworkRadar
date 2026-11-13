@@ -197,6 +197,7 @@ from networkradar_modules.core.startup import (
 from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
 from networkradar_modules.discovery.nmap import run_nmap_discovery
+from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
 
 def _score_identity_evidence(candidate, *, now=None, thresholds=None,
                               half_life_days=30.0, group_cap=0.45,
@@ -1354,19 +1355,8 @@ def health_sample():
 # ============================================================
 
 def read_arp_cache():
-    mapping = {}
-    try:
-        r = subprocess.run(["arp", "-a"], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=8)
-        for line in r.stdout.splitlines():
-            m = re.search(
-                r"(\d{1,3}(?:\.\d{1,3}){3})\s+([0-9a-fA-F]{2}(?:-[0-9a-fA-F]{2}){5})",
-                line)
-            if m:
-                mapping[m.group(1)] = m.group(2).replace("-", ":").upper()
-    except Exception:
-        pass
-    return mapping
+    """Read the local OS ARP cache through the discovery adapter."""
+    return read_arp_cache_records()
 
 def local_identity():
     ident = {"ip": "", "mac": "",
