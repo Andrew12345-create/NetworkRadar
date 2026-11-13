@@ -106,6 +106,7 @@ def lookup_ieee_assignment(mac: Any, assignments: Mapping[str, Any]) -> dict[str
             "registry": registry,
             "prefix_bits": length * 4,
             "organization": organization,
+            "updated_at": str(value.get("updated_at") or "") if isinstance(value, Mapping) else "",
             "assignment_type": {
                 "MA-L": "large MAC address block (OUI)",
                 "MA-M": "medium MAC address block",
