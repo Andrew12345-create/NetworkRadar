@@ -3319,7 +3319,7 @@ def _select_tshark_interface(interfaces, *, preferred="", primary_guid="",
         for idx, desc in interfaces:
             if pref.casefold() == str(idx).casefold() or pref.casefold() in str(desc).casefold():
                 return str(idx)
-        if pref.startswith(r"\\Device\\NPF_"):
+        if pref.startswith(r"\Device\NPF_"):
             return pref
         raise RuntimeError(
             "Configured NETWORKRADAR_TSHARK_INTERFACE was not found by TShark -D: "
@@ -3348,12 +3348,12 @@ def _select_tshark_interface(interfaces, *, preferred="", primary_guid="",
         )
 
     wifi = [(idx, desc) for idx, desc in interfaces
-            if re.search(r"\\b(wi[ -]?fi|wireless|802\\.11)\\b", desc, re.IGNORECASE)
+            if re.search(r"\b(wi[ -]?fi|wireless|802\.11)\b", desc, re.IGNORECASE)
             and not re.search(r"loopback|virtualbox|vmware", desc, re.IGNORECASE)]
     if wifi:
         return str(wifi[0][0])
     ethernet = [(idx, desc) for idx, desc in interfaces
-                if re.search(r"\\bethernet\\b", desc, re.IGNORECASE)
+                if re.search(r"\bethernet\b", desc, re.IGNORECASE)
                 and not re.search(r"loopback|virtualbox|vmware", desc, re.IGNORECASE)]
     if ethernet:
         return str(ethernet[0][0])
