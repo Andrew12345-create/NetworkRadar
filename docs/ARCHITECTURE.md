@@ -11,6 +11,7 @@ The dashboard markup lives in `index.html`; its responsive stylesheet and browse
 The `networkradar_modules` package contains components now used by the running application:
 
 - `identity.fusion` — evidence-weighted identity scoring, source-independence caps, freshness decay, conflict detection and conservative merge decisions.
+- `identity.dhcp` — conservative interpretation of DHCP vendor-class identifiers, hostnames and parameter-request lists. It produces explainable client-family/network-role hints and preserves PRL option names without treating overlapping option patterns as definitive OS or hardware identity.
 - `core.startup` — OS-managed single-instance locking and bind-first local-server binding. The application delegates its startup lock and server binding to this module.
 - `database.manager` — serialized SQLite writer queue, short-lived read connections, write batching and database-writer health state. The application uses this as its `DatabaseManager`.
 - `diagnostics.status` — normalises engine status records; the application imports this helper for engine-health reporting.
@@ -40,7 +41,7 @@ The `last_authorized` field is maintained through the application's additive sch
 
 ## Identity fusion
 
-The main application's PHANTOM TRACK entry point delegates to `networkradar_modules.identity.fusion.score_evidence`. Evidence from one independence group is capped; stale evidence decays; conflicting strong identity attributes produce `CONFLICTING_IDENTITY`; locally administered MAC observations are not valid merge anchors; and only a `CONFIRMED_MATCH` outcome can be auto-merge eligible.
+The main application's PHANTOM TRACK entry point delegates to `networkradar_modules.identity.fusion.score_evidence`. DHCP interpretation is handled by `identity.dhcp`: explicit vendor-class tokens (for example Android DHCP, Microsoft, BusyBox/udhcp, dhcpcd, PXEClient and iPXE) create bounded, explainable hints. Parameter-request-list values are decoded and retained as observable features, but are not independently mapped to an operating system because common option combinations overlap across client implementations. DHCP values are client-supplied and spoofable; they never establish an exact hardware model. Evidence from one independence group is capped; stale evidence decays; conflicting strong identity attributes produce `CONFLICTING_IDENTITY`; locally administered MAC observations are not valid merge anchors; and only a `CONFIRMED_MATCH` outcome can be auto-merge eligible.
 
 Malformed timestamps are ignored as evidence. Materially future-dated observations receive no freshness credit.
 
