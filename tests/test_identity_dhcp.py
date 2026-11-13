@@ -36,6 +36,12 @@ class DhcpFingerprintTests(unittest.TestCase):
         self.assertIn("classless_static_routes option requested", result["features"])
         self.assertEqual(result["fingerprint"]["parameter_request_list_names"][0], "subnet_mask")
 
+    def test_prl_option_93_does_not_claim_pxe_architecture(self):
+        result = analyse_dhcp_identity("", "", "93,97")
+        self.assertEqual(result["hints"], [])
+        self.assertIn("Option 93 appears in the parameter-request list", result["features"])
+        self.assertNotIn("PXE client architecture", " ".join(result["features"]))
+
     def test_hostname_hints_are_low_confidence(self):
         result = analyse_dhcp_identity("", "Office-Printer-01")
         self.assertEqual(result["hints"][0]["category"], "Printer candidate")
