@@ -7,6 +7,8 @@ This file records the current repository snapshot's declared application version
 - Connected the production PHANTOM TRACK scorer to the tested `networkradar_modules.identity.fusion` implementation. The previous embedded scorer ignored conflict kinds and auto-merge policy, always reported `auto_merge_allowed: false`, and iterated thresholds in a way that could downgrade a confirmed match to a weaker label.
 - Restored strong-identity conflict detection and the intended rule that only `CONFIRMED_MATCH` can be auto-merge eligible.
 - Hardened identity evidence handling: blank values no longer create false conflicts, malformed timestamps are ignored, and materially future-dated evidence receives no freshness credit.
+- Removed disclosure of the server-wide agent HMAC pepper during enrolment; endpoints receive only their own derived authentication key.
+- Gated agent-hub startup, endpoint enrolment, command polling and command queuing on current network authorisation.
 - Corrected network approval expiry. Routine `last_seen` refreshes previously made old approvals appear fresh indefinitely. Authorisation now uses `last_authorized`, fails closed for missing/invalid/future timestamps, and requires re-approval after the configured 90-day period.
 - Added a row-count check so a missing current network profile cannot be reported as successfully authorised.
 - Made `networkradar_modules/__init__.py` the single source of the application version.
