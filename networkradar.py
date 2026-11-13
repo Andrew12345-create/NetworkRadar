@@ -6129,7 +6129,12 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                     conn.execute("INSERT INTO remote_agents(agent_id,hostname,platform,os_version,agent_version,secret_hash,status,enrolled_at,last_seen,last_ip,capabilities_json) VALUES(?,?,?,?,?,?,'ONLINE',?,?,?,?)",(agent_id,hostname,platform_name,os_version,agent_version,secret_hash,now_text(),now_text(),self.client_address[0],json.dumps(["inventory","processes","services","lock","power-control"])) )
                     conn.execute("INSERT INTO agent_audit_events(timestamp,agent_id,actor,action,outcome,details) VALUES(?,?,?,?,?,?)",(now_text(),agent_id,"endpoint","ENROL","SUCCESS",hostname))
                 DB_MANAGER.write(_enrol)
-                return self._reply({"agent_id":agent_id,"secret":agent_secret,"auth_pepper":_agent_pepper().hex(),"message":"Enrolled. Store this secret securely; it will not be shown again."},201)
+                # Give this endpoint only its own derived HMAC key. Never disclose
+                # the server-wide pepper: a shared pepper would let one enrolled
+                # endpoint plus a database copy impersonate every other agent.
+                agent_auth_key = _agent_hmac_key(secret_hash).hex()
+                return self._reply({"agent_id":agent_id,"auth_key":agent_auth_key,
+                    "message":"Enrolled. Store this per-agent key securely; it will not be shown again."},201)
             if self.path == "/agent/v1/report":
                 agent_id=_verify_agent_request(self,raw)
                 inventory=payload.get("inventory",{})
