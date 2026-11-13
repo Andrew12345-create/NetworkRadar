@@ -1552,6 +1552,20 @@ def mac_properties(mac):
             "locally_administered": bool(first & 2),
             "unicast": not bool(first & 1), "prefix": m[:8].replace(":", "")}
 
+# ============================================================
+# RADAR IDENTITY (preserved from 8.1.0)
+# ============================================================
+
+OUI_DIR = DATA / "fingerprints"
+OUI_DIR.mkdir(parents=True, exist_ok=True)
+OUI_FILES = {
+    "MA-L": "https://standards-oui.ieee.org/oui/oui.txt",
+    "MA-M": "https://standards-oui.ieee.org/oui28/mam.txt",
+    "MA-S": "https://standards-oui.ieee.org/oui36/oui36.txt",
+}
+_OUI_LOCK = threading.RLock()
+_OUI_MEM = {}
+
 def load_oui_cache():
     global _OUI_MEM
     with _OUI_LOCK:
