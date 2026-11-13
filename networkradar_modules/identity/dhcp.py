@@ -36,13 +36,14 @@ def parse_parameter_request_list(value: Any) -> list[int]:
         token = token.strip()
         if not token:
             continue
-        match = re.fullmatch(r"(?:0x)?([0-9a-fA-F]{1,2})", token)
-        if not match:
-            continue
-        try:
-            number = int(match.group(1), 16) if token.lower().startswith("0x") else int(token, 10)
-        except ValueError:
-            continue
+        if token.lower().startswith("0x"):
+            if not re.fullmatch(r"0x[0-9a-fA-F]{1,2}", token):
+                continue
+            number = int(token[2:], 16)
+        else:
+            if not re.fullmatch(r"[0-9]{1,3}", token):
+                continue
+            number = int(token, 10)
         if 0 <= number <= 254 and number not in values:
             values.append(number)
     return values[:128]
