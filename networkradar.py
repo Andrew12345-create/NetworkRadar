@@ -1186,6 +1186,17 @@ def _wifi_details():
             bssid = v
     return ssid, bssid
 
+def _select_primary_adapter(adapters, default_routes):
+    """Choose the active interface with the lowest effective default-route metric."""
+    routed = [item for item in adapters if item.get("idx") in default_routes]
+    if routed:
+        return min(
+            routed,
+            key=lambda item: int(default_routes[item["idx"]].get("_metric", 999999)),
+        )
+    return adapters[0] if adapters else None
+
+
 def detect_network():
     """Return network context as a legacy dict (8.1.0 compatible shape).
 
@@ -1265,8 +1276,7 @@ def detect_network():
                          "ip": ip_val, "prefix": pfx})
 
     up = [x for x in adapters if x["status"] == "Up" and x["ip"]]
-    primary = next((x for x in up if x["idx"] in default_routes),
-                   up[0] if up else None)
+    primary = _select_primary_adapter(up, default_routes)
 
     if primary is None:
         return {"network": "", "ip": "", "gateway": "",
