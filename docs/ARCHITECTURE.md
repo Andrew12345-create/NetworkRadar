@@ -19,8 +19,9 @@ The `networkradar_modules` package contains components now used by the running a
 - `discovery.adapters` — pure helpers for MAC normalisation, Windows IPv4 interface selection, default-route metric selection and exact TShark interface matching.
 - `discovery.classification` — pure device-family classification using observed names, services, reported details, port observations and an explicitly supplied gateway address.
 - `discovery.probes` — reverse-DNS and NetBIOS name probes, SSDP discovery and same-host validation for UPnP description URLs. Redirects are rejected unless they remain on the same responding private host.
+- `discovery.mdns` — bounded active mDNS/DNS-SD PTR browsing and defensive parsing of PTR, SRV, TXT, A and AAAA records. It requests unicast replies, limits query/packet volume, binds to the selected local IPv4 where available, and never follows advertised URLs.
 
-The discovery package currently owns reusable collectors, parsers, selectors and classification logic. The higher-level inventory workflow remains in `networkradar.py`: it coordinates Nmap, ARP, local identity, SSDP/mDNS, deeper fingerprinting, identity assessment and database persistence. This is deliberate so each next extraction can be tested against the existing orchestration without changing its API or stored data shape.
+The discovery package currently owns reusable collectors, parsers, selectors and classification logic. During the first and every fifth inventory cycle, NetworkRadar combines passive TShark mDNS observations with an approval-gated, rate-bounded active DNS-SD browse. Active results are associated by responder IP and treated as device-reported service evidence, not proof of an exact hardware model. The higher-level inventory workflow remains in `networkradar.py`: it coordinates Nmap, ARP, local identity, SSDP/mDNS, deeper fingerprinting, identity assessment and database persistence. This is deliberate so each next extraction can be tested against the existing orchestration without changing its API or stored data shape.
 
 ## Application layers
 
