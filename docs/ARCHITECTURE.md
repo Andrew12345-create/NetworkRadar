@@ -83,3 +83,12 @@ Locally administered and multicast MAC addresses are not attributed to a
 global IEEE registrant. The registrant is labelled as an address-block
 assignee, not asserted to be the device manufacturer; exact product identity
 must come from independent device-reported or authenticated inventory data.
+
+
+Device-category signatures are constrained to compatible evidence families.
+For example, IEEE address-block registrants can enrich NIC attribution but
+cannot independently satisfy product, OS, service-role or device-reported
+identity rules. Product signatures may use explicit Nmap product, SNMP,
+UPnP or DNS-SD product evidence; OS signatures use OS/passive TCP evidence;
+DHCP signatures use DHCP observations. This prevents a NIC vendor such as an
+adapter or chipset supplier from being mistaken for the device itself.
