@@ -92,6 +92,7 @@ On startup, the application creates its local `data/` and `database/` directorie
 
 - Back up your own `data/` and `database/` folders before upgrading.
 - When updating application code, retain your existing local database and data folders.
+- Older approved profiles without a valid `last_authorized` timestamp will require a one-time re-approval.
 - Do not commit scan output, packet captures, database files, SSH known-host records, agent secrets, certificates or private keys.
 
 This repository does **not** ship a live SQLite database.
