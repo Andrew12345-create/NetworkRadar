@@ -192,6 +192,7 @@ from networkradar_modules import __version__ as APP_VERSION
 from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
 from networkradar_modules.identity.dhcp import analyse_dhcp_identity as _analyse_dhcp_identity
 from networkradar_modules.identity.oui import parse_ieee_registry, lookup_ieee_assignment
+from networkradar_modules.identity.recognition import recognition_family_compatible
 from networkradar_modules.identity.fingerprints import (
     derive_identity as _derive_identity_core,
     dhcp_fingerprint as _dhcp_fingerprint_core,
@@ -1790,6 +1791,8 @@ def advanced_device_recognition(device):
     matches = []
     for category, weight, _rule_family, patterns in _RECOGNITION_RULES:
         for fact in facts:
+            if not recognition_family_compatible(_rule_family, fact["family"]):
+                continue
             hit = next((pat for pat in patterns if re.search(pat, fact["value"], re.I)), None)
             if hit:
                 family = fact["family"]
