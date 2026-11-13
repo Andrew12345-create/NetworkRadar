@@ -4,6 +4,20 @@ from datetime import datetime, timezone, timedelta
 import networkradar as app
 
 
+class DeviceIdentityDerivationTests(unittest.TestCase):
+    def test_locally_administered_mac_uses_ip_fallback(self):
+        device = {"ip": "192.168.43.22", "mac": "02:11:22:33:44:55"}
+        _, key, basis = app.derive_identity(device)
+        self.assertEqual(key, "ip:192.168.43.22")
+        self.assertTrue(basis.startswith("IP fallback"))
+
+    def test_globally_administered_mac_remains_identity_anchor(self):
+        device = {"ip": "192.168.43.22", "mac": "00:11:22:33:44:55"}
+        _, key, basis = app.derive_identity(device)
+        self.assertEqual(key, "mac:00:11:22:33:44:55")
+        self.assertEqual(basis, "MAC")
+
+
 class ApplicationIdentityIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime.now(timezone.utc)
