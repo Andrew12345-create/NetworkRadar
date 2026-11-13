@@ -196,6 +196,7 @@ from networkradar_modules.core.startup import (
 )
 from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
+from networkradar_modules.discovery.nmap import run_nmap_discovery
 
 def _score_identity_evidence(candidate, *, now=None, thresholds=None,
                               half_life_days=30.0, group_cap=0.45,
@@ -1487,45 +1488,8 @@ def ssdp_scan(timeout=2.0):
 # ============================================================
 
 def discover_devices():
-    net = current_network()
-    if not net:
-        return [], 0.0
-    cmd = [str(NMAP), "-sn", "-R", "-oX", "-", net]
-    started = time.time()
-    r = subprocess.run(cmd, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=150)
-    dur = round(time.time() - started, 2)
-    NMAP_LOG.write_text((r.stderr or "") + "\n" + (r.stdout or "")[:2000],
-                        encoding="utf-8")
-    if r.returncode != 0:
-        raise RuntimeError(f"Nmap failed: {(r.stderr or '')[-1000:]}")
-    root = ET.fromstring(r.stdout)
-    devices = []
-    for host in root.findall("host"):
-        st = host.find("status")
-        if st is None or st.get("state") != "up":
-            continue
-        ip, mac, vendor, hostname = "", "Unavailable", "Unknown", "-"
-        for addr in host.findall("address"):
-            if addr.get("addrtype") == "ipv4":
-                ip = addr.get("addr", "")
-            elif addr.get("addrtype") == "mac":
-                mac = addr.get("addr", "Unavailable")
-                vendor = addr.get("vendor") or "Unknown"
-        names = host.find("hostnames")
-        if names is not None:
-            cands = [n.get("name") for n in names.findall("hostname") if n.get("name")]
-            if cands:
-                hostname = cands[0]
-        if ip:
-            devices.append({
-                "ip": ip, "mac": mac, "vendor": vendor, "hostname": hostname,
-                "device_name": hostname if hostname != "-" else "",
-                "friendly_name": "", "device_type": "Unclassified device",
-                "os_guess": "Unknown", "model": "",
-                "identification_confidence": 0, "identification_methods": "",
-                "open_ports": "", "service_summary": ""})
-    return devices, dur
+    """Run the authorised-network discovery scan through the modular Nmap engine."""
+    return run_nmap_discovery(current_network(), NMAP, NMAP_LOG)
 
 def derive_identity(device):
     mac = (device.get("mac") or "").replace("-", ":").upper()
