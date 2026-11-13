@@ -109,6 +109,36 @@ class TSharkInterfaceSelectionTests(unittest.TestCase):
         )
 
 
+class InterfaceIPv4SelectionTests(unittest.TestCase):
+    def test_preferred_routable_address_beats_apipa_and_deprecated(self):
+        rows = [
+            {"InterfaceIndex": 7, "IPAddress": "169.254.12.8",
+             "PrefixLength": 16, "AddressState": "Preferred",
+             "SkipAsSource": False},
+            {"InterfaceIndex": 7, "IPAddress": "192.168.43.22",
+             "PrefixLength": 24, "AddressState": "Preferred",
+             "SkipAsSource": False},
+            {"InterfaceIndex": 7, "IPAddress": "192.168.43.23",
+             "PrefixLength": 24, "AddressState": "Deprecated",
+             "SkipAsSource": False},
+            {"InterfaceIndex": 8, "IPAddress": "127.0.0.1",
+             "PrefixLength": 8, "AddressState": "Preferred",
+             "SkipAsSource": False},
+        ]
+        selected = app._select_ipv4_interface_rows(rows)
+        self.assertEqual(selected[7]["IPAddress"], "192.168.43.22")
+        self.assertNotIn(8, selected)
+
+    def test_invalid_and_non_ipv4_addresses_are_ignored(self):
+        rows = [
+            {"InterfaceIndex": 1, "IPAddress": "not-an-ip",
+             "PrefixLength": 24},
+            {"InterfaceIndex": 2, "IPAddress": "2001:db8::1",
+             "PrefixLength": 64},
+        ]
+        self.assertEqual(app._select_ipv4_interface_rows(rows), {})
+
+
 class NetworkAdapterSelectionTests(unittest.TestCase):
     def test_lowest_effective_default_route_metric_wins(self):
         adapters = [
