@@ -31,9 +31,9 @@ class DashboardAssetTests(unittest.TestCase):
             'src="/assets/dashboard.js?v={APP_VERSION}" defer', html
         )
         self.assertNotIn("<style", html.lower())
-        script_tags = re.findall(r"<script\\b[^>]*>", html, flags=re.IGNORECASE)
+        script_tags = re.findall(r"<script\b[^>]*>", html, flags=re.IGNORECASE)
         self.assertTrue(script_tags)
-        self.assertTrue(all(re.search(r"\\bsrc=", tag, flags=re.IGNORECASE) for tag in script_tags))
+        self.assertTrue(all(re.search(r"\bsrc=", tag, flags=re.IGNORECASE) for tag in script_tags))
         self.assertNotIn("WEB_PAGE", source)
         self.assertNotIn("DASHBOARD_JS_BUNDLED", source)
         self.assertIn('(ROOT / "index.html").read_text(encoding="utf-8")', source)
