@@ -1197,6 +1197,30 @@ def _select_primary_adapter(adapters, default_routes):
     return adapters[0] if adapters else None
 
 
+def _select_ipv4_interface_rows(rows):
+    """Choose one usable, preferred IPv4 address per Windows interface."""
+    selected = {}
+    priorities = {}
+    for row in rows:
+        try:
+            idx = int(row["InterfaceIndex"])
+            address = ipaddress.ip_address(str(row.get("IPAddress") or "").strip())
+            if (address.version != 4 or address.is_loopback or address.is_link_local
+                    or address.is_unspecified or address.is_multicast):
+                continue
+            state = str(row.get("AddressState") or "").casefold()
+            skip_source = str(row.get("SkipAsSource", "False")).casefold() in {
+                "true", "1", "yes"
+            }
+            priority = (1 if state == "preferred" else 0, 0 if skip_source else 1)
+        except (KeyError, ValueError, TypeError):
+            continue
+        if idx not in priorities or priority > priorities[idx]:
+            selected[idx] = row
+            priorities[idx] = priority
+    return selected
+
+
 def detect_network():
     """Return network context as a legacy dict (8.1.0 compatible shape).
 
@@ -1228,7 +1252,7 @@ def detect_network():
         "MacAddress,Status,MediaType | ConvertTo-Json -Depth 3")
     ip_raw = _ps(
         "Get-NetIPAddress -AddressFamily IPv4 | "
-        "Select-Object InterfaceIndex,IPAddress,PrefixLength | ConvertTo-Json -Depth 3")
+        "Select-Object InterfaceIndex,IPAddress,PrefixLength,AddressState,SkipAsSource | ConvertTo-Json -Depth 3")
     route_raw = _ps(
         "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | "
         "Select-Object InterfaceIndex,NextHop,RouteMetric,InterfaceMetric | "
@@ -1240,10 +1264,8 @@ def detect_network():
         "Get-NetIPInterface -AddressFamily IPv4 | "
         "Select-Object InterfaceIndex,Dhcp | ConvertTo-Json -Depth 3")
 
-    ips_by_idx, dns_by_idx, dhcp_by_idx = {}, {}, {}
-    for r in ip_raw:
-        try: ips_by_idx[int(r["InterfaceIndex"])] = r
-        except (KeyError, ValueError, TypeError): pass
+    ips_by_idx = _select_ipv4_interface_rows(ip_raw)
+    dns_by_idx, dhcp_by_idx = {}, {}
     for r in dns_raw:
         try: dns_by_idx[int(r["InterfaceIndex"])] = list(r.get("ServerAddresses") or [])
         except (KeyError, ValueError, TypeError): pass
