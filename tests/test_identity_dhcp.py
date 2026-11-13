@@ -33,7 +33,7 @@ class DhcpFingerprintTests(unittest.TestCase):
     def test_prl_is_preserved_without_os_guess(self):
         result = analyse_dhcp_identity("", "", "1,3,6,15,119,121,252")
         self.assertEqual(result["hints"], [])
-        self.assertIn("classless_static_routes option requested", result["features"])
+        self.assertIn("Classless static route option requested", result["features"])
         self.assertEqual(result["fingerprint"]["parameter_request_list_names"][0], "subnet_mask")
 
     def test_prl_option_93_does_not_claim_pxe_architecture(self):
