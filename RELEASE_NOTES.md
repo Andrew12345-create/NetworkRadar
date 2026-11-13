@@ -17,6 +17,7 @@ This file records the current repository snapshot's declared application version
 - Added the optional SSH dependency manifest referenced by the application.
 - Extracted the dashboard markup, stylesheet and JavaScript from the Python monolith into `index.html`, `networkradar.css` and `dashboard.js`; the local server now reads and serves these assets directly. This removes roughly 86 KB of presentation code from `networkradar.py`.
 - Consolidated repeated CSS foundation variables and duplicate mobile rules, then formatted the stylesheet into readable sections without changing the visual design tokens.
+- Removed all 48 static inline style attributes from `index.html`; reusable layout, spacing, progress, toast and visibility styles now live in the external stylesheet. Runtime-controlled styles remain managed by the dashboard client.
 - Updated installation, data-safety, version and architecture documentation to match the actual repository layout.
 - Added application-level regression tests for identity scoring and approval freshness.
 
