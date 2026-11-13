@@ -6114,6 +6114,8 @@ class AgentHubHandler(BaseHTTPRequestHandler):
         try:
             raw,payload=_agent_json_body(self)
             if self.path == "/agent/v1/enrol":
+                if not is_authorized():
+                    return self._reply({"error":"Endpoint enrolment is disabled until the current network is authorised."},403)
                 token=str(payload.get("token",""))
                 if len(token)<32 or len(token)>128: return self._reply({"error":"Invalid enrolment token."},401)
                 token_hash=_agent_hash(token); agent_id="nr-"+uuid.uuid4().hex[:20]
@@ -6262,6 +6264,8 @@ class AgentHubHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             if self.path.startswith("/agent/v1/commands"):
+                if not is_authorized():
+                    return self._reply({"error":"Command delivery is disabled until the current network is authorised."},403)
                 agent_id=_verify_agent_request(self,b"")
                 def _take(conn):
                     conn.execute("UPDATE agent_commands SET status='EXPIRED' WHERE agent_id=? AND status IN ('QUEUED','DELIVERED') AND expires_at<?",(agent_id,now_text()))
@@ -6292,6 +6296,8 @@ def start_agent_hub_status():
 
 def start_agent_hub():
     global AGENT_HUB, AGENT_HUB_THREAD
+    if not is_authorized():
+        return {"state":"BLOCKED","reason":"The current network profile is not authorised; endpoint management remains disabled."}
     if AGENT_HUB is not None:
         return {"state":"ONLINE","address":str(AGENT_HUB.server_address),"note":"Agent hub is already running."}
     if os.environ.get("NETWORKRADAR_AGENT_ENABLED", "0") != "1":
@@ -6319,6 +6325,8 @@ def start_agent_hub():
 
 
 def create_agent_enrollment_token(actor="local-user"):
+    if not is_authorized():
+        raise RuntimeError("The current network profile is not authorised; endpoint enrolment is disabled.")
     token=secrets.token_urlsafe(36); created=datetime.now(); expires=created+timedelta(minutes=15)
     def _w(conn):
         conn.execute("INSERT INTO agent_enrollment_tokens(token_hash,created_at,expires_at,created_by) VALUES(?,?,?,?)",(_agent_hash(token),created.strftime("%Y-%m-%d %H:%M:%S"),expires.strftime("%Y-%m-%d %H:%M:%S"),_clean(actor,80)))
@@ -6328,6 +6336,8 @@ def create_agent_enrollment_token(actor="local-user"):
 
 
 def queue_agent_command(agent_id, action, args=None, actor="local-user", confirmed=False):
+    if not is_authorized():
+        raise ValueError("The current network profile is not authorised; endpoint commands are disabled.")
     agent_id=str(agent_id or "")
     if not re.fullmatch(r"nr-[a-f0-9]{20}",agent_id): raise ValueError("Invalid agent identifier.")
     action=str(action or "").strip().lower(); spec=AGENT_ACTIONS.get(action)
