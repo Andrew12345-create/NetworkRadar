@@ -17,7 +17,10 @@ _VALID_LENGTHS = {6: "MA-L", 7: "MA-M", 9: "MA-S"}
 
 def normalise_mac_hex(value: Any) -> str:
     """Return twelve uppercase hex digits from a valid 48-bit MAC."""
-    raw = re.sub(r"[^0-9A-Fa-f]", "", str(value or "")).upper()
+    raw = str(value or "").strip()
+    if not raw or not re.fullmatch(r"[0-9A-Fa-f:\\-.\\s]+", raw):
+        return ""
+    raw = re.sub(r"[:\\-.\\s]", "", raw).upper()
     return raw if _HEX.fullmatch(raw) else ""
 
 
@@ -91,6 +94,8 @@ def lookup_ieee_assignment(mac: Any, assignments: Mapping[str, Any]) -> dict[str
         if isinstance(value, Mapping):
             organization = str(value.get("organization") or "").strip()
             registry = str(value.get("registry") or _VALID_LENGTHS[length]).upper()
+            if registry not in _VALID_LENGTHS.values() or len(prefix) != {"MA-L": 6, "MA-M": 7, "MA-S": 9}[registry]:
+                registry = _VALID_LENGTHS[length]
         else:
             organization = str(value).strip()
             registry = _VALID_LENGTHS[length]
