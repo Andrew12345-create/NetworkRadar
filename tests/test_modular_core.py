@@ -18,10 +18,13 @@ class StartupTests(unittest.TestCase):
     def test_lock_acquire_release(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "db" / ".lock"
-            acquire_instance_lock(path)
-            self.assertTrue(path.exists())
-            release_instance_lock()
-            acquire_instance_lock(path)
+            try:
+                acquire_instance_lock(path)
+                self.assertTrue(path.exists())
+                release_instance_lock()
+                acquire_instance_lock(path)
+            finally:
+                release_instance_lock()
 
     def test_port_conflict_is_explicit(self):
         sock = socket.socket()
