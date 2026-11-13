@@ -187,7 +187,8 @@ try:
 except ImportError:
     paramiko = None
 
-# The identity engine is a maintained package module and is covered by tests.
+# The package metadata is the single source of the application version.
+from networkradar_modules import __version__ as APP_VERSION
 from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
 
 class StartupError(RuntimeError):
@@ -295,7 +296,7 @@ def engine_record(name, reported_status, *, last_error="", configured=True, deta
     else: state = "UNKNOWN"
     return {"engine": str(name), "status": state, "reported_status": raw, "last_error": str(last_error or "")[:500], "details": details or {}}
 
-APP_VERSION = "12.0.3"
+
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 LOG_DIR = DATA / "logs"
