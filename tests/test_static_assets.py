@@ -31,6 +31,7 @@ class DashboardAssetTests(unittest.TestCase):
             'src="/assets/dashboard.js?v={APP_VERSION}" defer', html
         )
         self.assertNotIn("<style", html.lower())
+        self.assertNotRegex(html, r"\\sstyle=")
         script_tags = re.findall(r"<script\b[^>]*>", html, flags=re.IGNORECASE)
         self.assertTrue(script_tags)
         self.assertTrue(all(re.search(r"\bsrc=", tag, flags=re.IGNORECASE) for tag in script_tags))
