@@ -21,6 +21,18 @@ This file records the current repository snapshot's declared application version
 - Updated installation, data-safety, version and architecture documentation to match the actual repository layout.
 - Added application-level regression tests for identity scoring and approval freshness.
 
+## Discovery-engine modularisation
+
+The discovery refactor has begun without changing the public application entry points or device-record shape:
+
+- Extracted Nmap host-discovery execution and XML parsing into `networkradar_modules/discovery/nmap.py`. The application supplies its current network scope, Nmap executable and log path.
+- Extracted local ARP cache collection and Windows-compatible output parsing into `networkradar_modules/discovery/arp.py`.
+- Extracted MAC normalisation, usable IPv4 selection, default-route adapter selection and TShark interface matching into `networkradar_modules/discovery/adapters.py`.
+- Extracted device-family inference into `networkradar_modules/discovery/classification.py`. The helper is now independent of application locks and receives the gateway address explicitly.
+- Added isolated tests for scanner execution, XML parsing, ARP parsing, interface selection and device classification.
+
+The higher-level inventory orchestration, multi-source enrichment and database persistence remain in `networkradar.py` for the next refactor stage.
+
 ## Known limitations still under audit
 
 - The application remains largely monolithic; startup and diagnostics helpers in the package are not yet the runtime's single source of truth.
