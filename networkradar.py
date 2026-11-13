@@ -1852,6 +1852,11 @@ def persist_identity(conn, device, ts):
         "SELECT device_id, identity_basis FROM devices WHERE ip=?",
         (device["ip"],)).fetchone()
     old_id, old_basis = (old[0], old[1]) if old else ("", "")
+    if (old_id and old_id != did and str(basis).startswith("IP fallback")
+            and old_basis and not str(old_basis).startswith("IP fallback")):
+        # Preserve the device's existing ID on this IP, but stop using the
+        # newly randomised MAC as a cross-IP identity anchor.
+        did = old_id
     if old_id and old_id != did and str(old_basis or "").startswith("IP fallback"):
         hist = conn.execute(
             "SELECT ip, mac, first_seen, last_seen FROM device_ip_history WHERE device_id=?",
