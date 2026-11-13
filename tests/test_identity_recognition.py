@@ -17,6 +17,8 @@ class RecognitionFamilyTests(unittest.TestCase):
 
     def test_product_rules_do_not_use_manufacturer_or_service_text(self):
         self.assertTrue(recognition_family_compatible("product", "product"))
+        self.assertTrue(recognition_family_compatible("product", "snmp"))
+        self.assertTrue(recognition_family_compatible("product", "upnp"))
         self.assertFalse(recognition_family_compatible("product", "reported"))
         self.assertFalse(recognition_family_compatible("product", "service"))
 
