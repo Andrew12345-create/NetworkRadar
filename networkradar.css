@@ -1621,3 +1621,51 @@ body.nav-collapsed #sideNavigation a.active::after {
     max-height:30vh
   }
 }
+
+
+/* Layout and spacing utilities used by the dashboard markup. */
+.row-between {
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.row-between-wide {
+  display:flex;
+  justify-content:space-between;
+  gap:14px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.button-row {
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.flex-fill { flex:1; }
+.mt-8 { margin-top:8px; }
+.mt-10 { margin-top:10px; }
+.mt-12 { margin-top:12px; }
+.mt-14 { margin-top:14px; }
+.mt-20 { margin-top:20px; }
+.mb-10 { margin-bottom:10px; }
+.mb-14 { margin-bottom:14px; }
+.m-0 { margin:0; }
+.my-12 { margin:12px 0; }
+.text-14 { font-size:14px; }
+.text-18 { font-size:18px; }
+.wrap-anywhere { overflow-wrap:anywhere; }
+.min-w-240 { min-width:240px; }
+.min-w-220 { min-width:220px; }
+.small-note { font-size:12px; }
+.pre-scroll {
+  white-space:pre-wrap;
+  overflow:auto;
+  max-height:340px;
+}
+.pre-scroll-320 {
+  white-space:pre-wrap;
+  overflow:auto;
+  max-height:320px;
+}
