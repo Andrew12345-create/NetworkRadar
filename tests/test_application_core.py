@@ -203,5 +203,97 @@ class NetworkApprovalFreshnessTests(unittest.TestCase):
         self.assertFalse(app._profile_authorization_fresh(profile, now)[0])
 
 
+
+class StrongNetworkAnchorAuthorizationTests(unittest.TestCase):
+    def _detected(self, **extra):
+        detected = {
+            "fingerprint": "test-fingerprint",
+            "confidence": 90,
+            "gateway_mac": "",
+            "bssid": "",
+            "_classification": {"fingerprint": app.Conf.CONFIRMED},
+        }
+        detected.update(extra)
+        return detected
+
+    def _approved_profile(self):
+        return {
+            "id": "test-network",
+            "fingerprint": "test-fingerprint",
+            "approved": True,
+            "last_authorized": datetime.now().isoformat(),
+        }
+
+    def test_missing_gateway_mac_and_bssid_blocks_active_discovery(self):
+        allowed, decision, reasons, _ = app._authz_decision(
+            self._detected(), [self._approved_profile()]
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(decision, "INDETERMINATE")
+        self.assertIn("No strong network anchor", " ".join(reasons))
+
+    def test_valid_gateway_mac_is_a_strong_anchor(self):
+        allowed, decision, _, _ = app._authz_decision(
+            self._detected(gateway_mac="00:11:22:33:44:55"),
+            [self._approved_profile()],
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(decision, "AUTHORISED")
+
+    def test_valid_interface_bssid_is_a_strong_anchor(self):
+        allowed, decision, _, _ = app._authz_decision(
+            self._detected(bssid="AA:BB:CC:DD:EE:FF"),
+            [self._approved_profile()],
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(decision, "AUTHORISED")
+
+    def test_invalid_or_multicast_anchor_does_not_authorise(self):
+        for value in ("00:00:00:00:00:00", "FF:FF:FF:FF:FF:FF", "bad-mac"):
+            with self.subTest(value=value):
+                allowed, _, reasons, _ = app._authz_decision(
+                    self._detected(gateway_mac=value),
+                    [self._approved_profile()],
+                )
+                self.assertFalse(allowed)
+                self.assertIn("No strong network anchor", " ".join(reasons))
+
+
+class WifiInterfaceParsingTests(unittest.TestCase):
+    def test_uses_bssid_from_exact_connected_interface(self):
+        output = """Name                   : Wi-Fi
+Description            : Adapter A
+State                  : connected
+SSID                   : Home Network
+BSSID                  : aa:bb:cc:dd:ee:01
+
+Name                   : Wi-Fi 2
+Description            : Adapter B
+State                  : connected
+SSID                   : Guest Network
+BSSID                  : aa:bb:cc:dd:ee:02
+"""
+        self.assertEqual(
+            app._parse_wifi_interface_blocks(output, "Wi-Fi 2"),
+            ("Guest Network", "AA:BB:CC:DD:EE:02"),
+        )
+
+    def test_does_not_use_bssid_from_another_interface(self):
+        output = """Name : Wi-Fi
+State : connected
+SSID : Home
+BSSID : aa:bb:cc:dd:ee:01
+"""
+        self.assertEqual(app._parse_wifi_interface_blocks(output, "Ethernet"), ("", ""))
+
+    def test_disconnected_interface_has_no_anchor(self):
+        output = """Name : Wi-Fi
+State : disconnected
+SSID : Home
+BSSID : aa:bb:cc:dd:ee:01
+"""
+        self.assertEqual(app._parse_wifi_interface_blocks(output, "Wi-Fi"), ("", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
