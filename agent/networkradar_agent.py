@@ -29,7 +29,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 AGENT_VERSION = "1.0.0"
-CAPABILITIES = ["inventory"]
+CAPABILITIES = ["inventory-report"]
 _CONFIG_MAGIC = b"NRDPAPI1"
 _MAX_RESPONSE = 65536
 
