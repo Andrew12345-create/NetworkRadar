@@ -120,7 +120,15 @@ class UpnpDescriptionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_upnp_description(b"x" * (256 * 1024 + 1))
 
-    def test_returns_empty_when_device_element_is_missing(self):
+
+    def test_child_model_is_not_attributed_to_parent(self):
+        xml = b'''<root><device><friendlyName>Gateway</friendlyName>
+        <deviceList><device><modelName>Child Radio</modelName></device></deviceList>
+        </device></root>'''
+        result = parse_upnp_description(xml)
+        self.assertEqual(result["modelname"], "")
+        self.assertEqual(result["embedded_devices"][0]["modelname"], "Child Radio")
+\n    def test_returns_empty_when_device_element_is_missing(self):
         self.assertEqual(parse_upnp_description(b"<root><other/></root>"), {})
 
 
