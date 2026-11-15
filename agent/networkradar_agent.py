@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import hashlib
+import getpass
 import hmac
 import http.client
 import json
@@ -316,7 +317,7 @@ $result | ConvertTo-Json -Depth 7 -Compress
     env["NR_INCLUDE_SERIAL"] = "1" if include_serial else "0"
     completed = runner(
         [powershell, "-NoLogo", "-NoProfile", "-NonInteractive",
-         "-ExecutionPolicy", "Bypass", "-Command", script],
+         "-Command", script],
         capture_output=True, text=True, timeout=30,
         encoding="utf-8", errors="replace", env=env,
     )
@@ -442,9 +443,12 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.enrol:
-            if not (args.server and args.token and args.server_cert_sha256):
-                raise ValueError("--enrol requires --server, --token and --server-cert-sha256.")
-            config = enrol(args.server, args.token, args.server_cert_sha256)
+            if not (args.server and args.server_cert_sha256):
+                raise ValueError("--enrol requires --server and --server-cert-sha256.")
+            token = args.token or getpass.getpass("Single-use NetworkRadar enrolment token: ")
+            if not token.strip():
+                raise ValueError("An enrolment token is required.")
+            config = enrol(args.server, token.strip(), args.server_cert_sha256)
             path = save_config(config, args.config)
             print(f"Endpoint enrolled. Encrypted agent configuration saved to: {path}")
         else:
