@@ -5203,6 +5203,40 @@ AGENT_ACTIONS = {
     "shutdown_computer": {"confirmation": True, "description": "Shut down the computer after a 60-second delay"},
     "restart_service": {"confirmation": True, "description": "Restart one explicitly named non-critical Windows service"},
 }
+
+_AGENT_CAPABILITIES = frozenset({"inventory", "processes", "services", "lock", "power-control"})
+_AGENT_ACTION_CAPABILITY = {
+    "refresh_inventory": "inventory",
+    "list_processes": "processes",
+    "list_services": "services",
+    "lock_workstation": "lock",
+    "restart_computer": "power-control",
+    "shutdown_computer": "power-control",
+    "restart_service": "services",
+}
+
+
+def _normalise_agent_capabilities(raw):
+    """Constrain an agent's advertised capabilities to known server features.
+
+    Older agents that omit the field retain the historical capability set.
+    New clients must explicitly request only the capabilities they implement.
+    """
+    if raw is None:
+        return sorted(_AGENT_CAPABILITIES)
+    if not isinstance(raw, list):
+        return ["inventory"]
+    selected = {
+        str(item).strip().lower()
+        for item in raw
+        if isinstance(item, str) and str(item).strip().lower() in _AGENT_CAPABILITIES
+    }
+    return sorted(selected or {"inventory"})
+
+
+def _agent_supports_action(capabilities, action):
+    required = _AGENT_ACTION_CAPABILITY.get(str(action or "").strip().lower())
+    return bool(required and required in set(capabilities or []))
 _AGENT_CRITICAL_SERVICES = {"rpcss", "dcomlaunch", "lsass", "winlogon", "eventlog", "samss", "plugplay", "power", "profsvc", "winmgmt"}
 
 
@@ -5308,11 +5342,12 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                 platform_name=_clean(payload.get("platform","unknown"),80)
                 os_version=_clean(payload.get("os_version",""),160)
                 agent_version=_clean(payload.get("agent_version",""),40)
+                capabilities = _normalise_agent_capabilities(payload.get("capabilities"))
                 def _enrol(conn):
                     row=conn.execute("SELECT expires_at,used_at FROM agent_enrollment_tokens WHERE token_hash=?",(token_hash,)).fetchone()
                     if not row or row[1] or row[0] < now_text(): raise PermissionError("Enrolment token is invalid, expired or already used.")
                     conn.execute("UPDATE agent_enrollment_tokens SET used_at=? WHERE token_hash=?",(now_text(),token_hash))
-                    conn.execute("INSERT INTO remote_agents(agent_id,hostname,platform,os_version,agent_version,secret_hash,status,enrolled_at,last_seen,last_ip,capabilities_json) VALUES(?,?,?,?,?,?,'ONLINE',?,?,?,?)",(agent_id,hostname,platform_name,os_version,agent_version,secret_hash,now_text(),now_text(),self.client_address[0],json.dumps(["inventory","processes","services","lock","power-control"])) )
+                    conn.execute("INSERT INTO remote_agents(agent_id,hostname,platform,os_version,agent_version,secret_hash,status,enrolled_at,last_seen,last_ip,capabilities_json) VALUES(?,?,?,?,?,?,'ONLINE',?,?,?,?)",(agent_id,hostname,platform_name,os_version,agent_version,secret_hash,now_text(),now_text(),self.client_address[0],json.dumps(capabilities)) )
                     conn.execute("INSERT INTO agent_audit_events(timestamp,agent_id,actor,action,outcome,details) VALUES(?,?,?,?,?,?)",(now_text(),agent_id,"endpoint","ENROL","SUCCESS",hostname))
                 DB_MANAGER.write(_enrol)
                 # Give this endpoint only its own derived HMAC key. Never disclose
@@ -5453,9 +5488,23 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                 agent_id=_verify_agent_request(self,b"")
                 def _take(conn):
                     conn.execute("UPDATE agent_commands SET status='EXPIRED' WHERE agent_id=? AND status IN ('QUEUED','DELIVERED') AND expires_at<?",(agent_id,now_text()))
-                    rows=conn.execute("SELECT id,action,args_json FROM agent_commands WHERE agent_id=? AND status='QUEUED' AND expires_at>=? ORDER BY id LIMIT 5",(agent_id,now_text())).fetchall()
-                    for row in rows: conn.execute("UPDATE agent_commands SET status='DELIVERED' WHERE id=? AND status='QUEUED'",(row[0],))
-                    return [{"id":r[0],"action":r[1],"args":json.loads(r[2] or "{}")} for r in rows]
+                    agent=conn.execute("SELECT capabilities_json FROM remote_agents WHERE agent_id=? AND status!='REVOKED'",(agent_id,)).fetchone()
+                    if not agent: return []
+                    try:
+                        capabilities=json.loads(agent[0] or "[]")
+                    except (TypeError, ValueError):
+                        capabilities=[]
+                    rows=conn.execute("SELECT id,action,args_json FROM agent_commands WHERE agent_id=? AND status='QUEUED' AND expires_at>=? ORDER BY id LIMIT 20",(agent_id,now_text())).fetchall()
+                    deliver=[]
+                    for row in rows:
+                        if not _agent_supports_action(capabilities, row[1]):
+                            conn.execute("UPDATE agent_commands SET status='REJECTED' WHERE id=? AND status='QUEUED'",(row[0],))
+                            conn.execute("INSERT INTO agent_audit_events(timestamp,agent_id,actor,action,outcome,details) VALUES(?,?,?,?,?,?)",(now_text(),agent_id,"server",row[1],"REJECTED","Agent capability does not include this action."))
+                            continue
+                        if len(deliver)<5:
+                            conn.execute("UPDATE agent_commands SET status='DELIVERED' WHERE id=? AND status='QUEUED'",(row[0],))
+                            deliver.append({"id":row[0],"action":row[1],"args":json.loads(row[2] or "{}")})
+                    return deliver
                 return self._reply({"commands":DB_MANAGER.write(_take)})
             return self._reply({"error":"Not found"},404)
         except PermissionError as exc: return self._reply({"error":str(exc)},401)
@@ -5537,8 +5586,15 @@ def queue_agent_command(agent_id, action, args=None, actor="local-user", confirm
             raise ValueError("Invalid or protected Windows service name.")
         clean_args={"service_name":name}
     def _w(conn):
-        row=conn.execute("SELECT status FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
+        row=conn.execute("SELECT status,capabilities_json FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
         if not row or row[0]=="REVOKED": raise ValueError("Agent not found or revoked.")
+        try:
+            capabilities=json.loads(row[1] or "[]")
+        except (TypeError, ValueError):
+            capabilities=[]
+        if not _agent_supports_action(capabilities, action):
+            required=_AGENT_ACTION_CAPABILITY.get(action, "unknown")
+            raise ValueError(f"Agent does not advertise the required '{required}' capability.")
         cur=conn.execute("INSERT INTO agent_commands(agent_id,action,args_json,status,created_at,expires_at,approved_by) VALUES(?,?,?,'QUEUED',?,?,?)",(agent_id,action,json.dumps(clean_args),now_text(),(datetime.now()+timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"),_clean(actor,80)))
         conn.execute("INSERT INTO agent_audit_events(timestamp,agent_id,actor,action,outcome,details) VALUES(?,?,?,?,?,?)",(now_text(),agent_id,_clean(actor,80),action,"QUEUED",json.dumps(clean_args)))
         return cur.lastrowid
