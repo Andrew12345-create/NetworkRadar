@@ -97,7 +97,7 @@ To run continuously at the default five-minute interval:
 python .\networkradar_agent.py
 ```
 
-To use a different interval between 60 and 3600 seconds:
+To use a different interval between 60 and 600 seconds:
 
 ```powershell
 python .\networkradar_agent.py --interval 600
