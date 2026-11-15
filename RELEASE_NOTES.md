@@ -10,6 +10,7 @@
 - Added a dashboard Network Workspaces explorer with a workspace selector, interface history and device-sighting view.
 - Added read-only API routes for workspace directory, interface observations and workspace device sightings.
 - Fixed a security-critical issue: when a subnet-keyed legacy profile receives a different fingerprint, its approval and approval timestamp are reset. A different network sharing the subnet cannot inherit approval.
+- Tightened active-discovery authorisation to require an observed gateway MAC or interface-specific BSSID. A high score based only on subnet, gateway IP, DNS, DHCP or SSID is not enough to authorise a network.
 - Preserved existing database tables and records; workspace tables and indexes are additive.
 
 ## Important boundaries
