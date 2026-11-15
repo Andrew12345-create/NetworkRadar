@@ -5204,7 +5204,7 @@ AGENT_ACTIONS = {
     "restart_service": {"confirmation": True, "description": "Restart one explicitly named non-critical Windows service"},
 }
 
-_AGENT_CAPABILITIES = frozenset({"inventory", "processes", "services", "lock", "power-control"})
+_AGENT_CAPABILITIES = frozenset({"inventory", "inventory-report", "processes", "services", "lock", "power-control"})
 _AGENT_ACTION_CAPABILITY = {
     "refresh_inventory": "inventory",
     "list_processes": "processes",
@@ -5225,13 +5225,13 @@ def _normalise_agent_capabilities(raw):
     if raw is None:
         return sorted(_AGENT_CAPABILITIES)
     if not isinstance(raw, list):
-        return ["inventory"]
+        return ["inventory-report"]
     selected = {
         str(item).strip().lower()
         for item in raw
         if isinstance(item, str) and str(item).strip().lower() in _AGENT_CAPABILITIES
     }
-    return sorted(selected or {"inventory"})
+    return sorted(selected or {"inventory-report"})
 
 
 def _agent_supports_action(capabilities, action):
