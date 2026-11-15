@@ -103,6 +103,27 @@ class PinnedHTTPSClient:
         self.pin = normalise_certificate_pin(certificate_pin)
         self.timeout = max(2.0, min(float(timeout), 30.0))
 
+    def verify_certificate(self) -> str:
+        """Verify the currently presented leaf certificate without sending HTTP."""
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        connection = http.client.HTTPSConnection(
+            self.host, self.port, context=context, timeout=self.timeout
+        )
+        try:
+            connection.connect()
+            if connection.sock is None:
+                raise ConnectionError("TLS socket was not established.")
+            certificate = connection.sock.getpeercert(binary_form=True)
+            actual_pin = hashlib.sha256(certificate or b"").hexdigest()
+            if not certificate or not hmac.compare_digest(actual_pin, self.pin):
+                raise ssl.SSLError("NetworkRadar server certificate pin mismatch.")
+            return actual_pin
+        finally:
+            connection.close()
+
     def request(self, method: str, path: str, body: bytes = b"",
                 headers: dict[str, str] | None = None) -> tuple[int, dict]:
         if not path.startswith("/") or "?" in path or "#" in path:
@@ -440,6 +461,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--token", help="Single-use enrolment token (not saved).")
     parser.add_argument("--server-cert-sha256",
                         help="SHA-256 fingerprint of the server's TLS leaf certificate.")
+    parser.add_argument("--update-server-cert-sha256",
+                        help="Rotate the stored TLS pin after verifying the new certificate.")
+    parser.add_argument("--confirm-pin-rotation", action="store_true",
+                        help="Confirm an explicitly supplied TLS certificate-pin rotation.")
     parser.add_argument("--config", help="Encrypted DPAPI configuration file path.")
     parser.add_argument("--once", action="store_true",
                         help="Collect and report once, then exit.")
@@ -453,6 +478,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.update_server_cert_sha256:
+            if not args.confirm_pin_rotation:
+                raise ValueError("Pin rotation requires --confirm-pin-rotation.")
+            config = load_config(args.config)
+            new_pin = normalise_certificate_pin(args.update_server_cert_sha256)
+            PinnedHTTPSClient(config["server_url"], new_pin).verify_certificate()
+            config["certificate_pin"] = new_pin
+            path = save_config(config, args.config)
+            print(f"TLS certificate pin updated after a successful pinned handshake: {path}")
+            return 0
         if args.enrol:
             if not (args.server and args.server_cert_sha256):
                 raise ValueError("--enrol requires --server and --server-cert-sha256.")
