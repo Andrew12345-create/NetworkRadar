@@ -10,6 +10,7 @@ class NetworkWorkspaceTests(unittest.TestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.executescript("""
             CREATE TABLE network_workspaces(network_id TEXT PRIMARY KEY, display_name TEXT, network_type TEXT, created_at TEXT, last_seen TEXT, current_fingerprint TEXT, status TEXT);
+            CREATE TABLE network_workspace_authorizations(network_id TEXT NOT NULL, fingerprint TEXT NOT NULL, approved INTEGER DEFAULT 0, last_authorized TEXT DEFAULT '', approved_by TEXT DEFAULT '', updated_at TEXT NOT NULL, PRIMARY KEY(network_id,fingerprint));
             CREATE TABLE network_fingerprint_history(fingerprint TEXT PRIMARY KEY, network_id TEXT, first_seen TEXT, last_seen TEXT, network TEXT, gateway TEXT, gateway_mac TEXT, dns_servers TEXT, ssid TEXT, bssid TEXT, interface_name TEXT, interface_guid TEXT, confidence INTEGER, fingerprint_raw TEXT);
             CREATE TABLE network_interface_observations(id INTEGER PRIMARY KEY, network_id TEXT, timestamp TEXT, interface_index INTEGER, interface_name TEXT, interface_guid TEXT, interface_description TEXT, interface_type TEXT, status TEXT, ip TEXT, prefix INTEGER, network TEXT, gateway TEXT, gateway_mac TEXT, dns_servers TEXT, dhcp TEXT, ssid TEXT, bssid TEXT, route_metric INTEGER, adapter_mac TEXT, is_primary INTEGER);
         """)
@@ -44,6 +45,14 @@ class NetworkWorkspaceTests(unittest.TestCase):
         self.assertTrue(has_strong_network_anchor({
             "fingerprint_raw": '{"bssid":"aa:bb:cc:dd:ee:ff"}'
         }))
+
+    def test_same_subnet_workspaces_have_isolated_authorisations(self):
+        home = ensure_workspace(self.db, {"fingerprint":"home-fp","network":"192.168.1.0/24"}, "t1")
+        office = ensure_workspace(self.db, {"fingerprint":"office-fp","network":"192.168.1.0/24"}, "t2")
+        self.db.execute("UPDATE network_workspace_authorizations SET approved=1,last_authorized='approved' WHERE network_id=?", (home,))
+        states = dict(self.db.execute("SELECT network_id,approved FROM network_workspace_authorizations"))
+        self.assertEqual(states[home], 1)
+        self.assertEqual(states[office], 0)
 
     def test_same_fingerprint_reuses_workspace(self):
         a = {"fingerprint": "fp-a", "network": "10.0.0.0/24"}
