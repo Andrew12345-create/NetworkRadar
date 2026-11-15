@@ -5949,7 +5949,7 @@ def phantom_probe_device(ip):
         summary = "No tested native management service is reachable. Device discovery remains available."
     # Presence of an agent takes precedence over inferred agentless capability.
     with DB_MANAGER.read() as conn:
-        agent = conn.execute("SELECT agent_id FROM remote_agents WHERE last_ip=? AND status!='REVOKED' AND last_seen>=? ORDER BY last_seen DESC LIMIT 1", (target, (datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"))).fetchone()
+        agent = conn.execute("SELECT agent_id FROM remote_agents WHERE last_ip=? AND status!='REVOKED' AND last_seen>=? ORDER BY last_seen DESC LIMIT 1", (target, (datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"))).fetchone()
     if agent:
         readiness, score = "AGENT_MANAGED", 100
         summary = "A NetworkRadar agent is enrolled for this endpoint. Agentless capabilities remain separately visible."
@@ -5988,7 +5988,7 @@ def phantom_access_inventory():
             a.last_probe,a.probes_json,a.readiness,a.readiness_score
             FROM devices d LEFT JOIN agentless_device_access a ON a.ip=d.ip
             ORDER BY CASE d.status WHEN 'ONLINE' THEN 0 ELSE 1 END,d.ip""").fetchall()
-        agents = {r[0] for r in conn.execute("SELECT last_ip FROM remote_agents WHERE status!='REVOKED' AND last_ip!='' AND last_seen>=?", ((datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()}
+        agents = {r[0] for r in conn.execute("SELECT last_ip FROM remote_agents WHERE status!='REVOKED' AND last_ip!='' AND last_seen>=?", ((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()}
         recent_reads = {}
         cutoff = (datetime.now()-timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
         for audit in conn.execute("""SELECT timestamp,action,details FROM agent_audit_events
@@ -6281,7 +6281,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(phantom_access_summary())
             with DB_MANAGER.read() as conn:
                 if p.path == "/api/command/agents":
-                    rows=conn.execute("SELECT agent_id,hostname,platform,os_version,agent_version,CASE WHEN status='REVOKED' THEN status WHEN last_seen<? THEN 'OFFLINE' ELSE status END AS display_status,enrolled_at,last_seen,last_ip,inventory_json,capabilities_json,revoked_at FROM remote_agents ORDER BY last_seen DESC",((datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
+                    rows=conn.execute("SELECT agent_id,hostname,platform,os_version,agent_version,CASE WHEN status='REVOKED' THEN status WHEN last_seen<? THEN 'OFFLINE' ELSE status END AS display_status,enrolled_at,last_seen,last_ip,inventory_json,capabilities_json,revoked_at FROM remote_agents ORDER BY last_seen DESC",((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
                     out=[]
                     for r in rows:
                         try: inv=json.loads(r[9] or "{}")
@@ -6290,7 +6290,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(out)
                 if p.path == "/api/command/summary":
                     total=conn.execute("SELECT COUNT(*) FROM remote_agents WHERE status!='REVOKED'").fetchone()[0]
-                    online=conn.execute("SELECT COUNT(*) FROM remote_agents WHERE status!='REVOKED' AND last_seen>=?",((datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchone()[0]
+                    online=conn.execute("SELECT COUNT(*) FROM remote_agents WHERE status!='REVOKED' AND last_seen>=?",((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchone()[0]
                     pending=conn.execute("SELECT COUNT(*) FROM agent_commands WHERE status='QUEUED'").fetchone()[0]
                     hub=start_agent_hub_status()
                     return self.send_json({"managed":total,"online":online,"queued_commands":pending,"hub":hub})
@@ -6679,7 +6679,7 @@ class Handler(BaseHTTPRequestHandler):
                         last_seen,last_ip,inventory_json,capabilities_json
                         FROM remote_agents WHERE status!='REVOKED'
                         ORDER BY last_seen DESC LIMIT 500""",
-                        ((datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"),))
+                        ((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),))
                     device_mac = _normalise_mac(d[1] or "")
                     agent_matches = []
                     for ar in agent_rows:
