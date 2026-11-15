@@ -82,7 +82,7 @@ def record_interface_observation(conn, network_id, interface, timestamp, is_prim
         return
     conn.execute(
         "INSERT INTO network_interface_observations(network_id,timestamp,interface_index,interface_name,interface_guid,interface_description,interface_type,status,ip,prefix,network,gateway,gateway_mac,dns_servers,dhcp,ssid,bssid,route_metric,adapter_mac,is_primary) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (network_id, timestamp, int(interface.get("idx") or 0),
+        (network_id, timestamp, int(interface.get("idx") or interface.get("interface_index") or 0),
          str(interface.get("interface") or ""), str(interface.get("interface_guid") or ""),
          str(interface.get("interface_description") or ""), str(interface.get("interface_type") or "OTHER"),
          str(interface.get("status") or ""), str(interface.get("ip") or ""), interface.get("prefix"),
