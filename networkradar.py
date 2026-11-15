@@ -996,7 +996,8 @@ def _gateway_mac_via_neighbor(gw_ip, interface_index=None):
             f"Get-NetNeighbor -AddressFamily IPv4{interface_filter} "
             "-ErrorAction SilentlyContinue | "
             "Select-Object IPAddress,InterfaceIndex,LinkLayerAddress,State "
-            "| ConvertTo-Json -Depth 3"
+            "| ConvertTo-Json -Depth 3",
+            label="Get-NetNeighbor",
         )
         for row in rows:
             try:
@@ -1453,6 +1454,9 @@ def is_authorized():
         return bool(NET_CTX.get("authorized"))
 
 def authorize_current(actor="local-user"):
+    # Approval is a security-sensitive write: refresh live interface evidence
+    # immediately before reading the fingerprint and recording consent.
+    refresh_network_context()
     with NET_LOCK:
         current_context = dict(NET_CTX)
         fp = NET_CTX.get("fingerprint", "")
