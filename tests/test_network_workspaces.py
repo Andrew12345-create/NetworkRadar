@@ -45,6 +45,12 @@ class NetworkWorkspaceTests(unittest.TestCase):
         self.assertTrue(has_strong_network_anchor({
             "fingerprint_raw": '{"bssid":"aa:bb:cc:dd:ee:ff"}'
         }))
+        for invalid in ("00:00:00:00:00:00", "FF:FF:FF:FF:FF:FF",
+                        "01:11:22:33:44:55", "not-a-mac"):
+            with self.subTest(invalid=invalid):
+                self.assertFalse(has_strong_network_anchor({
+                    "fingerprint_raw": {"gateway_mac": invalid}
+                }))
 
     def test_same_subnet_workspaces_have_isolated_authorisations(self):
         home = ensure_workspace(self.db, {"fingerprint":"home-fp","network":"192.168.1.0/24"}, "t1")
@@ -61,9 +67,24 @@ class NetworkWorkspaceTests(unittest.TestCase):
         self.assertEqual(ensure_workspace(self.db, {"network": "10.0.0.0/24"}, "t"), "")
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM network_workspaces").fetchone()[0], 0)
     def test_wifi_parser_keeps_interfaces_separate(self):
-        rows = parse_netsh_wlan_interfaces("Name : Wi-Fi\nSSID : Home\nBSSID : aa:bb:cc:dd:ee:01\n\nName : Wi-Fi 2\nSSID : Guest\nBSSID : aa:bb:cc:dd:ee:02")
+        rows = parse_netsh_wlan_interfaces("Name : Wi-Fi\nState : connected\nSSID : Home\nBSSID : aa:bb:cc:dd:ee:01\n\nName : Wi-Fi 2\nState : connected\nSSID : Guest\nBSSID : aa:bb:cc:dd:ee:02")
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[1]["ssid"], "Guest")
+    def test_disconnected_wifi_interface_does_not_supply_a_bssid(self):
+        rows = parse_netsh_wlan_interfaces(
+            "Name : Wi-Fi\nState : disconnected\nSSID : Home\n"
+            "BSSID : aa:bb:cc:dd:ee:01"
+        )
+        self.assertEqual(rows[0]["bssid"], "")
+        self.assertEqual(rows[0]["ssid"], "")
+
+    def test_invalid_bssid_is_not_retained_as_network_anchor(self):
+        rows = parse_netsh_wlan_interfaces(
+            "Name : Wi-Fi\nState : connected\nSSID : Home\n"
+            "BSSID : ff:ff:ff:ff:ff:ff"
+        )
+        self.assertEqual(rows[0]["bssid"], "")
+
     def test_interface_type_classification(self):
         self.assertEqual(classify_interface_type("Wi-Fi"), "WIFI")
         self.assertEqual(classify_interface_type("Ethernet 2"), "ETHERNET")

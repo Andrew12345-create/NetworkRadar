@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone, timedelta
 
 import networkradar as app
@@ -201,6 +202,50 @@ class NetworkApprovalFreshnessTests(unittest.TestCase):
         now = datetime(2026, 1, 1, 12, 0, 0)
         profile = {"last_authorized": "2026-01-01 12:10:00"}
         self.assertFalse(app._profile_authorization_fresh(profile, now)[0])
+
+
+class GatewayNeighbourRefreshTests(unittest.TestCase):
+    @patch.object(app.subprocess, "run")
+    @patch.object(app, "_ps")
+    def test_gateway_ping_primes_cache_then_retries_selected_interface(self, ps, run):
+        ps.side_effect = [
+            [],
+            [{
+                "IPAddress": "192.168.1.1",
+                "InterfaceIndex": 7,
+                "LinkLayerAddress": "aa-bb-cc-dd-ee-ff",
+                "State": "Reachable",
+            }],
+        ]
+        result = app._gateway_mac_via_neighbor("192.168.1.1", 7)
+        self.assertEqual(result, "AA:BB:CC:DD:EE:FF")
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0],
+                         ["ping", "-n", "1", "-w", "900", "192.168.1.1"])
+        self.assertIn("-InterfaceIndex 7", ps.call_args_list[0].args[0])
+        self.assertIn("-InterfaceIndex 7", ps.call_args_list[1].args[0])
+
+    @patch.object(app.subprocess, "run")
+    @patch.object(app, "_ps")
+    def test_invalid_gateway_is_not_probed(self, ps, run):
+        self.assertIsNone(app._gateway_mac_via_neighbor("not-an-ip", 7))
+        ps.assert_not_called()
+        run.assert_not_called()
+
+    @patch.object(app.subprocess, "run")
+    @patch.object(app, "_ps")
+    def test_neighbour_from_another_interface_is_rejected(self, ps, run):
+        ps.side_effect = [
+            [{
+                "IPAddress": "192.168.1.1",
+                "InterfaceIndex": 8,
+                "LinkLayerAddress": "aa-bb-cc-dd-ee-ff",
+                "State": "Reachable",
+            }],
+            [],
+        ]
+        self.assertIsNone(app._gateway_mac_via_neighbor("192.168.1.1", 7))
+        run.assert_called_once()
 
 
 if __name__ == "__main__":

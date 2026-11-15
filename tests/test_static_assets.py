@@ -24,8 +24,9 @@ class DashboardAssetTests(unittest.TestCase):
     def test_html_references_both_external_assets(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         source = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
+        # A harmless asset-specific cache-busting suffix may follow the app version.
         self.assertIn(
-            'href="/assets/networkradar.css?v={APP_VERSION}"', html
+            'href="/assets/networkradar.css?v={APP_VERSION}', html
         )
         self.assertIn(
             'src="/assets/dashboard.js?v={APP_VERSION}" defer', html
