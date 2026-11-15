@@ -6673,10 +6673,12 @@ class Handler(BaseHTTPRequestHandler):
                         "last_seen": r[9], "status": r[10]} for r in rows])
 
                 if p.path == "/api/profiles":
-                    rows = conn.execute("""SELECT network, fingerprint, first_seen,
-                        last_seen, interface, gateway, gateway_mac, ssid, approved,
-                        profile_name, dns_servers, adapter_mac, confidence
-                        FROM network_profiles ORDER BY last_seen DESC LIMIT 100""").fetchall()
+                    rows = conn.execute("""SELECT p.network, p.fingerprint, p.first_seen,
+                        p.last_seen, p.interface, p.gateway, p.gateway_mac, p.ssid,
+                        COALESCE((SELECT a.approved FROM network_workspace_authorizations a
+                                  WHERE a.fingerprint=p.fingerprint LIMIT 1),0),
+                        p.profile_name, p.dns_servers, p.adapter_mac, p.confidence
+                        FROM network_profiles p ORDER BY p.last_seen DESC LIMIT 100""").fetchall()
                     with NET_LOCK:
                         cur_fp = NET_CTX.get("fingerprint", "")
                     return self.send_json([{"network": r[0], "fingerprint": r[1],
