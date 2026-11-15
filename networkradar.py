@@ -870,38 +870,122 @@ def _ps(cmd, timeout=15):
         return []
     return data if isinstance(data, list) else [data]
 
-def _gateway_mac_via_neighbor(gw_ip):
-    if not gw_ip:
-        return None
-    rows = _ps(f"Get-NetNeighbor -AddressFamily IPv4 -IPAddress '{gw_ip}' | "
-               f"Select-Object IPAddress,LinkLayerAddress,State | ConvertTo-Json -Depth 3")
-    for r in rows:
-        ll = _norm_mac(r.get("LinkLayerAddress"))
-        st = str(r.get("State") or "")
-        if _is_real_mac(ll) and st in ("Reachable", "Stale", "Permanent"):
-            return ll
-    return None
+def _gateway_mac_via_neighbor(gw_ip, interface_index=None):
+    """Resolve only the selected interface's default gateway MAC.
 
-def _wifi_details():
+    A single bounded ping primes Windows' neighbour cache; it is never used to
+    probe arbitrary hosts. Interface scoping prevents a VPN/secondary adapter
+    from supplying a misleading gateway MAC.
+    """
     try:
-        p = subprocess.run(["netsh", "wlan", "show", "interfaces"],
-                           capture_output=True, text=True, timeout=8,
-                           encoding="utf-8", errors="replace")
+        gateway = ipaddress.ip_address(str(gw_ip or "").strip())
+        if gateway.version != 4 or gateway.is_unspecified or gateway.is_multicast:
+            return None
+    except ValueError:
+        return None
+
+    try:
+        idx = int(interface_index) if interface_index is not None else None
+    except (TypeError, ValueError):
+        idx = None
+
+    def read_neighbor():
+        scope = f" -InterfaceIndex {idx}" if idx is not None else ""
+        rows = _ps(
+            f"Get-NetNeighbor -AddressFamily IPv4 -IPAddress '{gateway}'{scope} "
+            "-ErrorAction SilentlyContinue | "
+            "Select-Object IPAddress,LinkLayerAddress,State,InterfaceIndex "
+            "| ConvertTo-Json -Depth 3"
+        )
+        for row in rows:
+            try:
+                if ipaddress.ip_address(str(row.get("IPAddress", ""))) != gateway:
+                    continue
+            except ValueError:
+                continue
+            if idx is not None:
+                try:
+                    if int(row.get("InterfaceIndex", idx)) != idx:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+            mac = _norm_mac(row.get("LinkLayerAddress"))
+            state = str(row.get("State") or "").strip().casefold()
+            if valid_unicast_mac(mac) and state in {"reachable", "stale", "permanent"}:
+                return mac
+        return None
+
+    mac = read_neighbor()
+    if mac:
+        return mac
+    # A gateway-only ARP refresh is safe and helps when the cache is initially empty.
+    try:
+        subprocess.run(
+            ["ping", "-n", "1", "-w", "900", str(gateway)],
+            capture_output=True, text=True, timeout=2,
+            encoding="utf-8", errors="replace",
+        )
     except Exception:
+        pass
+    return read_neighbor()
+
+
+def _parse_wifi_interface_blocks(output, preferred_name):
+    """Return SSID/BSSID only from the named, connected Wi-Fi interface."""
+    preferred = str(preferred_name or "").strip().casefold()
+    if not preferred:
         return "", ""
-    if p.returncode != 0:
-        return "", ""
-    ssid = bssid = ""
-    for line in p.stdout.splitlines():
+    blocks = []
+    current = {}
+    for line in str(output or "").splitlines():
         if ":" not in line:
             continue
-        k, v = line.split(":", 1)
-        k = k.strip().lower(); v = v.strip()
-        if k == "ssid" and not ssid:
-            ssid = v
-        elif k == "bssid" and not bssid:
-            bssid = v
-    return ssid, bssid
+        key, value = line.split(":", 1)
+        key, value = key.strip().casefold(), value.strip()
+        if key == "name":
+            if current:
+                blocks.append(current)
+            current = {}
+        if current:
+            current[key] = value
+    if current:
+        blocks.append(current)
+    for block in blocks:
+        if str(block.get("name", "")).strip().casefold() != preferred:
+            continue
+        if str(block.get("state", "")).strip().casefold() != "connected":
+            return "", ""
+        ssid = str(block.get("ssid") or "").strip()
+        bssid = _norm_mac(block.get("bssid"))
+        if not valid_unicast_mac(bssid):
+            bssid = ""
+        return ssid, bssid
+    return "", ""
+
+
+def _wifi_details(interface_name=""):
+    """Read the BSSID for the selected adapter, never another Wi-Fi interface."""
+    if not interface_name:
+        return "", ""
+    try:
+        proc = subprocess.run(
+            ["netsh", "wlan", "show", "interfaces"],
+            capture_output=True, text=True, timeout=8,
+            encoding="utf-8", errors="replace",
+        )
+    except Exception:
+        return "", ""
+    if proc.returncode != 0:
+        return "", ""
+    return _parse_wifi_interface_blocks(proc.stdout, interface_name)
+
+
+def _has_strong_network_anchor(detected):
+    """A valid gateway MAC or selected-interface BSSID is mandatory for approval."""
+    return bool(
+        valid_unicast_mac(detected.get("gateway_mac"))
+        or valid_unicast_mac(detected.get("bssid"))
+    )
 
 def detect_network():
     """Return network context as a legacy dict (8.1.0 compatible shape).
@@ -1009,7 +1093,7 @@ def detect_network():
         if nh and nh not in ("0.0.0.0", ""):
             gateway_val = nh
             gw_class = Conf.CONFIRMED
-            gw_mac = _gateway_mac_via_neighbor(nh) or ""
+            gw_mac = _gateway_mac_via_neighbor(nh, interface_index=primary["idx"]) or ""
     gw_mac_class = Conf.CONFIRMED if gw_mac else Conf.MISSING
 
     dns_servers = sorted(set(dns_by_idx.get(primary["idx"], [])))
@@ -1019,7 +1103,8 @@ def detect_network():
     dhcp_class = (Conf.CONFIRMED if dhcp_flag in ("Enabled", "Disabled")
                   else Conf.MISSING)
 
-    ssid, bssid = _wifi_details()
+    selected_wireless = bool(re.search(r"wi[ -]?fi|wireless|802\.11", primary["name"] + " " + primary.get("description", ""), re.IGNORECASE))
+    ssid, bssid = _wifi_details(primary["name"]) if selected_wireless else ("", "")
 
     try:
         subnet_str = str(ipaddress.ip_network(
@@ -1037,7 +1122,10 @@ def detect_network():
         "bssid": bssid or None,
     }
     weight = sum(FP_WEIGHTS[k] for k, v in components.items() if v is not None)
-    has_strong = components["gateway_mac"] is not None or components["bssid"] is not None
+    has_strong = (
+        valid_unicast_mac(components["gateway_mac"])
+        or valid_unicast_mac(components["bssid"])
+    )
 
     if weight == 0:
         fingerprint = ""
@@ -1109,6 +1197,11 @@ def _authz_decision(detected, profiles):
     fp = detected.get("fingerprint") or ""
     weight = float(detected.get("confidence", 0)) / 100.0
     fp_class = detected.get("_classification", {}).get("fingerprint", Conf.MISSING)
+
+    if not _has_strong_network_anchor(detected):
+        return False, "INDETERMINATE", [
+            "No strong network anchor (gateway MAC or interface-specific BSSID) was observed.",
+            "Active discovery remains disabled. Refresh gateway neighbour data or verify the selected Wi-Fi interface."], None
 
     if not fp or fp_class == Conf.MISSING:
         return False, "INDETERMINATE", [
@@ -1240,6 +1333,14 @@ def authorize_current(actor="local-user"):
         conf = int(NET_CTX.get("confidence", 0) or 0)
     if not fp:
         raise RuntimeError("No fingerprint — cannot authorise")
+    with NET_LOCK:
+        current_context = dict(NET_CTX)
+    if not _has_strong_network_anchor(current_context):
+        raise RuntimeError(
+            "Refusing to authorise: no strong network anchor (gateway MAC or "
+            "interface-specific BSSID) was observed. Improve network identity "
+            "evidence before approving active discovery."
+        )
     if conf < int(MIN_FP_CONFIDENCE * 100):
         raise RuntimeError(
             f"Refusing to authorise: fingerprint confidence {conf}% is below "
