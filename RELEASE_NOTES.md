@@ -1,4 +1,31 @@
-# NetworkRadar 12.0.3 — audit corrections
+# NetworkRadar 12.1.0 — device intelligence workbench
+
+This milestone strengthens the existing multi-source identity engine and presents evidence quality more clearly in the dashboard. It is an incremental release, not a claim that every item in the broader NetworkRadar roadmap is complete.
+
+## Device identity and dashboard improvements
+
+- Added a reusable identity-quality assessment covering hardware, operating-system, network-identity, services, classification and evidence domains.
+- Reports evidence coverage, observed signal counts and contributing source families separately from identification confidence. Coverage is explicitly not a probability of correct identification.
+- Preserves conservative manufacturer/model semantics: IEEE address-block registrants are not presented as definitive device manufacturers, and exact model claims still require explicit device- or service-reported evidence.
+- Added an evidence-coverage panel to the device intelligence workspace.
+- Refined dashboard surfaces, cards, navigation, tables, modal tabs, focus states and responsive presentation with a consistent blue/cyan visual system.
+- Expanded device inventory search across OS, model, ports and service summary; added Unknown/low-evidence and High-confidence filters; added a visible model column.
+- Added regression tests for empty evidence, domain coverage, OUI-only observations and the distinction between coverage and identity probability.
+- Enabled the Windows Python 3.10–3.13 test workflow to run on pushes to `main`.
+
+## Validation status
+
+The new identity-quality module's four focused unit tests passed in an isolated local check. The full repository test matrix and live Windows network-discovery smoke test have not yet been verified for this commit.
+
+## Remaining roadmap
+
+Deeper manufacturer/model enrichment, expanded Unknown Device Hunter triage, richer relationship visualisation and end-to-end Windows validation remain subsequent work.
+
+---
+
+## Previous release notes
+
+
 
 This file records the current repository snapshot's declared application version and the fixes prepared on the audit branch. It is not a claim that the full Windows application has passed end-to-end testing.
 
