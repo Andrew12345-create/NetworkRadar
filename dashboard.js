@@ -195,7 +195,7 @@ async function loadNetworkWorkspaces(){
   }
   const picker=$("workspaceSelect");
   if(picker){
-   picker.innerHTML=networkWorkspaceCache.map(w=>'<option value="'+esc(w.network_id)+'">'+esc(w.display_name)+' · '+esc(w.network_type)+' · '+esc(w.subnet||"No subnet")+(w.is_current?" · ACTIVE":"")+'</option>').join("")||'<option value="">No workspaces observed yet</option>';
+   picker.innerHTML=networkWorkspaceCache.map(w=>'<option value="'+esc(w.network_id)+'">'+esc(w.display_name)+' · '+esc(w.network_type)+' · '+esc(w.subnet||"No subnet")+(w.is_current?" · ACTIVE":"")+(w.approved?" · APPROVED":" · NOT APPROVED")+'</option>').join("")||'<option value="">No workspaces observed yet</option>';
    picker.value=selectedWorkspaceId;
   }
   await renderNetworkWorkspace(selectedWorkspaceId);
@@ -210,7 +210,7 @@ async function renderNetworkWorkspace(networkId){
  const set=(id,value)=>{const el=$(id);if(el)el.textContent=value||"—";};
  if(!w){
   set("workspaceName","No network workspace");
-  set("workspaceType","—");set("workspaceSubnet","—");set("workspaceLastSeen","—");
+  set("workspaceType","—");set("workspaceSubnet","—");set("workspaceLastSeen","—");set("workspaceAuthorization","—");
   if($("workspaceInterfaceRows"))$("workspaceInterfaceRows").innerHTML='<tr><td colspan="6">No interface history yet.</td></tr>';
   if($("workspaceDeviceRows"))$("workspaceDeviceRows").innerHTML='<tr><td colspan="5">No device sightings yet.</td></tr>';
   return;
@@ -219,9 +219,11 @@ async function renderNetworkWorkspace(networkId){
  set("workspaceType",w.network_type);
  set("workspaceSubnet",w.subnet||"Unknown subnet");
  set("workspaceLastSeen",w.last_seen);
+ set("workspaceAuthorization",w.approved?"APPROVED":"REAPPROVAL REQUIRED");
  const notice=$("workspaceNotice");
  if(notice)notice.textContent=(w.is_current?"ACTIVE WORKSPACE · ":"HISTORICAL WORKSPACE · ")+
   "This view is read-only. Active discovery and approval remain bound to the current primary network. "+
+  (w.approved?"Workspace approval is current.":"This workspace is not approved for active discovery.")+" "+
   (w.fingerprint_count||0)+" fingerprint observation(s) · "+(w.device_count||0)+" device sighting(s).";
  try{
   const [interfaces,devices]=await Promise.all([
