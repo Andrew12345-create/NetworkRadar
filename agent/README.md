@@ -39,6 +39,25 @@ $env:NETWORKRADAR_AGENT_KEY = "C:\NetworkRadar\certs\agent-key.pem"
 
 Use the actual LAN address of the NetworkRadar host. Prefer binding to that one address rather than `0.0.0.0`. Protect the private key and restrict the Windows Firewall inbound rule for TCP 8767 to the specific endpoint devices that you administer. Do not expose the hub to the public internet.
 
+If you need to create a local PEM certificate/key pair and OpenSSL is installed, an example is:
+
+```powershell
+openssl req -x509 -newkey rsa:3072 -sha256 -days 365 -nodes `
+  -keyout C:\NetworkRadar\certs\agent-key.pem `
+  -out C:\NetworkRadar\certs\agent-cert.pem `
+  -subj "/CN=NetworkRadar Agent Hub" `
+  -addext "subjectAltName=IP:192.168.1.10,DNS:networkradar.local"
+```
+
+Replace the example IP/DNS names with the host address that endpoint devices will use. Keep the private key readable only by the NetworkRadar service/user account. The endpoint agent pins the leaf certificate itself, so any certificate replacement requires recalculating and redistributing the pin.
+
+For example, restrict the inbound listener to explicitly managed endpoints:
+
+```powershell
+$endpointIPs = @("192.168.1.21", "192.168.1.22")
+New-NetFirewallRule -DisplayName "NetworkRadar Agent Hub" -Direction Inbound -Action Allow -Protocol TCP -LocalAddress 192.168.1.10 -LocalPort 8767 -RemoteAddress $endpointIPs -Profile Private
+```
+
 The current network must be approved in NetworkRadar before the hub can start or accept enrolment.
 
 ## 2. Calculate the certificate pin
