@@ -10,7 +10,7 @@
  <div class="nav-group">Device intelligence</div>
  <a href="#identity" data-short="ID" title="Radar identity"><span class="nav-label">Radar identity</span></a><a href="#continuity" data-short="PT" title="Phantom Track"><span class="nav-label">Phantom Track</span></a><a href="#candidates" data-short="IC" title="Identity candidates"><span class="nav-label">Identity candidates</span></a><a href="#unknownHunter" data-short="UH" title="Unknown Device Hunter"><span class="nav-label">Unknown Device Hunter</span></a><a href="#ipv6" data-short="V6" title="IPv6 intelligence"><span class="nav-label">IPv6 intelligence</span></a>
  <div class="nav-group">Network activity</div>
- <a href="#profiles" data-short="NP" title="Network profiles"><span class="nav-label">Network profiles</span></a><a href="#dns" data-short="DN" title="DNS intelligence"><span class="nav-label">DNS intelligence</span></a><a href="#dhcp" data-short="DH" title="DHCP"><span class="nav-label">DHCP</span></a><a href="#arp" data-short="AR" title="ARP"><span class="nav-label">ARP</span></a><a href="#behaviour" data-short="BH" title="Behaviour"><span class="nav-label">Behaviour</span></a><a href="#changes" data-short="CH" title="Network changes"><span class="nav-label">Network changes</span></a>
+ <a href="#networkWorkspaces" data-short="NW" title="Network workspaces"><span class="nav-label">Network workspaces</span></a><a href="#profiles" data-short="NP" title="Network profiles"><span class="nav-label">Network profiles</span></a><a href="#dns" data-short="DN" title="DNS intelligence"><span class="nav-label">DNS intelligence</span></a><a href="#dhcp" data-short="DH" title="DHCP"><span class="nav-label">DHCP</span></a><a href="#arp" data-short="AR" title="ARP"><span class="nav-label">ARP</span></a><a href="#behaviour" data-short="BH" title="Behaviour"><span class="nav-label">Behaviour</span></a><a href="#changes" data-short="CH" title="Network changes"><span class="nav-label">Network changes</span></a>
  <div class="nav-group">Security &amp; investigations</div>
  <a href="#investigations" data-short="IN" title="Investigations"><span class="nav-label">Investigations</span></a><a href="#alerts" data-short="AL" title="Alert stream"><span class="nav-label">Alert stream</span></a><a href="#config" data-short="AU" title="Configuration audit"><span class="nav-label">Configuration audit</span></a><a href="#hunt" data-short="TH" title="Threat hunt"><span class="nav-label">Threat hunt</span></a><a href="#exposure" data-short="EX" title="Exposure intelligence"><span class="nav-label">Exposure intelligence</span></a>
  <div class="nav-group">Remote management</div>
@@ -20,6 +20,23 @@
  <div class="nav-empty" id="navEmpty">No matching sections.</div>
 </nav><div id="navBackdrop" aria-hidden="true" onclick="closeNavigation()"></div>
 <main>
+<section id="networkWorkspaces" class="section card mb-14">
+ <div class="row-between workspace-heading">
+  <div><div class="label">MULTI-NETWORK INTELLIGENCE</div><h2 class="m-0">NETWORK WORKSPACES</h2><div class="hint">Separate histories for each network fingerprint, including overlapping subnets and multiple active adapters.</div></div>
+  <div class="workspace-picker"><label class="label" for="workspaceSelect">VIEW WORKSPACE</label><select id="workspaceSelect" aria-label="Choose a network workspace" onchange="selectNetworkWorkspace(this.value)"><option value="">Loading workspaces…</option></select></div>
+ </div>
+ <div class="grid workspace-metrics">
+  <div class="profileitem"><div class="label">WORKSPACE</div><div class="value" id="workspaceName">—</div></div>
+  <div class="profileitem"><div class="label">NETWORK TYPE</div><div class="value" id="workspaceType">—</div></div>
+  <div class="profileitem"><div class="label">SUBNET</div><div class="value mono" id="workspaceSubnet">—</div></div>
+  <div class="profileitem"><div class="label">LAST OBSERVED</div><div class="value" id="workspaceLastSeen">—</div></div>
+ </div>
+ <div class="hint workspace-notice" id="workspaceNotice">The active scan and authorisation remain bound to the current primary network. Selecting another workspace browses its saved history only.</div>
+ <div class="split workspace-tables">
+  <div><h3>INTERFACES IN THIS WORKSPACE</h3><div class="scroll"><table><thead><tr><th>INTERFACE</th><th>TYPE</th><th>IP / SUBNET</th><th>GATEWAY</th><th>SSID / BSSID</th><th>ROLE</th></tr></thead><tbody id="workspaceInterfaceRows"><tr><td colspan="6">Loading…</td></tr></tbody></table></div></div>
+  <div><h3>DEVICE SIGHTINGS</h3><div class="scroll"><table><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>STATUS</th><th>LAST SEEN</th></tr></thead><tbody id="workspaceDeviceRows"><tr><td colspan="5">Loading…</td></tr></tbody></table></div></div>
+ </div>
+</section>
 <div class="meta" id="cmd">LOCAL · <span id="network">...</span> · <span id="updated">—</span></div>
 <section class="card mb-14"><div class="row-between"><div><div class="label">ENGINE</div><strong id="jobPhase">Init</strong><div class="hint" id="jobMessage">—</div></div><div id="jobPercent" class="headline-number">0%</div></div><div class="progress-track"><div id="jobBar" class="progress-fill"></div></div></section>
 <div class="grid">
