@@ -1,3 +1,29 @@
+# NetworkRadar 12.4.0 — Strong Network Anchor Detection Fix
+
+## Delivered
+
+- Fixed gateway MAC discovery on Windows. The previous implementation passed `-IPAddress` to `Get-NetNeighbor`, which is not a supported parameter; PowerShell returned an error and the helper silently treated the gateway MAC as missing.
+- Gateway-neighbour collection now queries only the selected default-route interface, then filters returned neighbour records against the exact gateway IP and interface index. Existing unicast-MAC and Reachable/Stale/Permanent state checks remain in place.
+- Fixed Wi-Fi BSSID extraction from real Windows output. `netsh wlan show interfaces` reports the access point address using the label `AP BSSID`; the parser previously accepted only `BSSID`.
+- Added regression coverage for the actual `AP BSSID` output shape, strong-anchor recognition and the supported `Get-NetNeighbor` query form.
+- No authorisation checks were weakened. Active discovery still requires a valid interface-specific gateway MAC or connected BSSID, sufficient fingerprint confidence and explicit fresh approval.
+
+## Expected result on the reported laptop
+
+The supplied diagnostics show:
+- Active interface: `Wi-Fi`, interface index `8`.
+- Default gateway: `192.168.100.1`.
+- Gateway MAC: `F4-A4-D6-17-32-72`, state `Reachable`, interface index `8`.
+- Connected SSID: `Andrew`.
+- Access-point BSSID: `B0:19:21:4A:14:6F`.
+
+Both the gateway MAC and BSSID are valid unicast anchors. After this fix, NetworkRadar should be able to observe at least one of them on this interface. The real Windows application must still be restarted and its runtime result verified locally.
+
+## Validation boundary
+
+Automated regression tests cover the corrected PowerShell query construction and actual WLAN parser output. CI must pass before merge. A live Windows re-run using the user-provided adapter remains necessary to confirm the complete runtime path.
+
+---
 # NetworkRadar 12.3.0 — Authenticated Endpoint Inventory
 
 ## Delivered
