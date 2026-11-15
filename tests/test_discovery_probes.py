@@ -87,7 +87,7 @@ class NetbiosProbeTests(unittest.TestCase):
 
 class UpnpDescriptionTests(unittest.TestCase):
     def test_extracts_root_model_and_embedded_device_fields(self):
-        xml = b\'''<?xml version="1.0"?>
+        xml = b'''<?xml version="1.0"?>
         <root xmlns="urn:schemas-upnp-org:device-1-0">
           <device>
             <friendlyName>Office Router</friendlyName>
@@ -101,7 +101,7 @@ class UpnpDescriptionTests(unittest.TestCase):
               <modelName>Radio-X</modelName><UDN>uuid:radio-456</UDN>
             </device></deviceList>
           </device>
-        </root>\'''
+        </root>'''
         result = parse_upnp_description(xml)
         self.assertEqual(result["friendlyname"], "Office Router")
         self.assertEqual(result["manufacturer"], "Example Networks")
@@ -111,8 +111,8 @@ class UpnpDescriptionTests(unittest.TestCase):
         self.assertEqual(result["embedded_devices"][0]["modelname"], "Radio-X")
 
     def test_rejects_dtd_and_entity_declarations(self):
-        xml = b\'''<!DOCTYPE root [<!ENTITY x "expanded">]>
-        <root><device><friendlyName>&x;</friendlyName></device></root>\'''
+        xml = b'''<!DOCTYPE root [<!ENTITY x "expanded">]>
+        <root><device><friendlyName>&x;</friendlyName></device></root>'''
         with self.assertRaises(ValueError):
             parse_upnp_description(xml)
 
