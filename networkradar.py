@@ -847,6 +847,9 @@ def initialize_database():
             "last_authorized": "TEXT DEFAULT ''",
             "confidence": "INTEGER DEFAULT 0",
         })
+        add_cols("network_device_sightings", {
+            "missed_scans": "INTEGER DEFAULT 0",
+        })
         add_cols("device_risk_scores", {
             "threat_risk": "INTEGER DEFAULT 0",
             "identification_uncertainty": "INTEGER DEFAULT 0",
@@ -2773,6 +2776,36 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
     except Exception:
         pass
     return devices
+
+def update_network_sighting_presence(devices):
+    """Update only the active workspace; empty/failed scans never mark sightings offline."""
+    if not devices:
+        return 0
+    with NET_LOCK:
+        workspace_id = NET_CTX.get("network_id", "")
+    if not workspace_id:
+        return 0
+    current_ips = sorted({str(d.get("ip") or "") for d in devices if d.get("ip")})
+    if not current_ips:
+        return 0
+    placeholders = ",".join("?" for _ in current_ips)
+    ts = now_text()
+    def _w(conn):
+        conn.execute(
+            f"UPDATE network_device_sightings SET missed_scans=0,status='ONLINE',last_seen=? "
+            f"WHERE network_id=? AND ip IN ({placeholders})",
+            (ts, workspace_id, *current_ips),
+        )
+        cur = conn.execute(
+            f"UPDATE network_device_sightings SET missed_scans=COALESCE(missed_scans,0)+1, "
+            f"status=CASE WHEN COALESCE(missed_scans,0)+1>=? THEN 'OFFLINE' "
+            f"ELSE 'SUSPECTED_OFFLINE' END "
+            f"WHERE network_id=? AND ip NOT IN ({placeholders}) "
+            f"AND status IN ('ONLINE','SUSPECTED_OFFLINE')",
+            (DEVICE_OFFLINE_CONFIRM_SCANS, workspace_id, *current_ips),
+        )
+        return max(0, cur.rowcount)
+    return DB_MANAGER.write(_w)
 
 def update_inventory(devices):
     # An empty discovery result is not sufficient evidence that every known
@@ -7315,6 +7348,11 @@ def _main_inner():
                         except Exception:
                             pass
                     devices = enrich_devices(devices, deep=deep, mdns_rows=mdns_rows)
+                    # Update only this workspace; a non-empty completed scan is required.
+                    try:
+                        update_network_sighting_presence(devices)
+                    except Exception as sighting_error:
+                        print("NETWORK SIGHTINGS:", _clean(sighting_error, 180))
                     # Keep Phantom Track in step with the completed inventory run.
                     # Offline devices are not re-observed; their anchors remain historical.
                     try:
