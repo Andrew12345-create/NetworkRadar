@@ -2,7 +2,7 @@ import sqlite3
 import unittest
 from networkradar_modules.network.workspaces import (
     classify_interface_type, ensure_workspace, parse_netsh_wlan_interfaces,
-    record_interface_observation,
+    record_interface_observation, has_strong_network_anchor,
 )
 
 class NetworkWorkspaceTests(unittest.TestCase):
@@ -33,6 +33,17 @@ class NetworkWorkspaceTests(unittest.TestCase):
         upsert_legacy_network_profile(self.db, {"network":"192.168.1.0/24","fingerprint":"office-fp"}, "t2")
         row = self.db.execute("SELECT approved,last_authorized,fingerprint FROM network_profiles").fetchone()
         self.assertEqual(row, (0, "", "office-fp"))
+
+    def test_authorisation_requires_a_strong_network_anchor(self):
+        self.assertFalse(has_strong_network_anchor({
+            "fingerprint_raw": {"subnet":"192.168.1.0/24","gateway":"192.168.1.1","dns":["1.1.1.1"]}
+        }))
+        self.assertTrue(has_strong_network_anchor({
+            "fingerprint_raw": {"gateway_mac":"00:11:22:33:44:55"}
+        }))
+        self.assertTrue(has_strong_network_anchor({
+            "fingerprint_raw": '{"bssid":"aa:bb:cc:dd:ee:ff"}'
+        }))
 
     def test_same_fingerprint_reuses_workspace(self):
         a = {"fingerprint": "fp-a", "network": "10.0.0.0/24"}
