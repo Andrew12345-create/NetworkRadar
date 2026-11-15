@@ -67,9 +67,31 @@ class NetworkWorkspaceTests(unittest.TestCase):
         self.assertEqual(ensure_workspace(self.db, {"network": "10.0.0.0/24"}, "t"), "")
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM network_workspaces").fetchone()[0], 0)
     def test_wifi_parser_keeps_interfaces_separate(self):
-        rows = parse_netsh_wlan_interfaces("Name : Wi-Fi\nState : connected\nSSID : Home\nBSSID : aa:bb:cc:dd:ee:01\n\nName : Wi-Fi 2\nState : connected\nSSID : Guest\nBSSID : aa:bb:cc:dd:ee:02")
+        rows = parse_netsh_wlan_interfaces("Name : Wi-Fi\nState : connected\nSSID : Home\nBSSID : aa:bb:cc:dd:ee:01\n\nName : Wi-Fi 2\nState : connected\nSSID : Guest\nAP BSSID : aa:bb:cc:dd:ee:02")
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[1]["ssid"], "Guest")
+        self.assertEqual(rows[1]["bssid"], "AA:BB:CC:DD:EE:02")
+
+    def test_parser_accepts_actual_windows_ap_bssid_label(self):
+        output = """There is 1 interface on the system:
+
+    Name                   : Wi-Fi
+    Description            : Intel(R) Wireless-AC 9560 160MHz
+    GUID                   : 4a54e23f-455a-4e34-b9f2-4ab74d8cf34f
+    Physical address       : 96:03:c3:d8:6e:a8
+    State                  : connected
+    SSID                   : Andrew
+    AP BSSID               : b0:19:21:4a:14:6f
+    Band                   : 2.4 GHz
+"""
+        rows = parse_netsh_wlan_interfaces(output)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "Wi-Fi")
+        self.assertEqual(rows[0]["ssid"], "Andrew")
+        self.assertEqual(rows[0]["bssid"], "B0:19:21:4A:14:6F")
+        self.assertTrue(has_strong_network_anchor({
+            "fingerprint_raw": {"bssid": rows[0]["bssid"]}
+        }))
     def test_disconnected_wifi_interface_does_not_supply_a_bssid(self):
         rows = parse_netsh_wlan_interfaces(
             "Name : Wi-Fi\nState : disconnected\nSSID : Home\n"

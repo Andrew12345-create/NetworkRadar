@@ -42,6 +42,10 @@ def parse_netsh_wlan_interfaces(output):
             current["bssid"] = ""
         elif not _valid_anchor_mac(current.get("bssid")):
             current["bssid"] = ""
+        else:
+            # Canonicalise case and separators so the same AP does not create
+            # a different network fingerprint across output variations.
+            current["bssid"] = str(current["bssid"]).strip().upper().replace("-", ":")
         rows.append(current.copy())
 
     for raw in str(output or "").splitlines():
@@ -50,6 +54,10 @@ def parse_netsh_wlan_interfaces(output):
             continue
         key, value = line.split(":", 1)
         key, value = key.strip().casefold(), value.strip()
+        # Windows netsh uses "AP BSSID" for the connected access-point MAC.
+        # Accept that label and the shorter "BSSID" form.
+        if key == "ap bssid":
+            key = "bssid"
         if key == "name":
             finish()
             current = {"name": value, "ssid": "", "bssid": "", "state": ""}
