@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 <#
-NetworkRadar 12.2.0 launcher
+NetworkRadar 12.4.1 launcher
 - Runs the Python intelligence platform from this installation directory.
 - Does not require elevation; capture permissions may be needed for TShark.
 - Passes command-line options through to networkradar.py.
@@ -12,6 +12,10 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $App = Join-Path $Root "networkradar.py"
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
+
+if (-not [string]::IsNullOrWhiteSpace($env:NETWORKRADAR_NETWORK)) {
+    Write-Warning "NETWORKRADAR_NETWORK is set to '$env:NETWORKRADAR_NETWORK'. This is a manual scan-scope override; automatic network fingerprinting and authorisation are disabled until it is removed."
+}
 
 if (-not (Test-Path -LiteralPath $App -PathType Leaf)) {
     Write-Error "NetworkRadar application not found: $App"

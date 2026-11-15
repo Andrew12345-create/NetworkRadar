@@ -324,5 +324,108 @@ class GatewayNeighbourRefreshTests(unittest.TestCase):
         run.assert_called_once()
 
 
+class NetworkFingerprintDiagnosticsTests(unittest.TestCase):
+    def test_manual_override_is_explicitly_non_authorising(self):
+        with patch.object(app, "NETWORK_OVERRIDE", "192.168.100.0/24"):
+            detected = app.detect_network()
+        self.assertEqual(detected["fingerprint"], "")
+        self.assertEqual(detected["fingerprint_status"], "MANUAL_OVERRIDE")
+        self.assertIn("not proof", detected["fingerprint_diagnostics"]["reason"])
+
+    @patch.object(app, "_wifi_details", return_value=("Andrew", "B0:19:21:4A:14:6F"))
+    @patch.object(app, "_gateway_mac_via_neighbor", return_value="F4:A4:D6:17:32:72")
+    @patch.object(app, "_ps")
+    def test_windows_adapter_evidence_produces_fingerprint(self, ps, gateway_mac, wifi):
+        ps.side_effect = [
+            [{"Name": "Wi-Fi", "InterfaceIndex": 8,
+              "InterfaceDescription": "Intel(R) Wireless-AC 9560 160MHz",
+              "InterfaceGuid": "{4a54e23f-455a-4e34-b9f2-4ab74d8cf34f}",
+              "MacAddress": "96-03-C3-D8-6E-A8", "Status": "Up",
+              "MediaType": "Native 802.11"}],
+            [{"InterfaceIndex": 8, "IPAddress": "192.168.100.82",
+              "PrefixLength": 24, "AddressState": "Preferred",
+              "SkipAsSource": False}],
+            [{"InterfaceIndex": 8, "NextHop": "192.168.100.1",
+              "RouteMetric": 25, "InterfaceMetric": 10}],
+            [{"InterfaceIndex": 8, "ServerAddresses": ["192.168.100.1"]}],
+            [{"InterfaceIndex": 8, "Dhcp": "Enabled"}],
+        ]
+        with patch.object(app, "NETWORK_OVERRIDE", ""):
+            detected = app.detect_network()
+        self.assertTrue(detected["fingerprint"])
+        self.assertEqual(detected["confidence"], 100)
+        self.assertEqual(detected["fingerprint_status"], "READY")
+        self.assertEqual(detected["gateway_mac"], "F4:A4:D6:17:32:72")
+        self.assertEqual(detected["bssid"], "B0:19:21:4A:14:6F")
+        self.assertEqual(detected["fingerprint_diagnostics"]["strong_anchors"],
+                         ["gateway_mac", "bssid"])
+        self.assertTrue(app.has_strong_network_anchor(detected))
+
+    def test_authorise_error_explains_manual_override(self):
+        original = dict(app.NET_CTX)
+        try:
+            app.NET_CTX.update({
+                "fingerprint": "", "mode": "MANUAL",
+                "fingerprint_diagnostics": {
+                    "status": "MANUAL_OVERRIDE",
+                    "reason": "Manual scope only."
+                }
+            })
+            with patch.object(app, "refresh_network_context"):
+                with self.assertRaisesRegex(RuntimeError, "NETWORKRADAR_NETWORK"):
+                    app.authorize_current()
+        finally:
+            app.NET_CTX.clear()
+            app.NET_CTX.update(original)
+
+
+class PowerShellDiagnosticTests(unittest.TestCase):
+    @patch.object(app.subprocess, "run")
+    def test_wlan_command_failure_is_included_in_fingerprint_diagnostics(self, run):
+        run.return_value.returncode = 1
+        run.return_value.stdout = ""
+        run.return_value.stderr = "WLAN AutoConfig service is not running."
+        app._PS_DIAGNOSTICS.records = []
+        self.assertEqual(app._wifi_details("Wi-Fi"), ("", ""))
+        record = app._PS_DIAGNOSTICS.records[0]
+        self.assertEqual(record["operation"], "netsh wlan show interfaces")
+        self.assertEqual(record["state"], "ERROR")
+        self.assertIn("AutoConfig", record["detail"])
+
+    @patch.object(app.subprocess, "run")
+    def test_empty_query_result_is_reported(self, run):
+        run.return_value.returncode = 0
+        run.return_value.stdout = ""
+        run.return_value.stderr = ""
+        app._PS_DIAGNOSTICS.records = []
+        self.assertEqual(app._ps("Get-NetAdapter", label="Get-NetAdapter"), [])
+        self.assertEqual(app._PS_DIAGNOSTICS.records[0]["state"], "EMPTY")
+        self.assertEqual(app._PS_DIAGNOSTICS.records[0]["operation"], "Get-NetAdapter")
+
+
+    @patch.object(app.subprocess, "run")
+    def test_helper_does_not_bypass_host_execution_policy(self, run):
+        run.return_value.returncode = 0
+        run.return_value.stdout = "[]"
+        run.return_value.stderr = ""
+        app._PS_DIAGNOSTICS.records = []
+        self.assertEqual(app._ps("Get-NetAdapter", label="Get-NetAdapter"), [])
+        args = run.call_args.args[0]
+        self.assertNotIn("-ExecutionPolicy", args)
+        self.assertNotIn("Bypass", args)
+
+    @patch.object(app.subprocess, "run")
+    def test_powershell_failure_is_reported_without_raw_command(self, run):
+        run.return_value.returncode = 1
+        run.return_value.stdout = ""
+        run.return_value.stderr = "Access is denied."
+        app._PS_DIAGNOSTICS.records = []
+        self.assertEqual(app._ps("Get-NetAdapter", label="Get-NetAdapter"), [])
+        record = app._PS_DIAGNOSTICS.records[0]
+        self.assertEqual(record["state"], "ERROR")
+        self.assertEqual(record["detail"], "Access is denied.")
+        self.assertNotIn("Get-NetAdapter", record["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()

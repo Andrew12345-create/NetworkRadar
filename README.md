@@ -1,4 +1,4 @@
-# NetworkRadar 12.4.0
+# NetworkRadar 12.4.1
 
 NetworkRadar is a Windows-focused, local-first network discovery and device-intelligence application. It combines authorised network discovery, device inventory, DNS/DHCP/ARP observations, identity evidence, historical tracking, exposure observations, investigations and a localhost dashboard. Optional management features include SSH terminal access and Windows/endpoint-management integrations.
 
@@ -59,6 +59,8 @@ NetworkRadar 12.4.0 fixes two Windows evidence-collection defects that could pre
 
 - Gateway MAC collection no longer passes the unsupported `-IPAddress` parameter to `Get-NetNeighbor`. It queries the selected default-route interface and matches the exact gateway IP and interface index in the returned neighbour rows.
 - The WLAN parser recognises Windows' actual `AP BSSID` label as well as `BSSID`, and still requires that the interface is connected and the address is a valid unicast MAC.
+
+Network fingerprint diagnostics are exposed by `/api/network`. If `NETWORKRADAR_NETWORK` is set, it acts only as a manual scan-scope override and automatic network fingerprinting/authorisation remain disabled. Remove it from the current PowerShell session with `Remove-Item Env:NETWORKRADAR_NETWORK -ErrorAction SilentlyContinue`, then restart NetworkRadar to restore automatic detection.
 
 The active-discovery authorisation gate remains strict: a strong anchor, adequate fingerprint confidence and explicit fresh network approval are all still required.
 
