@@ -72,6 +72,14 @@ python -c "import ssl,hashlib,pathlib; p=pathlib.Path(r'C:\NetworkRadar\certs\ag
 
 Copy the resulting 64-character hexadecimal fingerprint to the endpoint enrolment command. If the certificate is renewed or replaced, calculate and distribute the new pin before agents reconnect. A pin mismatch causes the agent to stop before sending the HTTP request.
 
+On each enrolled endpoint, rotate the stored pin only after the new certificate is live and its fingerprint has been verified out-of-band:
+
+```powershell
+python .\networkradar_agent.py --update-server-cert-sha256 NEW_64_CHARACTER_PIN --confirm-pin-rotation
+```
+
+The agent performs a TLS handshake and verifies the new leaf-certificate pin before updating its DPAPI-protected configuration. It sends no HTTP request during this rotation check. If the pin does not match the certificate currently presented by the configured server, the stored pin remains unchanged.
+
 ## 3. Create a one-time enrolment token
 
 In the NetworkRadar dashboard, open the **Managed Endpoints** section and select **Generate Enrolment Token**.
