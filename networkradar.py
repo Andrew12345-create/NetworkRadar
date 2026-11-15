@@ -190,6 +190,9 @@ except ImportError:
 # The package metadata is the single source of the application version.
 from networkradar_modules import __version__ as APP_VERSION
 from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
+from networkradar_modules.identity.dhcp import analyse_dhcp_identity as _analyse_dhcp_identity
+from networkradar_modules.identity.oui import parse_ieee_registry, lookup_ieee_assignment
+from networkradar_modules.identity.recognition import recognition_family_compatible
 from networkradar_modules.identity.fingerprints import (
     derive_identity as _derive_identity_core,
     dhcp_fingerprint as _dhcp_fingerprint_core,
@@ -202,7 +205,7 @@ from networkradar_modules.core.startup import (
 )
 from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
-from networkradar_modules.discovery.nmap import run_nmap_discovery
+from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
 from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
 from networkradar_modules.discovery.adapters import (
     _norm_mac, _is_real_mac, _select_primary_adapter,
@@ -213,6 +216,7 @@ from networkradar_modules.discovery.probes import (
     is_same_private_http_host, reverse_dns as _reverse_dns,
     netbios_name as _netbios_name, ssdp_scan as _ssdp_scan,
 )
+from networkradar_modules.discovery.mdns import discover_mdns as _discover_mdns
 
 def _score_identity_evidence(candidate, *, now=None, thresholds=None,
                               half_life_days=30.0, group_cap=0.45,
@@ -1373,6 +1377,19 @@ def _same_private_host(src_ip, url):
 def ssdp_scan(timeout=2.0):
     return _ssdp_scan(timeout=timeout, app_version=APP_VERSION)
 
+def mdns_active_snapshot(duration=2.0):
+    """Perform a small authorised DNS-SD browse on the selected local IPv4."""
+    if not is_authorized():
+        return []
+    try:
+        local = local_identity()
+        return _discover_mdns(
+            duration=duration,
+            interface_ip=str(local.get("ip", "") or ""),
+        )
+    except Exception:
+        return []
+
 def discover_devices():
     """Run the authorised-network discovery scan through the modular Nmap engine."""
     return run_nmap_discovery(current_network(), NMAP, NMAP_LOG)
@@ -1483,30 +1500,39 @@ OUI_FILES = {
 }
 _OUI_LOCK = threading.RLock()
 _OUI_MEM = {}
+_OUI_META_MEM = {}
 
 def load_oui_cache():
-    global _OUI_MEM
+    global _OUI_MEM, _OUI_META_MEM
     with _OUI_LOCK:
         if _OUI_MEM:
             return _OUI_MEM
         try:
             with DB_MANAGER.read() as conn:
-                _OUI_MEM = {r[0]: r[1] for r in conn.execute(
-                    "SELECT prefix, organization FROM oui_cache")}
+                rows = conn.execute(
+                    "SELECT prefix, organization, registry, updated_at FROM oui_cache").fetchall()
+                _OUI_MEM = {r[0]: r[1] for r in rows}
+                _OUI_META_MEM = {
+                    r[0]: {"organization": r[1], "registry": r[2] or "", "updated_at": r[3] or ""}
+                    for r in rows
+                }
         except Exception:
             _OUI_MEM = {}
+            _OUI_META_MEM = {}
         return _OUI_MEM
+
+def oui_lookup_details(mac):
+    props = mac_properties(mac)
+    if not props["valid"] or props["multicast"] or props["locally_administered"]:
+        return {}
+    load_oui_cache()
+    with _OUI_LOCK:
+        return lookup_ieee_assignment(mac, _OUI_META_MEM)
 
 def oui_lookup(mac):
     props = mac_properties(mac)
-    if not props["valid"] or props["multicast"] or props["locally_administered"]:
-        return "", props
-    cache = load_oui_cache()
-    for n in (9, 7, 6):
-        prefix = props["prefix"][:n]
-        if prefix in cache:
-            return cache[prefix], props
-    return "", props
+    details = oui_lookup_details(mac)
+    return details.get("organization", ""), props
 
 def update_oui_database(timeout=20):
     added = 0
@@ -1517,25 +1543,19 @@ def update_oui_database(timeout=20):
                 "User-Agent": f"NetworkRadar/{APP_VERSION}"})
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 raw = response.read(25 * 1024 * 1024).decode("utf-8", "replace")
-            parsed = {}
-            for line in raw.splitlines():
-                m = re.search(r"^\s*([0-9A-Fa-f-]{6,11})\s+\((?:hex|MA-L|MA-M|MA-S)\)\s+(.+)$", line, re.I)
-                if m:
-                    prefix = re.sub(r"[^0-9A-Fa-f]", "", m.group(1)).upper()
-                    org = _clean(m.group(2), 180)
-                    if len(prefix) in (6, 7, 9) and org:
-                        parsed[prefix] = org
+            parsed = parse_ieee_registry(raw, registry)
             if parsed:
                 def _w(conn, items=list(parsed.items()), reg=registry):
                     conn.executemany("""INSERT INTO oui_cache(prefix,organization,registry,updated_at)
                         VALUES(?,?,?,?) ON CONFLICT(prefix) DO UPDATE SET
                         organization=excluded.organization,registry=excluded.registry,
                         updated_at=excluded.updated_at""",
-                        [(k, v, reg, now_text()) for k, v in items])
+                        [(k, v["organization"], reg, now_text()) for k, v in items])
                 DB_MANAGER.write(_w)
                 added += len(parsed)
                 with _OUI_LOCK:
                     _OUI_MEM.clear()
+                    _OUI_META_MEM.clear()
         except Exception as exc:
             errors.append(f"{registry}: {_clean(exc, 160)}")
     return {"updated": added, "errors": errors, "timestamp": now_text()}
@@ -1627,20 +1647,25 @@ def _classify_from_signatures(device, dhcp_rows):
             candidates.append((category, score, why))
 
     for row in dhcp_rows:
-        vc = (row[1] or "").lower()
-        prl = (row[2] or "").strip()
-        if "android" in vc or "android" in (row[0] or "").lower():
-            candidates.append(("Android/mobile device", 76, "DHCP vendor class / hostname"))
-        if "msft" in vc or "microsoft" in vc:
-            candidates.append(("Windows computer", 74, "DHCP vendor class"))
-        if any(x in vc for x in ("udhcp", "busybox", "openwrt", "udhcpd")):
-            candidates.append(("Embedded Linux / IoT", 68, "DHCP vendor class"))
-        if prl:
-            opts = {x.strip() for x in prl.split(",") if x.strip().isdigit()}
-            if {1, 3, 6, 15, 119, 252}.issubset(opts):
-                candidates.append(("Windows-compatible network client", 60, "DHCP parameter-request-list pattern"))
-            elif {1, 3, 6, 12, 15, 28, 42}.issubset(opts):
-                candidates.append(("Unix-like network client", 58, "DHCP parameter-request-list pattern"))
+        hn, vc, prl = (row[0] or ""), (row[1] or ""), (row[2] or "")
+        dhcp_analysis = _analyse_dhcp_identity(
+            vendor_class=vc, hostname=hn, parameter_request_list=prl,
+            client_identifier=row[3] if len(row) > 3 else "")
+        for item in dhcp_analysis.get("hints", []):
+            category = item.get("category", "")
+            confidence = int(item.get("confidence", 0) or 0)
+            reason = item.get("reason", "DHCP fingerprint")
+            mapped = {
+                "Android mobile client": "Android/mobile device",
+                "Microsoft DHCP client": "Windows-compatible network client",
+                "Embedded Linux DHCP client": "Embedded Linux / IoT",
+                "dhcpcd-based client": "Unix-like network client candidate",
+                "Mobile device candidate": "Mobile device candidate",
+                "Printer candidate": "Printer candidate",
+                "Network infrastructure candidate": "Network infrastructure candidate",
+            }.get(category, category)
+            if mapped:
+                candidates.append((mapped, min(78, confidence), reason))
 
     mdns_rules = [
         (("_ipp._tcp", "_printer._tcp", "_pdl-datastream._tcp"), "Printer", 82, "mDNS/DNS-SD printing service"),
@@ -1703,6 +1728,11 @@ _RECOGNITION_RULES = [
     ("Apple computer", 0.91, "reported", (r"macbook", r"imac", r"mac mini", r"macos", r"darwin")),
     ("Apple mobile device", 0.91, "reported", (r"iphone", r"ipad", r"ios device", r"apple mobile")),
     ("Android mobile device", 0.88, "reported", (r"android", r"pixel [0-9]", r"samsung galaxy", r"oneplus", r"xiaomi", r"redmi", r"oppo", r"vivo")),
+    ("Android mobile device", 0.78, "dhcp", (r"android-dhcp", r"android mobile client")),
+    ("Windows computer", 0.76, "dhcp", (r"\bmsft\s*\d", r"microsoft dhcp client")),
+    ("Embedded Linux / IoT", 0.78, "dhcp", (r"\budhcp\b", r"\bbusybox\b", r"embedded linux dhcp client")),
+    ("Unix-like / embedded client", 0.66, "dhcp", (r"\bdhcpcd\b", r"dhcpcd-based client")),
+    ("Network boot client", 0.84, "dhcp", (r"\bpxeclient\b", r"\bipxe\b", r"\bhttpclient\b")),
     ("Smart-home / IoT", 0.88, "service", (r"home assistant", r"tasmota", r"shelly", r"tuya", r"zigbee", r"zwave", r"_hap\._tcp")),
     ("UPS / power equipment", 0.91, "reported", (r"apc ups", r"eaton ups", r"powerware", r"ups network management")),
 ]
@@ -1721,7 +1751,9 @@ def advanced_device_recognition(device):
                        ("device_name", "Discovered name"), ("model", "Reported model"),
                        ("reported_manufacturer", "Reported manufacturer")):
         add("reported", device.get(key, ""), label, 0.78 if key in ("hostname", "device_name") else 0.92)
-    add("oui", device.get("oui_manufacturer") or device.get("vendor", ""), "IEEE OUI allocation", 0.55)
+    oui_detail = device.get("oui_assignment") or {}
+    add("oui", oui_detail.get("organization") or device.get("oui_manufacturer") or device.get("vendor", ""),
+        "IEEE MAC address-block registrant", 0.55)
     add("os", device.get("os_guess", ""), "Nmap OS fingerprint", 0.82)
     passive = device.get("passive_tcp") or {}
     add("tcpip", passive.get("signature", ""), "Passive TCP SYN fingerprint", 0.55)
@@ -1743,6 +1775,9 @@ def advanced_device_recognition(device):
     for row in device.get("dhcp_identity", []) or []:
         add("dhcp", " ".join(str(row.get(k, "")) for k in ("vendor_class", "hostname", "parameter_request_list")),
             "DHCP client fingerprint", 0.72)
+    for item in device.get("dhcp_intelligence", []) or []:
+        add("dhcp", item.get("category", "") + " " + item.get("reason", ""),
+            "Interpreted DHCP fingerprint", min(0.78, float(item.get("confidence", 0) or 0) / 100.0))
 
     searchable = " | ".join(x["value"] for x in facts).lower()
     ports = {int(x) for x in device.get("port_numbers", []) if str(x).isdigit()}
@@ -1756,6 +1791,8 @@ def advanced_device_recognition(device):
     matches = []
     for category, weight, _rule_family, patterns in _RECOGNITION_RULES:
         for fact in facts:
+            if not recognition_family_compatible(_rule_family, fact["family"]):
+                continue
             hit = next((pat for pat in patterns if re.search(pat, fact["value"], re.I)), None)
             if hit:
                 family = fact["family"]
@@ -1813,6 +1850,7 @@ def advanced_device_recognition(device):
         "model": reported_model if reported_model and not _placeholder(reported_model) else "",
         "manufacturer": reported_maker if reported_maker and not _placeholder(reported_maker) else "",
         "nic_manufacturer": _clean(device.get("oui_manufacturer") or device.get("vendor", ""), 160),
+        "nic_address_block_registrant": oui_detail,
         "evidence": facts, "matches": matches,
         "passive_tcp_os_hint": (device.get("passive_tcp") or {}).get("os_family_hint", ""),
         "alternatives": [{"category": x[1], "confidence": x[0], "source_families": x[2]} for x in ranked[1:4]],
@@ -1835,9 +1873,12 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
     vendor = device.get("vendor", "")
     if mac:
         org, props = oui_lookup(mac)
+        assignment = oui_lookup_details(mac)
+        if assignment:
+            device["oui_assignment"] = assignment
         if org:
-            device["oui_manufacturer"] = org
-            evidence.append(("IEEE OUI", "NIC manufacturer", org, 58, "OBSERVED"))
+            device["oui_manufacturer"] = org  # legacy DB/API field; see oui_assignment for precise meaning
+            evidence.append(("IEEE MAC registry", "NIC address-block registrant", org, 58, "OBSERVED"))
         if props["locally_administered"]:
             evidence.append(("MAC analysis", "MAC address type",
                              "Locally administered/randomisable MAC", 65, "OBSERVED"))
@@ -1864,10 +1905,9 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
             dhcp_rows = _recent_dhcp_evidence(conn, device)
     except Exception:
         pass
-    device["dhcp_identity"] = [
-        {"hostname": r[0] or "", "vendor_class": r[1] or "",
-         "parameter_request_list": r[2] or "", "client_identifier": r[3] or ""}
-        for r in dhcp_rows]
+    device["dhcp_identity"] = []
+    dhcp_hints = {}
+    dhcp_profiles = []
     for row in dhcp_rows:
         hn, vc, prl, cid, _ = row
         if hn:
@@ -1878,6 +1918,28 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
             evidence.append(("DHCP", "Parameter request list", prl, 58, "OBSERVED"))
         if cid:
             evidence.append(("DHCP", "Client identifier", cid, 55, "OBSERVED"))
+        analysis = _analyse_dhcp_identity(
+            vendor_class=vc, hostname=hn, parameter_request_list=prl,
+            client_identifier=cid)
+        identity_row = {"hostname": hn, "vendor_class": vc,
+                        "parameter_request_list": prl, "client_identifier": cid,
+                        "parameter_request_list_names":
+                            analysis["fingerprint"]["parameter_request_list_names"]}
+        device["dhcp_identity"].append(identity_row)
+        for feature in analysis.get("features", []):
+            if feature not in dhcp_profiles:
+                dhcp_profiles.append(feature)
+        for item in analysis.get("hints", []):
+            key = (item.get("category", ""), item.get("attribute", "client_family"))
+            if key not in dhcp_hints or int(item.get("confidence", 0)) > int(dhcp_hints[key].get("confidence", 0)):
+                dhcp_hints[key] = item
+    device["dhcp_intelligence"] = list(dhcp_hints.values())
+    device["dhcp_profile_features"] = dhcp_profiles
+    for item in device["dhcp_intelligence"]:
+        attr = "DHCP network role hint" if item.get("attribute") == "network_role" else "DHCP client-family hint"
+        evidence.append(("DHCP fingerprint", attr,
+                         item.get("category", "") + ": " + item.get("reason", ""),
+                         int(item.get("confidence", 0)), "INFERRED"))
     if dhcp_rows:
         signatures = sorted({dhcp_fingerprint(row[1] or "", row[2] or "")
                              for row in dhcp_rows if row[1] or row[2]})
@@ -1964,6 +2026,7 @@ _IDENTITY_SOURCE_FAMILY = {
     "ieee oui": "mac_allocation", "mac analysis": "mac_properties",
     "hostname discovery": "name_resolution", "reverse dns": "name_resolution",
     "netbios": "windows_name_service", "dhcp": "dhcp",
+    "dhcp fingerprint": "dhcp",
     "mdns/dns-sd": "mdns", "ssdp/upnp": "upnp",
     "nmap os detection": "tcpip_fingerprint", "identity classifier": "heuristic_classifier",
     "tls certificate": "tls", "snmpv3": "snmp", "local adapter": "local_endpoint",
@@ -6787,11 +6850,13 @@ def deep_fingerprint(devices):
             # A host block with an explicit ports element is a completed result even if empty.
             if ports_node is None: continue
             dev["_port_scan_complete"] = True
-            osms = host.findall("./os/osmatch")
-            if osms:
-                best = max(osms, key=lambda m: int(m.get("accuracy", "0")))
-                name = _clean(best.get("name", "")); acc = int(best.get("accuracy", "0"))
-                if name: dev["os_guess"] = f"{name} ({acc}% Nmap)"
+            os_fingerprint = best_os_match(host)
+            if os_fingerprint:
+                dev["nmap_os_fingerprint"] = os_fingerprint
+                name = _clean(os_fingerprint.get("name", ""))
+                acc = os_fingerprint.get("accuracy", 0)
+                if name:
+                    dev["os_guess"] = f"{name} ({acc}% Nmap match accuracy)"
             for port in ports_node.findall("./port"):
                 st = port.find("state")
                 if st is None or st.get("state") != "open": continue
@@ -7074,6 +7139,11 @@ def _main_inner():
                             mdns_rows = mdns_passive_snapshot(duration=2)
                         except Exception:
                             mdns_rows = []
+                        # Active DNS-SD browsing is approval-gated and rate-bounded.
+                        try:
+                            mdns_rows.extend(mdns_active_snapshot(duration=2.0))
+                        except Exception:
+                            pass
                     devices = enrich_devices(devices, deep=deep, mdns_rows=mdns_rows)
                     # Keep Phantom Track in step with the completed inventory run.
                     # Offline devices are not re-observed; their anchors remain historical.

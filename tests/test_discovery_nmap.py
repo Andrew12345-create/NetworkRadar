@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from networkradar_modules.discovery.nmap import (
+    best_os_match,
     parse_nmap_xml,
     run_nmap_discovery,
 )
@@ -56,6 +57,31 @@ class NmapXMLParserTests(unittest.TestCase):
     def test_malformed_xml_is_rejected(self):
         with self.assertRaises(Exception):
             parse_nmap_xml("<nmaprun><host>")
+
+
+    def test_best_os_match_preserves_classes_and_marks_accuracy_semantics(self):
+        import xml.etree.ElementTree as ET
+        host = ET.fromstring("""<host><os>
+          <osmatch name="Linux 5.x" accuracy="96">
+            <osclass vendor="Linux" osfamily="Linux" osgen="5.X"
+                     type="general purpose" accuracy="96">
+              <cpe>cpe:/o:linux:linux_kernel:5</cpe>
+            </osclass>
+          </osmatch>
+          <osmatch name="Linux 4.x" accuracy="80"/>
+        </os></host>""")
+        result = best_os_match(host)
+        self.assertEqual(result["name"], "Linux 5.x")
+        self.assertEqual(result["accuracy"], 96)
+        self.assertEqual(result["classes"][0]["vendor"], "Linux")
+        self.assertEqual(result["classes"][0]["cpe"][0], "cpe:/o:linux:linux_kernel:5")
+        self.assertIn("not a probability", result["interpretation"])
+
+    def test_best_os_match_handles_missing_and_malformed_accuracy(self):
+        import xml.etree.ElementTree as ET
+        self.assertEqual(best_os_match(ET.fromstring("<host/>")), {})
+        host = ET.fromstring('<host><os><osmatch name="Unknown" accuracy="bad"/></os></host>')
+        self.assertEqual(best_os_match(host)["accuracy"], 0)
 
 
 class NmapExecutionTests(unittest.TestCase):

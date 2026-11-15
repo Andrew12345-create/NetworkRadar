@@ -88,3 +88,41 @@ def run_nmap_discovery(
     if result.returncode != 0:
         raise RuntimeError(f"Nmap failed: {stderr[-1000:]}")
     return parse_nmap_xml(stdout), duration
+
+
+def best_os_match(host: ET.Element) -> dict:
+    """Return the strongest structured Nmap OS match without overstating certainty.
+
+    Nmap's accuracy is a fingerprint-match score, not a calibrated probability.
+    OS classes and CPEs are retained as supporting evidence; no hardware model
+    is inferred from an OS match.
+    """
+    matches = host.findall("./os/osmatch")
+    if not matches:
+        return {}
+    def accuracy(node: ET.Element) -> int:
+        try:
+            return max(0, min(100, int(node.get("accuracy", "0"))))
+        except (TypeError, ValueError):
+            return 0
+    best = max(matches, key=accuracy)
+    classes = []
+    for node in best.findall("./osclass"):
+        classes.append({
+            "vendor": (node.get("vendor") or "")[:100],
+            "family": (node.get("osfamily") or "")[:100],
+            "generation": (node.get("osgen") or "")[:60],
+            "type": (node.get("type") or "")[:60],
+            "accuracy": accuracy(node),
+            "cpe": [
+                (item.text or "")[:200]
+                for item in node.findall("./cpe") if item.text
+            ][:10],
+        })
+    return {
+        "name": (best.get("name") or "")[:200],
+        "accuracy": accuracy(best),
+        "classes": classes[:20],
+        "method": "Nmap OS fingerprint",
+        "interpretation": "Nmap match accuracy; not a probability",
+    }
