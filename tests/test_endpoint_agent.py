@@ -12,7 +12,7 @@ class CertificatePinTests(unittest.TestCase):
         self.assertEqual(agent.normalise_certificate_pin(pin), "aabb" + "cc" * 29 + "dd")
 
     def test_rejects_short_or_non_hex_pin(self):
-        for value in ("abcd", "z" * 64, "", "00" * 31):
+        for value in ("abcd", "z" * 64, "", "00" * 31, "ab" * 32 + "zz"):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
                     agent.normalise_certificate_pin(value)
