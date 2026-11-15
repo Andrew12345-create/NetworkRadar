@@ -8,8 +8,8 @@ from agent import networkradar_agent as agent
 
 class CertificatePinTests(unittest.TestCase):
     def test_normalises_colon_delimited_sha256_pin(self):
-        pin = "AA:BB:" + ":".join(["CC"] * 30) + ":DD"
-        self.assertEqual(agent.normalise_certificate_pin(pin), "aabb" + "cc" * 30 + "dd")
+        pin = "AA:BB:" + ":".join(["CC"] * 29) + ":DD"
+        self.assertEqual(agent.normalise_certificate_pin(pin), "aabb" + "cc" * 29 + "dd")
 
     def test_rejects_short_or_non_hex_pin(self):
         for value in ("abcd", "z" * 64, "", "00" * 31):
