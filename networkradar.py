@@ -231,6 +231,7 @@ from networkradar_modules.discovery.mdns import discover_mdns as _discover_mdns
 from networkradar_modules.network.workspaces import (
     classify_interface_type, parse_netsh_wlan_interfaces, ensure_workspace,
     record_interface_observation, upsert_legacy_network_profile,
+    has_strong_network_anchor,
 )
 
 def _score_identity_evidence(candidate, *, now=None, thresholds=None,
@@ -1176,6 +1177,10 @@ def _authz_decision(detected, profiles):
         return False, "INDETERMINATE", [
             "Network fingerprint could not be computed from confirmed evidence.",
             f"Classification: {fp_class}."], None
+    if not has_strong_network_anchor(detected):
+        return False, "INDETERMINATE", [
+            "No strong network anchor (gateway MAC or interface-specific BSSID) was observed.",
+            "Active discovery remains disabled until the network can be distinguished reliably."], None
     if weight < MIN_FP_CONFIDENCE:
         return False, "INDETERMINATE", [
             f"Fingerprint confidence {weight:.0%} < {MIN_FP_CONFIDENCE:.0%}.",
