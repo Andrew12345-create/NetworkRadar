@@ -59,7 +59,7 @@ NetworkRadar now records separately identified network workspaces using opaque I
 
 Active discovery also requires a strong network anchor (gateway MAC or interface-specific BSSID); a high fingerprint score based only on shared network settings cannot authorise scanning. The dashboard Network Workspaces explorer is a historical, read-only view. It shows observed interfaces and device sightings for each workspace. Selecting a historical workspace does not switch the active scanner or grant authorisation. Existing legacy inventory and history tables are retained; the new workspace and sighting tables are additive.
 
-A fingerprint change currently creates a separate workspace rather than automatically merging networks. This is intentional: roaming access points, changing gateways and overlapping subnets need conservative correlation and explicit review before workspaces are merged.
+After upgrading to 12.2.0, approve each network again before active discovery. Workspace-specific approval records start unapproved because legacy subnet-keyed approvals cannot be safely assigned to individual workspaces. A fingerprint change currently creates a separate workspace rather than automatically merging networks. This is intentional: roaming access points, changing gateways and overlapping subnets need conservative correlation and explicit review before workspaces are merged.
 
 ## Packet-capture interface selection
 
