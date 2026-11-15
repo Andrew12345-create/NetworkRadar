@@ -935,18 +935,64 @@ def _ps(cmd, timeout=15):
     return data if isinstance(data, list) else [data]
 
 def _gateway_mac_via_neighbor(gw_ip, interface_index=None):
-    if not gw_ip:
+    """Resolve the selected interface's default gateway MAC, refreshing ARP once.
+
+    The only active probe is one bounded ping to the already-detected default
+    gateway. Neighbour results are scoped to that interface and exact gateway.
+    """
+    try:
+        gateway = ipaddress.ip_address(str(gw_ip or "").strip())
+        if gateway.version != 4 or gateway.is_unspecified or gateway.is_multicast:
+            return None
+    except ValueError:
         return None
-    interface_filter = (f" -InterfaceIndex {int(interface_index)}"
-                        if interface_index is not None else "")
-    rows = _ps(f"Get-NetNeighbor -AddressFamily IPv4{interface_filter} -IPAddress '{gw_ip}' | "
-               f"Select-Object IPAddress,InterfaceIndex,LinkLayerAddress,State | ConvertTo-Json -Depth 3")
-    for r in rows:
-        ll = _norm_mac(r.get("LinkLayerAddress"))
-        st = str(r.get("State") or "")
-        if _is_real_mac(ll) and st in ("Reachable", "Stale", "Permanent"):
-            return ll
-    return None
+
+    try:
+        idx = int(interface_index) if interface_index is not None else None
+    except (TypeError, ValueError):
+        return None
+
+    def _read_gateway_neighbor():
+        interface_filter = f" -InterfaceIndex {idx}" if idx is not None else ""
+        rows = _ps(
+            f"Get-NetNeighbor -AddressFamily IPv4{interface_filter} "
+            f"-IPAddress '{gateway}' -ErrorAction SilentlyContinue | "
+            "Select-Object IPAddress,InterfaceIndex,LinkLayerAddress,State "
+            "| ConvertTo-Json -Depth 3"
+        )
+        for row in rows:
+            try:
+                if ipaddress.ip_address(str(row.get("IPAddress", ""))) != gateway:
+                    continue
+            except ValueError:
+                continue
+            if idx is not None:
+                try:
+                    if int(row.get("InterfaceIndex", -1)) != idx:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+            mac = _norm_mac(row.get("LinkLayerAddress"))
+            state = str(row.get("State") or "").strip().casefold()
+            if valid_unicast_mac(mac) and state in {"reachable", "stale", "permanent"}:
+                return mac
+        return None
+
+    mac = _read_gateway_neighbor()
+    if mac:
+        return mac
+
+    # Windows may not have populated the neighbour cache yet. Prime only the
+    # selected route's gateway; do not sweep or probe other LAN addresses.
+    try:
+        subprocess.run(
+            ["ping", "-n", "1", "-w", "900", str(gateway)],
+            capture_output=True, text=True, timeout=2,
+            encoding="utf-8", errors="replace",
+        )
+    except Exception:
+        pass
+    return _read_gateway_neighbor()
 
 def _wifi_details(interface_name=None):
     """Return SSID/BSSID for the requested WLAN interface, never another adapter."""
