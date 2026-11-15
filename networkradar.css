@@ -2163,3 +2163,6 @@ th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hov
 .fw-footnote{margin-top:14px;line-height:1.6}
 @media(max-width:1000px){.fw-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:600px){.fw-metrics,.fw-profiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* NIGHTWATCH reconciliation note */
+.nw-inventory-status{margin:-5px 0 16px;padding:9px 12px;border:1px solid #20394a;border-radius:7px;background:#0a141e;color:#8da8b8;font:10px Consolas,monospace;letter-spacing:.35px}
