@@ -1769,3 +1769,317 @@ tbody tr:hover { background:rgba(71,169,232,.09); }
 @media(prefers-reduced-motion:reduce) {
   *,*::before,*::after { scroll-behavior:auto!important; transition-duration:.01ms!important; animation-duration:.01ms!important; animation-iteration-count:1!important; }
 }
+
+
+/* ================================================================
+   NETWORKRADAR 12.1.1 — DEVICE INSPECTOR READABILITY FIX
+   The device dossier is a primary workflow: keep it above navigation,
+   use the available viewport, and make every evidence panel readable.
+   ================================================================ */
+#deviceModal {
+  z-index: 1200 !important;
+  padding: 12px;
+  background: rgba(1, 8, 16, .88);
+  backdrop-filter: blur(10px);
+}
+#deviceModal.open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#deviceModal .modalbox {
+  width: min(1500px, 97vw);
+  max-width: 97vw;
+  height: min(920px, calc(100dvh - 24px));
+  max-height: calc(100dvh - 24px);
+  min-height: 0;
+  padding: 20px 22px 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(105, 184, 232, .48);
+  border-radius: 18px;
+  background: linear-gradient(155deg, #10263c 0%, #0b1b2d 48%, #091725 100%);
+  box-shadow: 0 32px 110px rgba(0,0,0,.78), 0 0 0 1px rgba(92,228,220,.07);
+}
+#deviceModal .modalhead {
+  flex: 0 0 auto;
+  min-height: 54px;
+  margin-bottom: 4px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid rgba(116,170,207,.26);
+}
+#deviceModal .modalhead .sub {
+  color: #78bde9;
+  font-size: 10px;
+  font-weight: 800;
+}
+#deviceModal .modalhead h2 {
+  color: #f3f8ff;
+  font-size: clamp(18px, 2vw, 25px);
+  line-height: 1.25;
+  letter-spacing: -.25px;
+}
+#deviceModal .modalhead button {
+  flex: 0 0 auto;
+  min-width: 82px;
+}
+#deviceModal .modalcontent {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  padding: 0 5px 8px 0;
+  overflow: auto;
+  color: #e4eff9;
+  font-size: 13px;
+  line-height: 1.65;
+  scrollbar-width: thin;
+  scrollbar-color: #47799b #0a1928;
+}
+#deviceModal .device-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 7px;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 18px;
+  padding: 13px 4px 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid rgba(116,170,207,.24);
+  background: #0c1e30;
+  box-shadow: 0 8px 16px rgba(0,0,0,.16);
+  scrollbar-width: thin;
+  scrollbar-color: #47799b transparent;
+}
+#deviceModal .device-tab {
+  flex: 0 0 auto;
+  min-height: 39px;
+  padding: 8px 13px;
+  border: 1px solid #31516c;
+  border-radius: 10px;
+  background: #142d45;
+  color: #c5d9eb;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .15px;
+}
+#deviceModal .device-tab:hover {
+  color: #fff;
+  border-color: #62b7e8;
+  background: #1a3b59;
+}
+#deviceModal .device-tab[aria-selected="true"] {
+  color: #f4fbff;
+  border-color: #57c7d8;
+  background: linear-gradient(135deg, #18517a, #14505a);
+  box-shadow: inset 0 -2px 0 #65e0d5, 0 4px 14px rgba(0,0,0,.2);
+}
+#deviceModal .device-pane {
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  padding: 2px 2px 22px;
+  color: #dce9f5;
+  overflow-wrap: anywhere;
+}
+#deviceModal .device-pane.active {
+  display: block;
+  animation: nr-pane-in .16s ease-out;
+}
+@keyframes nr-pane-in {
+  from { opacity: .72; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+#deviceModal .device-pane h3 {
+  margin: 22px 0 11px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(116,170,207,.2);
+  color: #9ed5f5;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 1.05px;
+  line-height: 1.5;
+}
+#deviceModal .profilegrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 11px;
+  align-items: stretch;
+}
+#deviceModal .profileitem,
+#deviceModal .device-kpi {
+  min-width: 0;
+  padding: 14px 15px;
+  overflow: hidden;
+  border: 1px solid rgba(116,170,207,.25);
+  border-radius: 12px;
+  background: linear-gradient(145deg, #142f49, #0e2236);
+  box-shadow: 0 5px 16px rgba(0,0,0,.13);
+}
+#deviceModal .profileitem .label,
+#deviceModal .device-kpi .label {
+  color: #9bbbd5;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+#deviceModal .profileitem .value {
+  margin-top: 7px;
+  color: #f0f7ff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+#deviceModal .device-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 11px;
+  margin: 12px 0 18px;
+}
+#deviceModal .device-kpi strong {
+  color: #f2f8ff;
+  font-size: 26px;
+  line-height: 1.3;
+}
+#deviceModal .device-kpi {
+  background: linear-gradient(145deg, #163650, #10263b);
+}
+#deviceModal .scroll {
+  width: 100%;
+  max-width: 100%;
+  max-height: min(48vh, 460px);
+  overflow: auto;
+  border: 1px solid rgba(116,170,207,.28);
+  border-radius: 11px;
+  background: rgba(3,13,23,.52);
+  scrollbar-width: thin;
+  scrollbar-color: #47799b #0a1928;
+}
+#deviceModal .device-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+#deviceModal .device-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 12px 13px;
+  color: #b9d7ed;
+  background: #17334d;
+  border-bottom: 1px solid #3b607d;
+  font-size: 10px;
+  letter-spacing: .85px;
+  white-space: nowrap;
+}
+#deviceModal .device-table td {
+  padding: 11px 13px;
+  color: #e0ebf5;
+  border-bottom: 1px solid rgba(116,170,207,.13);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+#deviceModal .device-table tbody tr:nth-child(even) {
+  background: rgba(118,178,220,.045);
+}
+#deviceModal .device-table tbody tr:hover {
+  background: rgba(75,171,225,.1);
+}
+#deviceModal .device-empty {
+  padding: 22px;
+  color: #b5cadd;
+  border: 1px dashed #456782;
+  border-radius: 12px;
+  background: rgba(8,25,41,.55);
+  font-size: 13px;
+}
+#deviceModal .notice {
+  padding: 13px 15px;
+  color: #ffe4ad;
+  border: 1px solid rgba(220,171,86,.48);
+  border-radius: 11px;
+  background: linear-gradient(100deg, rgba(75,54,22,.72), rgba(47,37,24,.72));
+  line-height: 1.65;
+}
+#deviceModal .hint,
+#deviceModal p {
+  color: #afc4d7;
+  line-height: 1.7;
+}
+#deviceModal .identity-quality {
+  padding: 17px;
+  border-color: rgba(90,201,218,.38);
+  background: linear-gradient(145deg, rgba(17,55,76,.92), rgba(9,29,47,.96));
+}
+#deviceModal .quality-item {
+  background: rgba(4,17,29,.58);
+}
+@media (max-width: 900px) {
+  #deviceModal { padding: 8px; }
+  #deviceModal .modalbox {
+    width: 100%;
+    max-width: 100%;
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 15px;
+  }
+  #deviceModal .device-kpis {
+    grid-template-columns: repeat(3,minmax(0,1fr));
+  }
+}
+@media (max-width: 600px) {
+  #deviceModal { padding: 5px; }
+  #deviceModal .modalbox {
+    height: calc(100dvh - 10px);
+    max-height: calc(100dvh - 10px);
+    padding: 11px;
+    border-radius: 12px;
+  }
+  #deviceModal .modalhead {
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 10px;
+  }
+  #deviceModal .modalhead h2 { font-size: 16px; }
+  #deviceModal .modalcontent { font-size: 12px; }
+  #deviceModal .device-tabs {
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 10px 2px;
+  }
+  #deviceModal .device-tab {
+    min-height: 36px;
+    padding: 7px 10px;
+    font-size: 10px;
+  }
+  #deviceModal .profilegrid {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: 8px;
+  }
+  #deviceModal .profileitem { padding: 10px; }
+  #deviceModal .profileitem .value { font-size: 13px; }
+  #deviceModal .device-kpis {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: 8px;
+  }
+  #deviceModal .device-kpi { padding: 10px; }
+  #deviceModal .device-kpi strong { font-size: 20px; }
+  #deviceModal .scroll { max-height: 42vh; }
+  #deviceModal .device-table { min-width: 660px; }
+}
+@media (max-width: 380px) {
+  #deviceModal .profilegrid,
+  #deviceModal .device-kpis { grid-template-columns: minmax(0,1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #deviceModal .device-pane.active { animation: none; }
+}
