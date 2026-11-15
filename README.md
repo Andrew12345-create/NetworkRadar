@@ -57,7 +57,7 @@ The dashboard opens at **http://127.0.0.1:8766** by default.
 
 NetworkRadar now records separately identified network workspaces using opaque IDs and fingerprint history. Different networks using the same private subnet are kept separate in the workspace directory. Active adapters are collected independently and classified as Wi-Fi, Ethernet, VPN, virtual or other; the selected primary adapter remains the only network used by the current active-discovery and authorisation loop.
 
-The dashboard Network Workspaces explorer is a historical, read-only view. It shows observed interfaces and device sightings for each workspace. Selecting a historical workspace does not switch the active scanner or grant authorisation. Existing legacy inventory and history tables are retained; the new workspace and sighting tables are additive.
+Active discovery also requires a strong network anchor (gateway MAC or interface-specific BSSID); a high fingerprint score based only on shared network settings cannot authorise scanning. The dashboard Network Workspaces explorer is a historical, read-only view. It shows observed interfaces and device sightings for each workspace. Selecting a historical workspace does not switch the active scanner or grant authorisation. Existing legacy inventory and history tables are retained; the new workspace and sighting tables are additive.
 
 A fingerprint change currently creates a separate workspace rather than automatically merging networks. This is intentional: roaming access points, changing gateways and overlapping subnets need conservative correlation and explicit review before workspaces are merged.
 
