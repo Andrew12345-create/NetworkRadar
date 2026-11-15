@@ -7,7 +7,8 @@ from .arp import parse_arp_output, read_arp_cache
 from .classification import infer_type
 from .nmap import best_os_match, parse_nmap_xml, run_nmap_discovery
 from .probes import (
-    is_same_private_http_host, netbios_name, reverse_dns, ssdp_scan,\n    parse_upnp_description,
+    is_same_private_http_host, netbios_name, reverse_dns, ssdp_scan,
+    parse_upnp_description,
 )
 from .mdns import build_ptr_query, discover_mdns, parse_mdns_packet
 
