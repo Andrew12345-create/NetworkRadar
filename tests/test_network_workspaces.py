@@ -1,0 +1,43 @@
+import sqlite3
+import unittest
+from networkradar_modules.network.workspaces import (
+    classify_interface_type, ensure_workspace, parse_netsh_wlan_interfaces,
+    record_interface_observation,
+)
+
+class NetworkWorkspaceTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.executescript("""
+            CREATE TABLE network_workspaces(network_id TEXT PRIMARY KEY, display_name TEXT, network_type TEXT, created_at TEXT, last_seen TEXT, current_fingerprint TEXT, status TEXT);
+            CREATE TABLE network_fingerprint_history(fingerprint TEXT PRIMARY KEY, network_id TEXT, first_seen TEXT, last_seen TEXT, network TEXT, gateway TEXT, gateway_mac TEXT, dns_servers TEXT, ssid TEXT, bssid TEXT, interface_name TEXT, interface_guid TEXT, confidence INTEGER, fingerprint_raw TEXT);
+            CREATE TABLE network_interface_observations(id INTEGER PRIMARY KEY, network_id TEXT, timestamp TEXT, interface_index INTEGER, interface_name TEXT, interface_guid TEXT, interface_description TEXT, interface_type TEXT, status TEXT, ip TEXT, prefix INTEGER, network TEXT, gateway TEXT, gateway_mac TEXT, dns_servers TEXT, dhcp TEXT, ssid TEXT, bssid TEXT, route_metric INTEGER, adapter_mac TEXT, is_primary INTEGER);
+        """)
+    def tearDown(self):
+        self.db.close()
+    def test_same_subnet_different_fingerprints_get_distinct_workspaces(self):
+        a = {"fingerprint": "fp-home", "network": "192.168.1.0/24", "ssid": "Home"}
+        b = {"fingerprint": "fp-office", "network": "192.168.1.0/24", "ssid": "Office"}
+        self.assertNotEqual(ensure_workspace(self.db, a, "t1"), ensure_workspace(self.db, b, "t2"))
+    def test_same_fingerprint_reuses_workspace(self):
+        a = {"fingerprint": "fp-a", "network": "10.0.0.0/24"}
+        self.assertEqual(ensure_workspace(self.db, a, "t1"), ensure_workspace(self.db, a, "t2"))
+    def test_missing_fingerprint_does_not_create_workspace(self):
+        self.assertEqual(ensure_workspace(self.db, {"network": "10.0.0.0/24"}, "t"), "")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM network_workspaces").fetchone()[0], 0)
+    def test_wifi_parser_keeps_interfaces_separate(self):
+        rows = parse_netsh_wlan_interfaces("Name : Wi-Fi\nSSID : Home\nBSSID : aa:bb:cc:dd:ee:01\n\nName : Wi-Fi 2\nSSID : Guest\nBSSID : aa:bb:cc:dd:ee:02")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1]["ssid"], "Guest")
+    def test_interface_type_classification(self):
+        self.assertEqual(classify_interface_type("Wi-Fi"), "WIFI")
+        self.assertEqual(classify_interface_type("Ethernet 2"), "ETHERNET")
+        self.assertEqual(classify_interface_type("WireGuard Tunnel"), "VPN")
+        self.assertEqual(classify_interface_type("vEthernet (Default Switch)"), "VIRTUAL")
+    def test_interface_observation_is_network_scoped(self):
+        record_interface_observation(self.db, "workspace-a", {"idx": 7, "interface": "Wi-Fi", "interface_type": "WIFI", "ip": "192.168.1.20", "prefix": 24}, "t1", True)
+        row = self.db.execute("SELECT network_id,interface_name,is_primary FROM network_interface_observations").fetchone()
+        self.assertEqual(row, ("workspace-a", "Wi-Fi", 1))
+
+if __name__ == "__main__":
+    unittest.main()
