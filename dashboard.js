@@ -290,11 +290,30 @@ function nwActivity(events,alerts){
  items.sort((a,b)=>String(b.time||"").localeCompare(String(a.time||"")));
  const list=items.slice(0,12);el.innerHTML=list.length?list.map(x=>{const s=String(x.severity).toUpperCase(),cl=s==="HIGH"||s==="CRITICAL"?"high":s==="MEDIUM"?"medium":"info";return '<article class="nw-feed-item"><time>'+esc(x.time||"Time unavailable")+'</time><div><b>'+esc(x.title)+'</b><small>'+esc(x.detail)+'</small></div><span>'+esc(x.ip||"LOCAL")+'</span><em class="'+cl+'">'+esc(s)+'</em></article>';}).join(""):'<div class="nw-feed-empty">No recent events or alerts have been recorded. This does not mean the network is threat-free.</div>';
 }
+function renderFirewall(f){
+ const badge=$("fwStatusBadge"),host=$("firewallSnapshot");
+ if(!host)return;
+ const status=String(f.status||"UNKNOWN").toUpperCase();
+ if(badge){badge.textContent=status;badge.className=status==="ONLINE"?"fw-online":"fw-degraded";}
+ const profiles=Array.isArray(f.profiles)?f.profiles:[];
+ const counts=f.rule_counts||{};
+ const cards=[["ENABLED PROFILES",profiles.filter(x=>x.enabled).length+" / "+profiles.length],["ACTIVE RULES",counts.enabled??"—"],["INBOUND RULES",counts.inbound??"—"],["OUTBOUND RULES",counts.outbound??"—"],["BLOCK RULES",counts.block??"—"],["ALLOW RULES",counts.allow??"—"]];
+ host.innerHTML='<div class="fw-metrics">'+cards.map(([k,v])=>'<article><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></article>').join('')+'</div>'+
+  '<div class="fw-profiles">'+(profiles.map(p=>'<article><b>'+esc(p.name)+'</b><span class="'+(p.enabled?'fw-on':'fw-off')+'">'+(p.enabled?'ENABLED':'DISABLED')+'</span><small>Inbound: '+esc(p.default_inbound_action)+' · Outbound: '+esc(p.default_outbound_action)+'</small></article>').join('')||'<div class="nw-feed-empty">No Windows firewall profiles returned.</div>')+'</div>'+
+  '<p class="fw-message">'+esc(f.message||"Firewall status unavailable.")+'</p>';
+}
 function renderNightwatch(s,n,d,dns,a,e,t){
- const online=d.filter(x=>String(x.status||"").toUpperCase()==="ONLINE").length;
+ const statusOf=x=>String(x.status||"UNKNOWN").toUpperCase();
+ const online=d.filter(x=>statusOf(x)==="ONLINE").length;
+ const offline=d.filter(x=>statusOf(x)==="OFFLINE").length;
+ const other=d.length-online-offline;
  const unknown=d.filter(x=>/unknown|unclassified|unidentified/i.test(String(x.device_type||""))||Number(x.identification_confidence||0)<25).length;
  nwSet("nwNetwork",n.network||s.network||"Network not identified");nwSet("nwGateway",n.gateway||"Not observed");nwSet("nwLastSync",new Date().toLocaleTimeString());
  nwSet("nwDevices",d.length);nwSet("nwOnline",online);nwSet("nwUnknown",unknown);nwSet("nwPorts",nwPortCount(d));nwSet("nwDns",dns.length);nwSet("nwAlerts",a.length);
+ const statusNote=$("nwInventoryStatus");
+ if(statusNote)statusNote.textContent=online+" ONLINE · "+offline+" OFFLINE · "+other+" OTHER / UNVERIFIED — totals reconcile to "+d.length+" known assets.";
+ const nodes=Array.isArray(t?.nodes)?t.nodes:[];
+ nwSet("nwRadarCount",nodes.length+" SIGNALS");
  nwSet("nwScanState",s.scan_status||s.discovery_status||"ENGINE ONLINE");nwSet("nwAuthState",n.authorized?"NETWORK AUTHORISED":"PASSIVE / NOT AUTHORISED");nwSet("nwEngineState","LOCAL API CONNECTED");
  const auth=$("nwAuthState");if(auth)auth.classList.toggle("authorised",!!n.authorized);nwTopology(t||{});nwActivity(e,a);
 }
@@ -306,13 +325,13 @@ async function refreshAll(){
   ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],["topology","/api/topology"],
   ["progress","/api/progress"],["investigations","/api/investigations"],
   ["network","/api/network"],["diagnostics","/api/diagnostics"],
-  ["engine","/api/engine_diagnostics"]
+  ["engine","/api/engine_diagnostics"],["firewall","/api/firewall"]
  ];
  try{
   const settled=await Promise.allSettled(specs.map(([,path])=>getJSON(path)));
   const data={},failed=[];
   settled.forEach((r,i)=>{const name=specs[i][0];if(r.status==="fulfilled")data[name]=r.value;else{data[name]=null;failed.push(name+": "+String(r.reason?.message||r.reason||"request failed"));}});
-  const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{};
+  const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{},fw=data.firewall||{};
   const statusOK=!!data.status;
   pill($("connection"),!statusOK?"API DEGRADED":(failed.length?"CONNECTED · PARTIAL":"CONNECTED"),!statusOK?"bad":(failed.length?"warn":"ok"));
   if(!statusOK){$("updated").textContent="Status API unavailable. "+failed.join(" | ");}
@@ -324,13 +343,14 @@ async function refreshAll(){
   $("online").textContent=s.online??"—";$("historical").textContent=s.historical??"—";$("deviceHint").textContent=(s.offline??"—")+" offline";$("openInvestigations").textContent=s.open_investigations??inv.length;
   const nr=$("networkRisk");nr.textContent=s.network_risk_band||"UNKNOWN";nr.className="value risk-"+(s.network_risk_band||"UNKNOWN");
   pill($("dnsStatus"),s.dns_status||"UNKNOWN",s.dns_status==="ONLINE"?"ok":"warn");pill($("dhcpStatus"),s.dhcp_status||"UNKNOWN",s.dhcp_status==="ONLINE"?"ok":"warn");pill($("arpStatus"),s.arp_status||"UNKNOWN",s.arp_status==="ONLINE"?"ok":"warn");
-  const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"").slice(0,60);
+  const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"");$("dhcpClass").title=dhcp.reason||"No DHCP diagnostic detail returned.";
   $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";$("scanQuality").textContent=(diag.scan_quality?.score??"—")+"/100 · "+(diag.scan_quality?.band||"—");
   if(data.devices){deviceCache=d;filterDevices();}else{$("deviceRows").innerHTML='<tr><td colspan="7">Device API unavailable. Check server log and /api/devices.</td></tr>';}
   $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||'<tr><td colspan="3">—</td></tr>';
   $("alertRows").innerHTML=a.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.client_ip)}</td><td>${esc(x.rule_id)}</td><td class="${x.severity==="HIGH"?"red":"amber"}">${esc(x.severity)}</td></tr>`).join("")||'<tr><td colspan="4">—</td></tr>';
   $("eventRows").innerHTML=e.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.category)}</td><td>${esc(x.event_type)}</td><td>${esc(x.details)}</td></tr>`).join("")||'<tr><td colspan="5">—</td></tr>';
   renderNightwatch(s,n,d,dnsRows,a,e,topology);
+  renderFirewall(fw);
   $("behaviourStatus").textContent=diag.behaviour?.message||"Behaviour diagnostics unavailable.";
   $("behaviourRows").innerHTML=((diag.behaviour?.baseline_devices||0)>0?'<tr><td colspan="5">See device detail for samples.</td></tr>':'<tr><td colspan="5">Collecting baselines.</td></tr>');
   $("investigationRows").innerHTML=inv.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.title)}</td><td>${esc(x.severity)}</td><td>${esc(x.status)}</td><td>${esc(x.evidence_count)}</td></tr>`).join("")||'<tr><td colspan="5">None.</td></tr>';

@@ -14,6 +14,7 @@
  <div class="nav-group">Network activity</div>
  <a href="#networkWorkspaces" data-short="NW" title="Network workspaces"><span class="nav-label">Network workspaces</span></a><a href="#profiles" data-short="NP" title="Network profiles"><span class="nav-label">Network profiles</span></a><a href="#dns" data-short="DN" title="DNS intelligence"><span class="nav-label">DNS intelligence</span></a><a href="#dhcp" data-short="DH" title="DHCP"><span class="nav-label">DHCP</span></a><a href="#arp" data-short="AR" title="ARP"><span class="nav-label">ARP</span></a><a href="#behaviour" data-short="BH" title="Behaviour"><span class="nav-label">Behaviour</span></a><a href="#changes" data-short="CH" title="Network changes"><span class="nav-label">Network changes</span></a>
  <div class="nav-group">Security &amp; investigations</div>
+ <a href="#firewall" data-short="FW" title="Firewall command centre"><span class="nav-label">Firewall command centre</span></a>
  <a href="#investigations" data-short="IN" title="Investigations"><span class="nav-label">Investigations</span></a><a href="#alerts" data-short="AL" title="Alert stream"><span class="nav-label">Alert stream</span></a><a href="#config" data-short="AU" title="Configuration audit"><span class="nav-label">Configuration audit</span></a><a href="#hunt" data-short="TH" title="Threat hunt"><span class="nav-label">Threat hunt</span></a><a href="#exposure" data-short="EX" title="Exposure intelligence"><span class="nav-label">Exposure intelligence</span></a>
  <div class="nav-group">Remote management</div>
  <a href="#phantomAccess" data-short="PA" title="Phantom Access"><span class="nav-label">Phantom Access</span></a><a href="#commandCenter" data-short="ME" title="Managed endpoints"><span class="nav-label">Managed endpoints</span></a>
@@ -32,9 +33,16 @@
 <section class="nightwatch-metrics">
  <article><span>DISCOVERED ASSETS</span><strong id="nwDevices">—</strong><small>Known device records</small></article><article><span>ONLINE NOW</span><strong id="nwOnline">—</strong><small>Current inventory state</small></article><article><span>UNCLASSIFIED</span><strong id="nwUnknown">—</strong><small>Identity needs more evidence</small></article><article><span>OPEN PORTS</span><strong id="nwPorts">—</strong><small>Unique ports in inventory</small></article><article><span>DNS SAMPLES</span><strong id="nwDns">—</strong><small>Latest returned observations</small></article><article><span>ALERT RECORDS</span><strong id="nwAlerts">—</strong><small>Latest returned alerts</small></article>
 </section>
+<div id="nwInventoryStatus" class="nw-inventory-status" aria-live="polite">Inventory status breakdown will appear after the first refresh.</div>
 <section id="topology" class="nightwatch-panel"><div class="nw-panel-head"><div><div class="nw-eyebrow">NETWORK INTELLIGENCE / 01</div><h2>LIVE NETWORK TOPOLOGY</h2><p>Lines represent observed DNS, mDNS, LLMNR or DHCP relationships — not physical links.</p></div><b>OBSERVATION MAP</b></div>
 <div class="nw-topology-wrap"><svg id="nwTopology" viewBox="0 0 1000 500" role="img" aria-label="Observed network device relationships"><text x="500" y="250" text-anchor="middle" class="nw-svg-empty">WAITING FOR NETWORK OBSERVATIONS</text></svg></div><div id="nwTopologyNote" class="nw-legend">No topology data loaded.</div></section>
 <section id="activity" class="nightwatch-panel"><div class="nw-panel-head"><div><div class="nw-eyebrow">NETWORK TELEMETRY / 02</div><h2>LIVE ACTIVITY FEED</h2><p>Recent events and alerts recorded by NetworkRadar. No simulated events are shown.</p></div><b>LOCAL EVENT LOG</b></div><div id="nwActivityFeed" class="nw-activity-feed">Waiting for real network events…</div></section>
+<section id="firewall" class="nightwatch-panel firewall-panel">
+ <div class="nw-panel-head"><div><div class="nw-eyebrow">DEFENCE SYSTEMS / 03</div><h2>FIREWALL COMMAND CENTRE</h2><p>Read-only Windows Defender Firewall visibility. Newly discovered devices remain allowed by default.</p></div><b id="fwStatusBadge">INSPECTING</b></div>
+ <div class="fw-policy-banner"><strong>DEFAULT DEVICE POLICY: ALLOW</strong><span>NetworkRadar will not automatically block, quarantine or restrict any device.</span></div>
+ <div id="firewallSnapshot" class="fw-snapshot"><div class="nw-feed-empty">Collecting local firewall status…</div></div>
+ <div class="fw-footnote">This reports the firewall on the computer running NetworkRadar. It does not control the router or enforce rules on other Wi-Fi devices. No Windows Firewall settings are changed by this release.</div>
+</section>
 
 <section id="networkWorkspaces" class="section card mb-14">
  <div class="row-between workspace-heading">
@@ -207,5 +215,5 @@ This terminal runs with the permissions of the SSH account you authenticate as.<
 </main>
 <div id="toast" class="toast"></div>
 <div id="deviceModal" class="modal" onclick="if(event.target===this)closeDevice()"><div class="modalbox"><div class="modalhead"><div><div class="sub">DEVICE</div><h2 id="modalTitle">Device</h2></div><button class="secondary" onclick="closeDevice()">CLOSE</button></div><div id="modalContent" class="modalcontent">Loading...</div></div></div>
-<script src="/assets/dashboard.js?v={APP_VERSION}-nightwatch-1" defer></script>
+<script src="/assets/dashboard.js?v={APP_VERSION}" defer></script>
 </body></html>

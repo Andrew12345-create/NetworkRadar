@@ -2145,3 +2145,24 @@ th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hov
 @media(max-width:900px){.nightwatch-hero{grid-template-columns:1fr}.nw-radar{width:190px}.nightwatch-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:600px){.nightwatch-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.nw-panel-head{flex-direction:column}.nw-feed-item{grid-template-columns:1fr 70px;gap:8px}.nw-feed-item time{grid-column:1}.nw-feed-item>div{grid-column:1}.nw-feed-item>span{display:none}.nw-feed-item em{grid-column:2;grid-row:1}.nightwatch-hero{padding:20px 16px}.nightwatch-hero h2{font-size:26px}}
 @media(prefers-reduced-motion:reduce){.nw-sweep,.nw-eyebrow i,.nw-blip,.nw-edge{animation:none}}
+
+/* 12.6.0 Firewall visibility — default allow, no automatic enforcement */
+.firewall-panel{border-color:#245044}
+.fw-policy-banner{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;padding:14px 16px;margin:14px 0;border:1px solid #176448;border-radius:9px;background:#08251d;color:#c8ffdf}
+.fw-policy-banner strong{font:800 11px Consolas,monospace;color:#00ff9c;letter-spacing:1px}
+.fw-policy-banner span,.fw-footnote,.fw-message{font-size:11px;color:#8ca7b5}
+.fw-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px}
+.fw-metrics article,.fw-profiles article{padding:13px;border:1px solid #203b4a;border-radius:9px;background:#0a1721}
+.fw-metrics article span{display:block;color:#7192a2;font:800 9px Consolas,monospace}
+.fw-metrics article strong{display:block;margin-top:7px;color:#e7f7fc;font:700 22px Consolas,monospace}
+.fw-profiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:12px}
+.fw-profiles article{display:grid;grid-template-columns:1fr auto;gap:7px}
+.fw-profiles article b{color:#d9edf4;font:700 12px Consolas,monospace}
+.fw-profiles article small{grid-column:1/-1;color:#819aaa;font-size:10px}
+.fw-online,.fw-on{color:#00ff9c!important}.fw-degraded,.fw-off{color:#ffb020!important}
+.fw-footnote{margin-top:14px;line-height:1.6}
+@media(max-width:1000px){.fw-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:600px){.fw-metrics,.fw-profiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* NIGHTWATCH reconciliation note */
+.nw-inventory-status{margin:-5px 0 16px;padding:9px 12px;border:1px solid #20394a;border-radius:7px;background:#0a141e;color:#8da8b8;font:10px Consolas,monospace;letter-spacing:.35px}
