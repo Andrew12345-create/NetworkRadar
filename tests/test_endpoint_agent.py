@@ -1,5 +1,7 @@
 """Tests for the opt-in, inventory-only NetworkRadar endpoint agent."""
 import hashlib
+import os
+import tempfile
 import hmac
 import unittest
 import unittest.mock
@@ -125,6 +127,26 @@ class PinnedTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "64 KiB"):
                 client.request("POST", "/agent/v1/report", b"x" * 65537)
             connection.assert_not_called()
+
+
+@unittest.skipUnless(os.name == "nt", "Windows DPAPI is available only on Windows.")
+class DPAPIConfigTests(unittest.TestCase):
+    def test_agent_configuration_round_trips_encrypted_for_current_user(self):
+        config = {
+            "server_url": "https://127.0.0.1:8767",
+            "certificate_pin": "ab" * 32,
+            "agent_id": "nr-" + "a" * 20,
+            "auth_key": "cd" * 32,
+            "interval_seconds": 300,
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "agent.dat")
+            agent.save_config(config, path)
+            encrypted = open(path, "rb").read()
+            self.assertTrue(encrypted.startswith(agent._CONFIG_MAGIC))
+            self.assertNotIn(b"auth_key", encrypted)
+            self.assertNotIn(config["auth_key"].encode("ascii"), encrypted)
+            self.assertEqual(agent.load_config(path), config)
 
 
 class CapabilityBoundaryTests(unittest.TestCase):
