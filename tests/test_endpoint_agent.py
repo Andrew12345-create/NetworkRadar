@@ -119,6 +119,18 @@ class PinnedTransportTests(unittest.TestCase):
         self.assertTrue(connection.request_called)
         self.assertTrue(connection.closed)
 
+    def test_certificate_rotation_verifies_new_pin_without_http_request(self):
+        certificate = b"new-server-leaf-certificate"
+        connection = self.FakeConnection(certificate)
+        pin = hashlib.sha256(certificate).hexdigest()
+        with unittest.mock.patch.object(
+            agent.http.client, "HTTPSConnection", return_value=connection
+        ), unittest.mock.patch.object(agent.ssl, "SSLContext"):
+            client = agent.PinnedHTTPSClient("https://radar.local:8767", pin)
+            self.assertEqual(client.verify_certificate(), pin)
+        self.assertFalse(connection.request_called)
+        self.assertTrue(connection.closed)
+
     def test_oversized_body_is_rejected_before_connection(self):
         client = agent.PinnedHTTPSClient(
             "https://radar.local:8767", "ab" * 32
