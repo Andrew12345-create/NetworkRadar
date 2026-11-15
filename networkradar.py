@@ -1247,7 +1247,12 @@ def refresh_network_context():
              "last_authorized": r[3], "fingerprint": r[4]} for r in rows
         ], workspace_id)
 
-    persisted, workspace_id = DB_MANAGER.write(_persist) if detected.get("fingerprint") else ([], "")
+    has_interface_fingerprint = any(
+        iface.get("fingerprint") for iface in detected.get("interfaces", []))
+    persisted, workspace_id = (
+        DB_MANAGER.write(_persist)
+        if detected.get("fingerprint") or has_interface_fingerprint else ([], "")
+    )
     profiles = persisted
     detected["network_id"] = workspace_id
     authorised, decision, reasons, pid = _authz_decision(detected, profiles)
