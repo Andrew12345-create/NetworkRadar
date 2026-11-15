@@ -113,7 +113,7 @@ Serial numbers are omitted by default. The `--include-serial` option must be sup
 
 ## 6. View the endpoint dossier
 
-When the report reaches NetworkRadar, the server associates it with an inventory device by the observed source IP address, with hostname as a secondary matching clue. Open the device in the dashboard and select **Hardware** to view:
+When the report reaches NetworkRadar, the server associates it with an inventory device by the server-observed source IP or a matching endpoint network-adapter MAC. Hostnames alone are not used as join keys because they are client-supplied and may be duplicated. Open the device in the dashboard and select **Hardware** to view:
 
 - endpoint-reported manufacturer and exact model;
 - system family and BIOS version;
