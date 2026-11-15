@@ -46,7 +46,7 @@ class AgentSignatureTests(unittest.TestCase):
             "nr-" + "1" * 20, key, "POST", "/agent/v1/report", body,
             timestamp="1790000000", nonce="A" * 24,
         )
-        canonical = b"POST\\n/agent/v1/report\\n1790000000\\n" + b"A" * 24 + b"\\n" + hashlib.sha256(body).hexdigest().encode()
+        canonical = bytes([10]).join([b"POST", b"/agent/v1/report", b"1790000000", b"A" * 24, hashlib.sha256(body).hexdigest().encode()])
         expected = hmac.new(bytes.fromhex(key), canonical, hashlib.sha256).hexdigest()
         self.assertEqual(headers["X-NR-Signature"], expected)
         self.assertEqual(headers["X-NR-Agent"], "nr-" + "1" * 20)
