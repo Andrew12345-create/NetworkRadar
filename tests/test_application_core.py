@@ -80,17 +80,17 @@ class EndpointManagementAuthorizationTests(unittest.TestCase):
 
 class EndpointAgentCapabilityTests(unittest.TestCase):
     def test_inventory_only_client_cannot_receive_remote_control_capabilities(self):
-        self.assertEqual(app._normalise_agent_capabilities(["inventory"]), ["inventory"])
-        self.assertFalse(app._agent_supports_action(["inventory"], "list_processes"))
-        self.assertFalse(app._agent_supports_action(["inventory"], "restart_computer"))
-        self.assertTrue(app._agent_supports_action(["inventory"], "refresh_inventory"))
+        self.assertEqual(app._normalise_agent_capabilities(["inventory-report"]), ["inventory-report"])
+        self.assertFalse(app._agent_supports_action(["inventory-report"], "list_processes"))
+        self.assertFalse(app._agent_supports_action(["inventory-report"], "restart_computer"))
+        self.assertFalse(app._agent_supports_action(["inventory-report"], "refresh_inventory"))
 
     def test_requested_capabilities_are_allowlisted(self):
         self.assertEqual(
-            app._normalise_agent_capabilities(["inventory", "power-control", "unknown"]),
-            ["inventory", "power-control"],
+            app._normalise_agent_capabilities(["inventory-report", "power-control", "unknown"]),
+            ["inventory-report", "power-control"],
         )
-        self.assertEqual(app._normalise_agent_capabilities([]), ["inventory"])
+        self.assertEqual(app._normalise_agent_capabilities([]), ["inventory-report"])
 
     def test_legacy_agents_without_capability_field_keep_compatibility(self):
         capabilities = app._normalise_agent_capabilities(None)
