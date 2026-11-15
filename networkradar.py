@@ -1316,14 +1316,14 @@ def _authz_decision(detected, profiles):
                 "Manual network override does not provide a verifiable network identity.")
         else:
             missing = ", ".join(diagnostics.get("missing_components") or []) or "unknown"
-            failed = [
+            collection_issues = [
                 f"{item.get('operation')}: {item.get('detail')}"
                 for item in diagnostics.get("collection", [])
-                if item.get("state") == "ERROR"
+                if item.get("state") != "OK"
             ]
             reason = "Network fingerprint unavailable. Missing components: " + missing + "."
-            if failed:
-                reason += " Collection errors: " + "; ".join(failed[:3])
+            if collection_issues:
+                reason += " Windows collection issues: " + "; ".join(collection_issues[:4])
         return False, "INDETERMINATE", [
             reason, f"Classification: {fp_class}."], None
     if not has_strong_network_anchor(detected):
@@ -1473,14 +1473,14 @@ def authorize_current(actor="local-user"):
                 "'Remove-Item Env:NETWORKRADAR_NETWORK -ErrorAction SilentlyContinue', "
                 "restart NetworkRadar, and refresh network detection.")
         missing = ", ".join(diagnostics.get("missing_components") or []) or "unknown"
-        failures = [
+        collection_issues = [
             f"{item.get('operation')}: {item.get('detail')}"
             for item in diagnostics.get("collection", [])
-            if item.get("state") == "ERROR"
+            if item.get("state") != "OK"
         ]
         detail = f"Missing fingerprint components: {missing}."
-        if failures:
-            detail += " Windows collection errors: " + "; ".join(failures[:3])
+        if collection_issues:
+            detail += " Windows collection issues: " + "; ".join(collection_issues[:4])
         raise RuntimeError(
             "NetworkRadar cannot authorise because automatic network identity "
             "was not established. " + detail +
