@@ -5387,9 +5387,22 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                 if len(safe.encode("utf-8")) > 50000:
                     return self._reply({"error":"Inventory report exceeds the 50 KiB storage limit."},413)
                 def _report(conn):
+                    row=conn.execute("SELECT status,capabilities_json FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
+                    if not row or row[0]=="REVOKED":
+                        return "MISSING"
+                    try:
+                        capabilities=json.loads(row[1] or "[]")
+                    except (TypeError, ValueError):
+                        capabilities=[]
+                    if not ({"inventory-report", "inventory"} & set(capabilities)):
+                        return "UNSUPPORTED"
                     cur=conn.execute("UPDATE remote_agents SET status='ONLINE',last_seen=?,last_ip=?,inventory_json=? WHERE agent_id=? AND status!='REVOKED'",(now_text(),self.client_address[0],safe,agent_id))
-                    return cur.rowcount
-                if not DB_MANAGER.write(_report): return self._reply({"error":"Agent is revoked or no longer enrolled."},401)
+                    return "UPDATED" if cur.rowcount else "MISSING"
+                report_status=DB_MANAGER.write(_report)
+                if report_status=="UNSUPPORTED":
+                    return self._reply({"error":"Agent does not advertise inventory-report capability."},403)
+                if report_status!="UPDATED":
+                    return self._reply({"error":"Agent is revoked or no longer enrolled."},401)
                 return self._reply({"ok":True,"server_time":int(time.time())})
             if self.path == "/agent/v1/result":
                 agent_id=_verify_agent_request(self,raw)
