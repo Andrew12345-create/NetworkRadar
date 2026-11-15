@@ -5237,6 +5237,29 @@ def _normalise_agent_capabilities(raw):
 def _agent_supports_action(capabilities, action):
     required = _AGENT_ACTION_CAPABILITY.get(str(action or "").strip().lower())
     return bool(required and required in set(capabilities or []))
+
+def _endpoint_inventory_association_basis(device_ip, device_mac, agent_last_ip, inventory):
+    """Join endpoint inventory only by observed IP or an exact adapter MAC.
+
+    Hostnames are intentionally excluded because they are client-supplied,
+    frequently duplicated, and may change independently of the hardware.
+    """
+    normalised_device_mac = _normalise_mac(device_mac or "")
+    adapters = inventory.get("network_adapters", []) if isinstance(inventory, dict) else []
+    if not isinstance(adapters, list):
+        adapters = []
+    adapter_macs = {
+        _normalise_mac(item.get("mac", ""))
+        for item in adapters if isinstance(item, dict) and item.get("mac")
+    }
+    adapter_macs.discard("")
+    ip_match = str(agent_last_ip or "") == str(device_ip or "")
+    mac_match = bool(normalised_device_mac and normalised_device_mac in adapter_macs)
+    if not ip_match and not mac_match:
+        return ""
+    if ip_match and normalised_device_mac and adapter_macs and not mac_match:
+        return ""
+    return "OBSERVED_SOURCE_IP" if ip_match else "MATCHED_ADAPTER_MAC"
 _AGENT_CRITICAL_SERVICES = {"rpcss", "dcomlaunch", "lsass", "winlogon", "eventlog", "samss", "plugplay", "power", "profsvc", "winmgmt"}
 
 
@@ -6649,25 +6672,12 @@ class Handler(BaseHTTPRequestHandler):
                                 agent_inventory = {}
                         except (TypeError, ValueError):
                             agent_inventory = {}
-                        adapters = agent_inventory.get("network_adapters", [])
-                        if not isinstance(adapters, list):
-                            adapters = []
-                        adapter_macs = {
-                            _normalise_mac(item.get("mac", ""))
-                            for item in adapters if isinstance(item, dict) and item.get("mac")
-                        }
-                        adapter_macs.discard("")
-                        ip_match = str(ar[7] or "") == ip
-                        mac_match = bool(device_mac and device_mac in adapter_macs)
-                        # Hostnames alone are not a safe join key: duplicate or
-                        # client-supplied names could attach one endpoint to another.
-                        if not ip_match and not mac_match:
+                        association_basis = _endpoint_inventory_association_basis(
+                            ip, device_mac, ar[7], agent_inventory
+                        )
+                        if not association_basis:
                             continue
-                        # If both sides expose MACs, a contradictory MAC blocks
-                        # an IP-only association rather than misattributing hardware.
-                        if ip_match and device_mac and adapter_macs and not mac_match:
-                            continue
-                        score = 2 if ip_match else 1
+                        score = 2 if association_basis == "OBSERVED_SOURCE_IP" else 1
                         try:
                             agent_capabilities = json.loads(ar[9] or "[]")
                             if not isinstance(agent_capabilities, list):
@@ -6676,7 +6686,7 @@ class Handler(BaseHTTPRequestHandler):
                             agent_capabilities = []
                         agent_matches.append((score, str(ar[6] or ""), ar,
                                               agent_inventory, agent_capabilities,
-                                              "OBSERVED_SOURCE_IP" if ip_match else "MATCHED_ADAPTER_MAC"))
+                                              association_basis))
                     if agent_matches:
                         agent_matches.sort(key=lambda item: (item[0], item[1]), reverse=True)
                         _, _, ar, agent_inventory, agent_capabilities, association_basis = agent_matches[0]
