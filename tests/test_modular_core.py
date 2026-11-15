@@ -18,10 +18,13 @@ class StartupTests(unittest.TestCase):
     def test_lock_acquire_release(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "db" / ".lock"
-            acquire_instance_lock(path)
-            self.assertTrue(path.exists())
-            release_instance_lock()
-            acquire_instance_lock(path)
+            try:
+                acquire_instance_lock(path)
+                self.assertTrue(path.exists())
+                release_instance_lock()
+                acquire_instance_lock(path)
+            finally:
+                release_instance_lock()
 
     def test_port_conflict_is_explicit(self):
         sock = socket.socket()
@@ -80,6 +83,33 @@ class IdentityTests(unittest.TestCase):
         outcome, _, explanation = score_evidence(rows, now=self.now)
         self.assertFalse(explanation["auto_merge_allowed"])
         self.assertTrue(explanation["local_mac_present"])
+
+    def test_blank_hostname_does_not_create_false_conflict(self):
+        rows = [
+            self.evidence("dhcp", "hostname", "alpha"),
+            self.evidence("nmap", "hostname", ""),
+        ]
+        outcome, _, _ = score_evidence(rows, now=self.now)
+        self.assertNotEqual(outcome, "CONFLICTING_IDENTITY")
+
+    def test_future_dated_evidence_is_not_fresh(self):
+        future = self.now + timedelta(days=2)
+        rows = [
+            self.evidence("dhcp", "hostname", "host-a", days=0),
+            self.evidence("nmap", "os", "Windows", days=0),
+        ]
+        for row in rows:
+            row["observed_at"] = future
+        outcome, score, _ = score_evidence(rows, now=self.now)
+        self.assertEqual(score, 0.0)
+        self.assertEqual(outcome, "NEW_IDENTITY")
+
+    def test_malformed_timestamp_is_ignored(self):
+        row = self.evidence("dhcp", "hostname", "host-a")
+        row["observed_at"] = "not-a-timestamp"
+        outcome, score, _ = score_evidence([row], now=self.now)
+        self.assertEqual(score, 0.0)
+        self.assertEqual(outcome, "NEW_IDENTITY")
 
     def test_empty_evidence_is_unknown(self):
         self.assertEqual(score_evidence([], now=self.now)[0], "UNKNOWN")

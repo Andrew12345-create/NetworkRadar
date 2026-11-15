@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 12.0.3 — PHANTOM ACCESS NEXUS. DASHBOARD LOAD HOTFIX.
+NetworkRadar 12.0.3 — local-first network discovery and device intelligence.
 Modular runtime + established intelligence core. Authorised networks only.\n\n
 12.0.1 changes:
   - Adds Phantom Terminal with authenticated interactive SSH sessions over a
@@ -186,116 +186,57 @@ try:
     import paramiko
 except ImportError:
     paramiko = None
-# 8.5.0: keep the distribution genuinely single-file. These implementations
-# are embedded here so a copied networkradar.py has no private-package imports.
-class StartupError(RuntimeError):
-    pass
 
-_NR_LOCK_HANDLE = None
-_NR_LOCK_GUARD = threading.Lock()
+# The package metadata is the single source of the application version.
+from networkradar_modules import __version__ as APP_VERSION
+from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
+from networkradar_modules.identity.fingerprints import (
+    derive_identity as _derive_identity_core,
+    dhcp_fingerprint as _dhcp_fingerprint_core,
+    normalise_mac as _normalise_mac_core,
+    mac_properties as _mac_properties_core,
+)
+from networkradar_modules.core.startup import (
+    StartupError, acquire_instance_lock as _acquire_instance_lock,
+    release_instance_lock as _release_instance_lock, bind_local_server,
+)
+from networkradar_modules.diagnostics.status import engine_record
+from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
+from networkradar_modules.discovery.nmap import run_nmap_discovery
+from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
+from networkradar_modules.discovery.adapters import (
+    _norm_mac, _is_real_mac, _select_primary_adapter,
+    _select_ipv4_interface_rows, _select_tshark_interface,
+)
+from networkradar_modules.discovery.classification import infer_type as _classify_device_type
+from networkradar_modules.discovery.probes import (
+    is_same_private_http_host, reverse_dns as _reverse_dns,
+    netbios_name as _netbios_name, ssdp_scan as _ssdp_scan,
+)
 
-def _legacy_pid_is_alive(raw):
-    """Deprecated PID-file probe; OS byte-range locking is authoritative.
+def _score_identity_evidence(candidate, *, now=None, thresholds=None,
+                              half_life_days=30.0, group_cap=0.45,
+                              auto_merge=frozenset({"CONFIRMED_MATCH"}),
+                              conflict_kinds=frozenset({"hostname", "client_id", "oui_global"}),
+                              local_group="oui_local"):
+    """Use the tested PHANTOM TRACK scorer; keep the legacy call signature."""
+    return _modular_score_evidence(
+        candidate,
+        now=now,
+        thresholds=thresholds or {
+            "CONFIRMED_MATCH": 0.85,
+            "STRONG_MATCH": 0.70,
+            "POSSIBLE_MATCH": 0.50,
+            "WEAK_MATCH": 0.30,
+        },
+        half_life_days=half_life_days,
+        group_cap=group_cap,
+        auto_merge=frozenset(auto_merge),
+        conflict_kinds=frozenset(conflict_kinds),
+        local_group=local_group,
+    )
 
-    A PID is not a process identity: Windows and Unix routinely reuse PIDs.
-    Treating a stale PID file as proof of a live NetworkRadar instance can
-    prevent startup indefinitely when an unrelated process reuses that PID.
-    The exclusive OS lock below safely detects a concurrently running instance
-    and is automatically released when its process exits.
-    """
-    return None
 
-def _acquire_os_lock(path):
-    global _NR_LOCK_HANDLE
-    with _NR_LOCK_GUARD:
-        if _NR_LOCK_HANDLE is not None: return
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        handle = open(path, "a+b")
-        try:
-            # PID files are not reliable process identities because PIDs are
-            # reused. The OS-managed exclusive lock below is authoritative.
-            handle.seek(0, os.SEEK_END)
-            if handle.tell() == 0: handle.write(b"\0"); handle.flush()
-            handle.seek(0)
-            if os.name == "nt":
-                import msvcrt
-                try: msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                except OSError as exc: raise StartupError("Another NetworkRadar instance holds the startup lock.") from exc
-            else:
-                import fcntl
-                try: fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except OSError as exc: raise StartupError("Another NetworkRadar instance holds the startup lock.") from exc
-            handle.seek(0); handle.truncate(); handle.write(f"pid={os.getpid()}\n".encode("ascii")); handle.flush()
-            _NR_LOCK_HANDLE = handle
-        except Exception:
-            handle.close(); raise
-
-def _release_os_lock():
-    global _NR_LOCK_HANDLE
-    with _NR_LOCK_GUARD:
-        h, _NR_LOCK_HANDLE = _NR_LOCK_HANDLE, None
-        if h is None: return
-        try:
-            if os.name == "nt":
-                import msvcrt
-                h.seek(0); msvcrt.locking(h.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(h.fileno(), fcntl.LOCK_UN)
-        finally: h.close()
-
-class _LocalOnlyHTTPServer(ThreadingHTTPServer):
-    allow_reuse_address = False
-    daemon_threads = True
-    block_on_close = False
-
-def bind_local_server(handler, host, requested_port, allow_alternate=False, search_span=20):
-    if not (1 <= int(requested_port) <= 65535): raise StartupError(f"Invalid TCP port: {requested_port}")
-    ports = [int(requested_port)]
-    if allow_alternate: ports.extend(range(int(requested_port)+1, min(65536, int(requested_port)+search_span+1)))
-    last = None
-    for port in ports:
-        try:
-            server = _LocalOnlyHTTPServer((host, port), handler)
-            return server, int(server.server_address[1])
-        except OSError as exc: last = exc
-    msg = f"{host}:{requested_port} could not be bound ({last})."
-    msg += f" Tried next {search_span} ports." if allow_alternate else " Choose another port with NETWORKRADAR_PORT or explicitly use --allow-alt-port."
-    raise StartupError(msg) from last
-
-def _score_identity_evidence(candidate, *, now=None, thresholds=None, half_life_days=30.0, group_cap=0.45, auto_merge=frozenset(), conflict_kinds=frozenset(), local_group="oui_local"):
-    # Evidence fusion is intentionally conservative; callers must supply evidence
-    # that actually compares two identities, not the union of both inventories.
-    from datetime import datetime as _dt, timezone as _tz
-    now = now or _dt.now(_tz.utc)
-    thresholds = thresholds or {"CONFIRMED_MATCH": .85, "STRONG_MATCH": .70, "POSSIBLE_MATCH": .50, "WEAK_MATCH": .30}
-    groups = {}
-    for item in candidate or []:
-        group = str(item.get("independence_group", "unknown"))
-        if group == local_group: continue
-        try:
-            raw = str(item.get("observed_at") or "")
-            when = _dt.fromisoformat(raw.replace("Z", "+00:00"))
-            if when.tzinfo is None: when = when.replace(tzinfo=_tz.utc)
-            age = max(0.0, (now - when.astimezone(_tz.utc)).total_seconds()/86400.0)
-            strength = max(0.0, min(1.0, float(item.get("strength", 0)))) * (0.5 ** (age/half_life_days))
-        except Exception: continue
-        groups[group] = max(groups.get(group, 0.0), strength)
-    total = min(1.0, sum(min(v, group_cap) for v in groups.values()))
-    outcome = "NEW_IDENTITY"
-    for label in ("CONFIRMED_MATCH", "STRONG_MATCH", "POSSIBLE_MATCH", "WEAK_MATCH"):
-        if total >= thresholds[label]: outcome = label; break
-    return outcome, total, {"total": round(total,4), "groups": {k: round(v,4) for k,v in groups.items()}, "auto_merge_allowed": False, "requires_manual_review": outcome not in ("NEW_IDENTITY", "UNKNOWN"), "local_mac_present": False}
-
-def engine_record(name, reported_status, *, last_error="", configured=True, details=None):
-    raw = str(reported_status or "UNKNOWN").upper()
-    if not configured: state = "NOT_CONFIGURED"
-    elif raw in {"RUNNING", "OBSERVING"}: state = "DEGRADED" if last_error else "ONLINE"
-    elif raw in {"ONLINE", "DEGRADED", "FAILED", "STOPPED", "STARTING", "DISABLED", "NOT_CONFIGURED"}: state = raw
-    else: state = "UNKNOWN"
-    return {"engine": str(name), "status": state, "reported_status": raw, "last_error": str(last_error or "")[:500], "details": details or {}}
-
-APP_VERSION = "12.0.3"
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 LOG_DIR = DATA / "logs"
@@ -451,12 +392,12 @@ def update_job(**kw):
 
 def acquire_instance_lock():
     try:
-        _acquire_os_lock(LOCK_FILE)
+        _acquire_instance_lock(LOCK_FILE)
     except StartupError as exc:
         raise RuntimeError(str(exc)) from exc
 
 def release_instance_lock():
-    _release_os_lock()
+    _release_instance_lock()
 
 def _port_available(host, port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -504,221 +445,6 @@ def require_port(host, port, allow_alternate=False):
 # ============================================================
 # DATABASE MANAGER (unchanged from 8.1.0 — this is correct)
 # ============================================================
-
-class NestedWriteError(RuntimeError):
-    pass
-
-class DatabaseManager:
-    def __init__(self, path, busy_ms=15000, queue_max=10000, batch_interval=0.03,
-                 batch_max=200):
-        self.path = Path(path)
-        self.busy_ms = busy_ms
-        self.q = _queue.Queue(maxsize=queue_max)
-        self.batch_interval = batch_interval
-        self.batch_max = batch_max
-        self.stop_flag = threading.Event()
-        self.ready = threading.Event()
-        self.start_error = None
-        self.thread = None
-        self.wconn = None
-        self.in_txn = threading.local()
-        self.health_data = {"running": False, "processed": 0, "failed": 0,
-                            "last_write_ms": 0.0, "last_error": "",
-                            "dropped_async": 0}
-        self.hlock = threading.Lock()
-
-    def start(self):
-        if self.thread and self.thread.is_alive():
-            return
-        self.stop_flag.clear()
-        self.ready.clear()
-        self.start_error = None
-        self.thread = threading.Thread(target=self._loop, daemon=True,
-                                       name="NR-DBWriter")
-        self.thread.start()
-        if not self.ready.wait(10):
-            raise RuntimeError("Database writer did not become ready.")
-        if self.start_error:
-            raise RuntimeError(f"Database writer startup failed: {self.start_error}")
-        with self.hlock:
-            self.health_data["running"] = True
-
-    def stop(self, timeout=10.0):
-        self.stop_flag.set()
-        if self.thread:
-            self.thread.join(timeout=timeout)
-        alive = bool(self.thread and self.thread.is_alive())
-        with self.hlock:
-            self.health_data["running"] = alive
-            if alive:
-                self.health_data["last_error"] = "Writer did not stop before timeout."
-        return not alive
-
-    @contextmanager
-    def read(self):
-        conn = sqlite3.connect(self.path, timeout=self.busy_ms / 1000,
-                               check_same_thread=False)
-        try:
-            conn.execute(f"PRAGMA busy_timeout={self.busy_ms}")
-            conn.execute("PRAGMA query_only=ON")
-            conn.row_factory = sqlite3.Row
-            yield conn
-        finally:
-            conn.close()
-
-    def write(self, fn, timeout=30.0):
-        if getattr(self.in_txn, "active", False):
-            raise NestedWriteError(
-                "Write from inside a write. Pass the existing conn instead.")
-        if self.stop_flag.is_set():
-            raise RuntimeError("Database writer is stopping.")
-        holder, done = {}, threading.Event()
-
-        def _wrap(conn):
-            self.in_txn.active = True
-            try:
-                return fn(conn)
-            finally:
-                self.in_txn.active = False
-
-        try:
-            self.q.put(("write", _wrap, holder, done), timeout=max(0.1, timeout))
-        except _queue.Full:
-            raise TimeoutError("Database write queue remained full.")
-        if not done.wait(timeout):
-            raise TimeoutError(
-                "Database write is still queued or executing; check database health.")
-        if "error" in holder:
-            raise holder["error"]
-        return holder.get("result")
-
-    def submit_async(self, fn):
-        if self.stop_flag.is_set():
-            with self.hlock:
-                self.health_data["dropped_async"] += 1
-            return False
-        try:
-            self.q.put_nowait(("async", fn, None, None))
-            return True
-        except _queue.Full:
-            with self.hlock:
-                self.health_data["failed"] += 1
-                self.health_data["dropped_async"] += 1
-            return False
-
-    def flush(self, timeout=10.0):
-        done = threading.Event()
-        if not self.thread or not self.thread.is_alive():
-            return self.q.empty()
-        try:
-            self.q.put(("flush", None, None, done), timeout=min(2.0, timeout))
-        except _queue.Full:
-            return False
-        return done.wait(timeout)
-
-    def health(self):
-        with self.hlock:
-            return dict(self.health_data, queued=self.q.qsize())
-
-    def _loop(self):
-        try:
-            self.wconn = sqlite3.connect(
-                self.path, timeout=self.busy_ms / 1000, check_same_thread=False)
-            self.wconn.execute(f"PRAGMA busy_timeout={self.busy_ms}")
-            self.wconn.execute("PRAGMA journal_mode=WAL")
-            self.wconn.execute("PRAGMA synchronous=NORMAL")
-            self.wconn.execute("PRAGMA foreign_keys=ON")
-            self.wconn.row_factory = sqlite3.Row
-            self.ready.set()
-        except Exception as exc:
-            self.start_error = str(exc)
-            self.ready.set()
-            return
-
-        while not self.stop_flag.is_set():
-            batch, barriers = self._drain()
-            if batch:
-                self._exec(batch)
-            for barrier in barriers:
-                barrier.set()
-            if not batch and not barriers:
-                time.sleep(0.01)
-
-        while True:
-            batch, barriers = self._drain(final=True)
-            if batch:
-                self._exec(batch)
-            for barrier in barriers:
-                barrier.set()
-            if not batch and not barriers:
-                break
-        try:
-            self.wconn.close()
-        except Exception:
-            pass
-
-    def _drain(self, final=False):
-        batch, barriers = [], []
-        deadline = time.monotonic() + self.batch_interval
-        while len(batch) < self.batch_max:
-            try:
-                if not batch and not barriers:
-                    item = self.q.get(timeout=0.05 if not final else 0.001)
-                else:
-                    item = self.q.get_nowait()
-            except _queue.Empty:
-                if final or time.monotonic() >= deadline:
-                    break
-                continue
-            if item[0] == "flush":
-                barriers.append(item[3])
-                break
-            batch.append(item)
-        return batch, barriers
-
-    def _exec(self, batch):
-        started = time.perf_counter()
-        failures = 0
-        try:
-            self.wconn.execute("BEGIN IMMEDIATE")
-            for index, (_, fn, holder, done) in enumerate(batch):
-                savepoint = f"nr_op_{index}"
-                try:
-                    self.wconn.execute(f"SAVEPOINT {savepoint}")
-                    result = fn(self.wconn)
-                    self.wconn.execute(f"RELEASE SAVEPOINT {savepoint}")
-                    if holder is not None:
-                        holder["result"] = result
-                except Exception as exc:
-                    failures += 1
-                    self.wconn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-                    self.wconn.execute(f"RELEASE SAVEPOINT {savepoint}")
-                    if holder is not None:
-                        holder["error"] = exc
-                    with self.hlock:
-                        self.health_data["last_error"] = str(exc)[:200]
-            self.wconn.execute("COMMIT")
-            for _, _, _, done in batch:
-                if done is not None:
-                    done.set()
-            with self.hlock:
-                self.health_data["processed"] += len(batch) - failures
-                self.health_data["failed"] += failures
-                self.health_data["last_write_ms"] = round(
-                    (time.perf_counter() - started) * 1000, 2)
-        except Exception as exc:
-            try:
-                self.wconn.execute("ROLLBACK")
-            except Exception:
-                pass
-            for _, _, holder, done in batch:
-                if holder is not None:
-                    holder["error"] = exc
-                if done is not None:
-                    done.set()
-            with self.hlock:
-                self.health_data["failed"] += len(batch)
-                self.health_data["last_error"] = str(exc)[:200]
 
 DB_MANAGER = DatabaseManager(DB)
 
@@ -1140,18 +866,6 @@ def _ps(cmd, timeout=15):
         return []
     return data if isinstance(data, list) else [data]
 
-def _norm_mac(m):
-    if not m:
-        return ""
-    clean = re.sub(r"[^0-9A-Fa-f]", "", m).upper()
-    return ":".join(clean[i:i+2] for i in range(0, 12, 2)) if len(clean) == 12 else ""
-
-def _is_real_mac(m):
-    if not m:
-        return False
-    clean = re.sub(r"[^0-9A-Fa-f]", "", m)
-    return len(clean) == 12 and clean.upper() not in {"000000000000", "FFFFFFFFFFFF"}
-
 def _gateway_mac_via_neighbor(gw_ip):
     if not gw_ip:
         return None
@@ -1197,7 +911,8 @@ def detect_network():
             if net.num_addresses > 4096:
                 raise RuntimeError(f"Manual network {net} too large.")
             return {"network": str(net), "ip": "", "gateway": "",
-                    "interface": "Manual override", "prefix": net.prefixlen,
+                    "interface": "Manual override", "interface_description": "",
+                    "interface_guid": "", "prefix": net.prefixlen,
                     "ssid": "", "bssid": "", "mode": "MANUAL",
                     "dns_servers": "", "adapter_mac": "",
                     "gateway_mac": "", "fingerprint": "", "fingerprint_raw": "",
@@ -1211,11 +926,11 @@ def detect_network():
             raise RuntimeError("NETWORKRADAR_NETWORK invalid CIDR")
 
     adapters_raw = _ps(
-        "Get-NetAdapter | Select-Object Name,InterfaceIndex,InterfaceDescription,"
+        "Get-NetAdapter | Select-Object Name,InterfaceIndex,InterfaceDescription,InterfaceGuid,"
         "MacAddress,Status,MediaType | ConvertTo-Json -Depth 3")
     ip_raw = _ps(
         "Get-NetIPAddress -AddressFamily IPv4 | "
-        "Select-Object InterfaceIndex,IPAddress,PrefixLength | ConvertTo-Json -Depth 3")
+        "Select-Object InterfaceIndex,IPAddress,PrefixLength,AddressState,SkipAsSource | ConvertTo-Json -Depth 3")
     route_raw = _ps(
         "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | "
         "Select-Object InterfaceIndex,NextHop,RouteMetric,InterfaceMetric | "
@@ -1227,10 +942,8 @@ def detect_network():
         "Get-NetIPInterface -AddressFamily IPv4 | "
         "Select-Object InterfaceIndex,Dhcp | ConvertTo-Json -Depth 3")
 
-    ips_by_idx, dns_by_idx, dhcp_by_idx = {}, {}, {}
-    for r in ip_raw:
-        try: ips_by_idx[int(r["InterfaceIndex"])] = r
-        except (KeyError, ValueError, TypeError): pass
+    ips_by_idx = _select_ipv4_interface_rows(ip_raw)
+    dns_by_idx, dhcp_by_idx = {}, {}
     for r in dns_raw:
         try: dns_by_idx[int(r["InterfaceIndex"])] = list(r.get("ServerAddresses") or [])
         except (KeyError, ValueError, TypeError): pass
@@ -1259,17 +972,20 @@ def detect_network():
         ip_r = ips_by_idx.get(idx) or {}
         ip_val = ip_r.get("IPAddress")
         pfx = ip_r.get("PrefixLength")
-        adapters.append({"idx": idx, "name": name, "status": status,
+        adapters.append({"idx": idx, "name": name,
+                         "description": str(a.get("InterfaceDescription") or ""),
+                         "guid": str(a.get("InterfaceGuid") or ""),
+                         "status": status,
                          "mac": mac_val if _is_real_mac(mac_val) else "",
                          "ip": ip_val, "prefix": pfx})
 
     up = [x for x in adapters if x["status"] == "Up" and x["ip"]]
-    primary = next((x for x in up if x["idx"] in default_routes),
-                   up[0] if up else None)
+    primary = _select_primary_adapter(up, default_routes)
 
     if primary is None:
         return {"network": "", "ip": "", "gateway": "",
-                "interface": "No active adapter", "prefix": None,
+                "interface": "No active adapter", "interface_description": "",
+                "interface_guid": "", "prefix": None,
                 "ssid": "", "bssid": "", "mode": "AUTO",
                 "dns_servers": "", "adapter_mac": "", "gateway_mac": "",
                 "fingerprint": "", "fingerprint_raw": "",
@@ -1334,6 +1050,8 @@ def detect_network():
         "ip": primary["ip"] or "",
         "gateway": gateway_val,
         "interface": primary["name"],
+        "interface_description": primary.get("description", ""),
+        "interface_guid": primary.get("guid", ""),
         "prefix": int(primary["prefix"]) if isinstance(primary["prefix"], int) else None,
         "ssid": ssid,
         "bssid": bssid,
@@ -1356,6 +1074,32 @@ def detect_network():
         },
     }
 
+def _profile_authorization_fresh(profile, now=None):
+    """Approval expires from last_authorized, never from routine last_seen updates."""
+    raw = str(profile.get("last_authorized") or "").strip()
+    if not raw:
+        return False, "No successful approval timestamp is recorded. Re-approve this network."
+    try:
+        approved_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if approved_at.tzinfo is not None:
+            approved_at = approved_at.astimezone().replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return False, "The network approval timestamp is invalid. Re-approve this network."
+
+    current = now or datetime.now()
+    if current.tzinfo is not None:
+        current = current.astimezone().replace(tzinfo=None)
+    age = current - approved_at
+    if age < timedelta(minutes=-5):
+        return False, "The network approval timestamp is in the future. Re-approve this network."
+    if age > timedelta(days=PROFILE_MAX_AGE_DAYS):
+        return False, (
+            f"Network approval expired ({age.days} days > {PROFILE_MAX_AGE_DAYS}). "
+            "Re-approve required."
+        )
+    return True, "Approval is within the configured freshness period."
+
+
 def _authz_decision(detected, profiles):
     """Single authoritative decision. Closes D1."""
     fp = detected.get("fingerprint") or ""
@@ -1371,26 +1115,34 @@ def _authz_decision(detected, profiles):
             f"Fingerprint confidence {weight:.0%} < {MIN_FP_CONFIDENCE:.0%}.",
             "Active discovery disabled until confidence improves."], None
 
-    match = next((p for p in profiles if p.get("fingerprint") == fp), None)
-    if not match:
+    matches = [p for p in profiles if p.get("fingerprint") == fp]
+    if not matches:
         return False, "NOT_AUTHORISED", [
             "No network profile matches the current fingerprint."], None
-    pid = match.get("id") or match.get("network") or "?"
-    if not match.get("approved"):
+
+    approved_matches = [p for p in matches if p.get("approved")]
+    if not approved_matches:
+        pid = matches[0].get("id") or matches[0].get("network") or "?"
         return False, "NOT_AUTHORISED", [
             f"Profile {pid} exists but approved != True."], pid
-    last = match.get("last_seen")
-    if last:
-        try:
-            age = datetime.now() - datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
-            if age.days > PROFILE_MAX_AGE_DAYS:
-                return False, "INDETERMINATE", [
-                    f"Profile {pid} stale ({age.days} days > {PROFILE_MAX_AGE_DAYS}). "
-                    "Re-approve required."], pid
-        except (ValueError, TypeError):
-            pass
+
+    fresh_matches = []
+    stale_reason = ""
+    for profile in approved_matches:
+        fresh, reason = _profile_authorization_fresh(profile)
+        if fresh:
+            fresh_matches.append(profile)
+        elif not stale_reason:
+            stale_reason = reason
+    if not fresh_matches:
+        pid = approved_matches[0].get("id") or approved_matches[0].get("network") or "?"
+        return False, "INDETERMINATE", [stale_reason or
+            "Network approval is stale or invalid. Re-approve required."], pid
+
+    match = fresh_matches[0]
+    pid = match.get("id") or match.get("network") or "?"
     return True, "AUTHORISED", [
-        f"Profile {pid} approved; weight {weight:.0%}; class {fp_class}."], pid
+        f"Profile {pid} approved recently; weight {weight:.0%}; class {fp_class}."], pid
 
 def refresh_network_context():
     detected = detect_network()
@@ -1438,11 +1190,12 @@ def refresh_network_context():
               detected.get("dns_servers", ""), detected.get("bssid", ""),
               int(detected.get("confidence", 0))))
         rows = conn.execute(
-            "SELECT network, approved, last_seen, fingerprint "
+            "SELECT network, approved, last_seen, last_authorized, fingerprint "
             "FROM network_profiles WHERE fingerprint=?",
             (detected.get("fingerprint", ""),)).fetchall()
         return [{"id": r[0], "approved": bool(r[1]),
-                 "last_seen": r[2], "fingerprint": r[3]} for r in rows]
+                 "last_seen": r[2], "last_authorized": r[3],
+                 "fingerprint": r[4]} for r in rows]
 
     profiles = DB_MANAGER.write(_persist) if detected.get("fingerprint") else []
     authorised, decision, reasons, pid = _authz_decision(detected, profiles)
@@ -1490,9 +1243,11 @@ def authorize_current(actor="local-user"):
             "Improve evidence (connect through the gateway, run a fresh scan, "
             "confirm DNS) before approving.")
     def _w(conn):
-        conn.execute("UPDATE network_profiles SET approved=1, last_seen=?, "
-                     "last_authorized=? WHERE fingerprint=?",
-                     (now_text(), now_text(), fp))
+        cur = conn.execute("UPDATE network_profiles SET approved=1, last_seen=?, "
+                           "last_authorized=? WHERE fingerprint=?",
+                           (now_text(), now_text(), fp))
+        if cur.rowcount < 1:
+            raise RuntimeError("The current network profile no longer exists. Refresh network detection and try again.")
         conn.execute(
             "INSERT INTO network_approval_history(timestamp, fingerprint, "
             "network, action, actor, reason) VALUES (?, ?, ?, 'APPROVED', ?, ?)",
@@ -1568,19 +1323,8 @@ def health_sample():
 # ============================================================
 
 def read_arp_cache():
-    mapping = {}
-    try:
-        r = subprocess.run(["arp", "-a"], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=8)
-        for line in r.stdout.splitlines():
-            m = re.search(
-                r"(\d{1,3}(?:\.\d{1,3}){3})\s+([0-9a-fA-F]{2}(?:-[0-9a-fA-F]{2}){5})",
-                line)
-            if m:
-                mapping[m.group(1)] = m.group(2).replace("-", ":").upper()
-    except Exception:
-        pass
-    return mapping
+    """Read the local OS ARP cache through the discovery adapter."""
+    return read_arp_cache_records()
 
 def local_identity():
     ident = {"ip": "", "mac": "",
@@ -1618,140 +1362,24 @@ def local_identity():
     return ident
 
 def reverse_dns(ip):
-    try:
-        name, _, _ = socket.gethostbyaddr(ip)
-        name = _clean(name.rstrip("."))
-        if name and name != ip:
-            return name
-    except (OSError, socket.timeout):
-        pass
-    return ""
+    return _reverse_dns(ip)
 
 def netbios_name(ip):
-    try:
-        r = subprocess.run(["nbtstat", "-A", ip], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=5)
-        for line in (r.stdout or "").splitlines():
-            m = re.match(r"^\s*([^\s]+)\s+<([0-9A-Fa-f]{2})>\s+(UNIQUE|GROUP)", line)
-            if m and m.group(2).upper() == "00" and m.group(3).upper() == "UNIQUE":
-                c = _clean(m.group(1))
-                if c and c.upper() not in ("WORKGROUP", "IS~"):
-                    return c
-    except Exception:
-        pass
-    return ""
+    return _netbios_name(ip)
 
 def _same_private_host(src_ip, url):
-    try:
-        p = urllib.parse.urlparse(url)
-        t = p.hostname
-        if not t:
-            return False
-        tip = ipaddress.ip_address(t)
-        sip = ipaddress.ip_address(src_ip)
-        return tip == sip and tip.is_private and p.scheme.lower() == "http"
-    except ValueError:
-        return False
+    return is_same_private_http_host(src_ip, url)
 
 def ssdp_scan(timeout=2.0):
-    found = {}
-    msg = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
-           'MAN: "ssdp:discover"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n').encode()
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    s.settimeout(0.25)
-    try:
-        s.sendto(msg, ("239.255.255.250", 1900))
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                pkt, addr = s.recvfrom(8192)
-            except socket.timeout:
-                continue
-            ip = addr[0]
-            h = {}
-            for line in pkt.decode("utf-8", errors="replace").splitlines()[1:]:
-                if ":" in line:
-                    k, v = line.split(":", 1)
-                    h[k.strip().lower()] = v.strip()
-            loc = h.get("location", "")
-            if not loc or not _same_private_host(ip, loc):
-                continue
-            meta = {"ssdp_server": _clean(h.get("server", "")),
-                    "usn": _clean(h.get("usn", ""))}
-            try:
-                req = urllib.request.Request(
-                    loc, headers={"User-Agent": f"NR/{APP_VERSION}"})
-                with urllib.request.urlopen(req, timeout=2) as r:
-                    xml = r.read(256 * 1024)
-                root = ET.fromstring(xml)
-                for el in root.iter():
-                    tag = el.tag.split("}")[-1].lower()
-                    val = _clean(el.text or "")
-                    if tag in ("friendlyname", "manufacturer", "modelname",
-                               "modelnumber", "devicetype", "serialnumber"):
-                        meta[tag] = val
-            except Exception:
-                pass
-            found[ip] = meta
-    finally:
-        s.close()
-    return found
-
-# ============================================================
-# DISCOVERY + IDENTIFICATION (mostly preserved from 8.1.0)
-# ============================================================
+    return _ssdp_scan(timeout=timeout, app_version=APP_VERSION)
 
 def discover_devices():
-    net = current_network()
-    if not net:
-        return [], 0.0
-    cmd = [str(NMAP), "-sn", "-R", "-oX", "-", net]
-    started = time.time()
-    r = subprocess.run(cmd, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=150)
-    dur = round(time.time() - started, 2)
-    NMAP_LOG.write_text((r.stderr or "") + "\n" + (r.stdout or "")[:2000],
-                        encoding="utf-8")
-    if r.returncode != 0:
-        raise RuntimeError(f"Nmap failed: {(r.stderr or '')[-1000:]}")
-    root = ET.fromstring(r.stdout)
-    devices = []
-    for host in root.findall("host"):
-        st = host.find("status")
-        if st is None or st.get("state") != "up":
-            continue
-        ip, mac, vendor, hostname = "", "Unavailable", "Unknown", "-"
-        for addr in host.findall("address"):
-            if addr.get("addrtype") == "ipv4":
-                ip = addr.get("addr", "")
-            elif addr.get("addrtype") == "mac":
-                mac = addr.get("addr", "Unavailable")
-                vendor = addr.get("vendor") or "Unknown"
-        names = host.find("hostnames")
-        if names is not None:
-            cands = [n.get("name") for n in names.findall("hostname") if n.get("name")]
-            if cands:
-                hostname = cands[0]
-        if ip:
-            devices.append({
-                "ip": ip, "mac": mac, "vendor": vendor, "hostname": hostname,
-                "device_name": hostname if hostname != "-" else "",
-                "friendly_name": "", "device_type": "Unclassified device",
-                "os_guess": "Unknown", "model": "",
-                "identification_confidence": 0, "identification_methods": "",
-                "open_ports": "", "service_summary": ""})
-    return devices, dur
+    """Run the authorised-network discovery scan through the modular Nmap engine."""
+    return run_nmap_discovery(current_network(), NMAP, NMAP_LOG)
 
 def derive_identity(device):
-    mac = (device.get("mac") or "").replace("-", ":").upper()
-    if re.fullmatch(r"[0-9A-F]{2}(?::[0-9A-F]{2}){5}", mac):
-        first = int(mac.split(":")[0], 16)
-        basis = ("MAC (locally administered)" if first & 0x02 else "MAC")
-        key = f"mac:{mac}"
-    else:
-        basis = "IP fallback"
-        key = f"ip:{device['ip']}"
-    return uuid.uuid5(uuid.NAMESPACE_URL, "nr:" + key).hex[:24], key, basis
+    """Compatibility wrapper around the pure identity-key derivation module."""
+    return _derive_identity_core(device)
 
 def persist_identity(conn, device, ts):
     derived_id, key, basis = derive_identity(device)
@@ -1769,6 +1397,11 @@ def persist_identity(conn, device, ts):
         "SELECT device_id, identity_basis FROM devices WHERE ip=?",
         (device["ip"],)).fetchone()
     old_id, old_basis = (old[0], old[1]) if old else ("", "")
+    if (old_id and old_id != did and str(basis).startswith("IP fallback")
+            and old_basis and not str(old_basis).startswith("IP fallback")):
+        # Preserve the device's existing ID on this IP, but stop using the
+        # newly randomised MAC as a cross-IP identity anchor.
+        did = old_id
     if old_id and old_id != did and str(old_basis or "").startswith("IP fallback"):
         hist = conn.execute(
             "SELECT ip, mac, first_seen, last_seen FROM device_ip_history WHERE device_id=?",
@@ -1820,58 +1453,22 @@ def persist_identity(conn, device, ts):
     device["identity_basis"] = basis
 
 def infer_type(device, ssdp=None):
-    ssdp = ssdp or {}
-    text = " ".join(str(x or "") for x in (
-        device.get("device_name", ""), device.get("hostname", ""),
-        device.get("friendly_name", ""), device.get("model", ""),
-        device.get("service_summary", ""), device.get("os_guess", ""),
-        ssdp.get("devicetype", ""), ssdp.get("friendlyname", ""),
-        ssdp.get("manufacturer", ""), ssdp.get("modelname", ""),
-        " ".join(device.get("services_found", []) or []),
-        " ".join(x.get("banner", "") for x in device.get("service_intel", []) or [])
-    )).lower()
-    ports = set(device.get("port_numbers", []) or [])
+    """Classify a device using observed evidence and its current network role."""
     with NET_LOCK:
         gateway_ip = NET_CTX.get("gateway", "")
-    if device.get("_is_gateway") or (gateway_ip and device.get("ip") == gateway_ip):
-        return "Router / network gateway (role-confirmed)"
-    patterns = [
-        (r"\b(printer|laserjet|deskjet|epson|brother|canon|xerox|ricoh|kyocera|ipp)\b", "Printer (probable)"),
-        (r"\b(ipcam|camera|cctv|hikvision|dahua|axis communications|rtsp)\b", "IP camera / video (probable)"),
-        (r"\b(iphone|ipad|ipod|ios device)\b", "Apple mobile (probable)"),
-        (r"\b(macbook|imac|mac mini|mac studio)\b", "Apple computer (probable)"),
-        (r"\b(android|galaxy|pixel|oneplus|xiaomi|redmi|oppo|vivo|huawei phone)\b", "Android/mobile device (probable)"),
-        (r"\b(windows|win10|win11|desktop-|laptop|thinkpad|elitebook|latitude|optiplex|probook)\b", "Computer (probable)"),
-        (r"\b(xbox|playstation|ps[345]|nintendo|switch console)\b", "Gaming console (probable)"),
-        (r"\b(chromecast|google tv|fire tv|roku|smart.?tv|mediarenderer|airplay receiver|webos tv|tizen)\b", "Smart TV / streaming (probable)"),
-        (r"\b(synology|qnap|truenas|freenas|nas[0-9-]|network attached storage)\b", "NAS / storage (probable)"),
-        (r"\b(mikrotik|routeros|openwrt|opnsense|pfsense|unifi|ubiquiti|access.?point|wireless controller|switch[0-9-])\b", "Router / switch / access point (probable)"),
-        (r"\b(asterisk|yealink|polycom|grandstream|voip|sip phone)\b", "VoIP / IP phone (probable)"),
-        (r"\b(esxi|vmware|hyper-v|proxmox|xenserver|virtual machine)\b", "Virtualisation host (probable)"),
-        (r"\b(server|windows server|ubuntu server|debian|rhel|centos|almalinux|rocky linux)\b", "Server (probable)"),
-        (r"\b(sonos|bose|echo dot|echo show|homepod|smart speaker)\b", "Smart speaker / audio (probable)"),
-        (r"\b(thermostat|smart plug|zigbee|zwave|tasmota|shelly|tuya|home assistant)\b", "Smart-home / IoT device (probable)"),
-        (r"\b(ups|apc smart|eaton power|powerware)\b", "UPS / power equipment (probable)"),
-        (r"\b(doorbell|intercom|access control|biometric|badge reader)\b", "Access control / intercom (probable)"),
-        (r"\b(nvr|dvr|video recorder|surveillance recorder)\b", "Video surveillance recorder (probable)"),
-        (r"\b(air.?condition|refrigerator|washing machine|dishwasher|oven|smart appliance)\b", "Smart appliance (probable)"),
-    ]
-    for pattern, category in patterns:
-        if re.search(pattern, text, re.I):
-            return category
-    if ports & {9100, 631, 515}:
-        return "Device exposing printing service (type unconfirmed)"
-    if ports & {554, 8554, 10554}:
-        return "Device exposing RTSP/video service (type unconfirmed)"
-    if ports & {8008, 8009, 32400, 1900}:
-        return "Device exposing media/UPnP service (type unconfirmed)"
-    if ports & {161, 162}:
-        return "Device exposing SNMP service (type unconfirmed)"
-    if 3389 in ports or ({445, 139} <= ports):
-        return "Device exposing Windows remote/file services (type unconfirmed)"
-    if ports & {22, 80, 443, 445, 3389}:
-        return "Network service host (type unconfirmed)"
-    return "Unclassified network device"
+    return _classify_device_type(device, ssdp, gateway_ip=gateway_ip)
+
+def dhcp_fingerprint(vendor_class, parameter_request_list):
+    """Compatibility wrapper around deterministic DHCP fingerprinting."""
+    return _dhcp_fingerprint_core(vendor_class, parameter_request_list)
+
+def _normalise_mac(mac):
+    """Compatibility wrapper for canonical MAC address normalisation."""
+    return _normalise_mac_core(mac)
+
+def mac_properties(mac):
+    """Compatibility wrapper for IEEE MAC address property extraction."""
+    return _mac_properties_core(mac)
 
 # ============================================================
 # RADAR IDENTITY (preserved from 8.1.0)
@@ -1886,25 +1483,6 @@ OUI_FILES = {
 }
 _OUI_LOCK = threading.RLock()
 _OUI_MEM = {}
-
-def dhcp_fingerprint(vendor_class, parameter_request_list):
-    vc = re.sub(r"\s+", " ", (vendor_class or "").strip().lower())[:120]
-    prl = ",".join(x.strip() for x in (parameter_request_list or "").split(",") if x.strip())
-    return hashlib.sha256((vc + "|" + prl).encode("utf-8", "ignore")).hexdigest()[:24]
-
-def _normalise_mac(mac):
-    m = (mac or "").strip().replace("-", ":").upper()
-    return m if re.fullmatch(r"[0-9A-F]{2}(?::[0-9A-F]{2}){5}", m) else ""
-
-def mac_properties(mac):
-    m = _normalise_mac(mac)
-    if not m:
-        return {"valid": False, "multicast": False, "locally_administered": False,
-                "unicast": False, "prefix": ""}
-    first = int(m[:2], 16)
-    return {"valid": True, "multicast": bool(first & 1),
-            "locally_administered": bool(first & 2),
-            "unicast": not bool(first & 1), "prefix": m[:8].replace(":", "")}
 
 def load_oui_cache():
     global _OUI_MEM
@@ -3273,30 +2851,15 @@ def choose_iface():
         m = re.match(r"\s*(\d+)\.\s*(.*)", line)
         if m:
             interfaces.append((m.group(1), m.group(2).strip()))
-    if PREFERRED_INTERFACE:
-        pref = PREFERRED_INTERFACE.strip().strip('"')
-        for idx, desc in interfaces:
-            if pref.casefold() == idx.casefold() or pref.casefold() in desc.casefold():
-                return idx
-        # Preserve support for explicit Npcap device paths and TShark aliases.
-        if pref.startswith(r"\Device\NPF_"):
-            return pref
-        raise RuntimeError("Configured NETWORKRADAR_TSHARK_INTERFACE was not found by TShark -D: " + pref[:160])
-    wifi = [(idx, desc) for idx, desc in interfaces
-            if re.search(r"\b(wi[ -]?fi|wireless|802\.11)\b", desc, re.IGNORECASE)
-            and not re.search(r"loopback|virtualbox|vmware", desc, re.IGNORECASE)]
-    if wifi:
-        return wifi[0][0]
-    ethernet = [(idx, desc) for idx, desc in interfaces
-                 if re.search(r"\bethernet\b", desc, re.IGNORECASE)
-                 and not re.search(r"loopback|virtualbox|vmware", desc, re.IGNORECASE)]
-    if ethernet:
-        return ethernet[0][0]
-    physical = [(idx, desc) for idx, desc in interfaces
-                if not re.search(r"loopback|virtualbox|vmware|bluetooth|npcap loopback", desc, re.IGNORECASE)]
-    if physical:
-        return physical[0][0]
-    raise RuntimeError("No usable TShark interface found. Check Npcap and set NETWORKRADAR_TSHARK_INTERFACE.")
+    with NET_LOCK:
+        primary = dict(NET_CTX)
+    return _select_tshark_interface(
+        interfaces,
+        preferred=PREFERRED_INTERFACE,
+        primary_guid=primary.get("interface_guid", ""),
+        primary_name=primary.get("interface", ""),
+        primary_description=primary.get("interface_description", ""),
+    )
 
 def domain_heuristics(domain):
     return []
@@ -3734,11 +3297,13 @@ class DHCPEngine(threading.Thread):
                     DHCP_STATE["last_exit_code"] = self.proc.returncode
                     DHCP_STATE["last_stderr"] = tail[-700:]
                     DHCP_STATE["last_command"] = " ".join(cmd[:12])
+                diagnostic = (tail or
+                    "No diagnostic output captured. Check Npcap, "
+                    "interface selection and capture permissions.")
                 raise RuntimeError(
                     f"TShark DHCP startup failed; executable={TSHARK}; "
                     f"interface={self.iface}; exit_code={self.proc.returncode}; "
-                    f"stderr={tail or 'No diagnostic output captured. Check Npcap, '
-                    'interface selection and capture permissions.'}")
+                    f"stderr={diagnostic}")
             self.state(status="ONLINE", error="", last_error="", failure_streak=0,
                        last_started=now_text())
             try:
@@ -5353,618 +4918,8 @@ def intelligence_answer(conn, question):
     return {"answer":"I can currently answer read-only questions about device counts, unknown identities, IPv6 observations, recent inventory records and observed service exposure. I will not infer facts that are not stored in NetworkRadar.","results":[],"source":"local query capability limits"}
 
 
-WEB_PAGE = r"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NetworkRadar {APP_VERSION}</title><style>
-
-:root{color-scheme:dark;--bg:#07101d;--panel:#0d1a2b;--panel2:#10233a;--line:#203b57;--text:#edf5ff;--muted:#91a9c2;--blue:#56b2ff;--cyan:#55e0d0;--green:#45d6a0;--amber:#ffc66d;--red:#ff7185;--shadow:0 18px 44px #0005}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 12% -10%,#16436a 0,transparent 34%),radial-gradient(ellipse at 95% 8%,#123b43 0,transparent 25%),var(--bg);color:var(--text);font:14px/1.55 "Segoe UI Variable","Segoe UI",Arial,sans-serif}
-header{padding:22px clamp(18px,4vw,64px) 18px;border-bottom:1px solid #29476188;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;background:linear-gradient(110deg,#0b1c2eeb,#0a1928e8);backdrop-filter:blur(18px)}
-.brand{display:flex;gap:15px;align-items:center}.logo{width:50px;height:50px;border-radius:16px;background:linear-gradient(140deg,#2389ee,#53dfcf);display:grid;place-items:center;font-size:21px;font-weight:900;color:#041422;box-shadow:0 8px 28px #2c9de755;position:relative}
-h1{font-size:20px;letter-spacing:2px;margin:0;font-weight:800}.sub{color:#9bb9d3;font-size:10px;letter-spacing:2.4px;margin-top:3px}.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-button{border:1px solid #65bdff55;border-radius:10px;padding:10px 15px;font-weight:750;cursor:pointer;background:linear-gradient(135deg,#3a9cf0,#56c7d9);color:#031522;box-shadow:0 7px 20px #168be333;transition:transform .16s}
-button:hover{transform:translateY(-1px)}button:disabled{opacity:.55;cursor:wait}button.secondary{background:#132b42;color:var(--text);border:1px solid #31516e}
-/* 11.0.2 navigation: persistent desktop sidebar + searchable mobile drawer */
-:root{--sidebar-width:264px;--sidebar-collapsed:76px;--header-height:82px}
-html{scroll-behavior:smooth;scroll-padding-top:calc(var(--header-height) + 18px)}
-body{min-height:100vh}
-header{position:sticky;top:0;z-index:45;min-height:var(--header-height);margin-left:var(--sidebar-width);padding:14px clamp(18px,3vw,42px);box-shadow:0 8px 28px #0003;transition:margin-left .22s ease}
-nav{position:fixed;inset:0 auto 0 0;width:var(--sidebar-width);z-index:60;display:flex;flex-direction:column;align-items:stretch;gap:5px;overflow-y:auto;overflow-x:hidden;padding:18px 13px 24px;background:linear-gradient(180deg,#091827f7,#071321f8);border-right:1px solid #28445f;box-shadow:12px 0 35px #0003;backdrop-filter:blur(18px);font-size:11px;letter-spacing:.7px;scrollbar-width:thin;scrollbar-color:#315675 transparent;transition:width .22s ease,transform .22s ease}
-.nav-brand{display:flex;align-items:center;gap:11px;padding:6px 8px 17px;margin-bottom:7px;border-bottom:1px solid #28445f;color:#eaf5ff;font-weight:900;letter-spacing:1.5px}
-.nav-brand-mark{width:34px;height:34px;flex:0 0 34px;border-radius:11px;display:grid;place-items:center;background:linear-gradient(140deg,#2389ee,#53dfcf);color:#041422;font-size:14px;font-weight:950}
-.nav-brand small{display:block;color:#8faac4;font-size:9px;letter-spacing:1.3px;font-weight:700;margin-top:2px}
-.nav-search-wrap{position:sticky;top:-18px;z-index:3;padding:8px 0 12px;background:#091827f7}
-#navSearch{width:100%;min-height:40px;padding:9px 12px 9px 35px;border:1px solid #294761;border-radius:10px;background:#0d2033;color:var(--text);font-size:12px}
-.nav-search-icon{position:absolute;left:12px;top:18px;color:#8daac4;pointer-events:none}
-.nav-group{margin:9px 0 3px;padding:0 9px;color:#6f8da9;font-size:9px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase}
-nav a{display:flex;align-items:center;gap:10px;min-height:37px;color:#b4cde3;text-decoration:none;white-space:nowrap;padding:8px 10px;border-radius:9px;border:1px solid transparent;font-weight:750;transition:background .15s,border-color .15s,color .15s}
-nav a::before{content:"";width:6px;height:6px;flex:0 0 6px;border-radius:50%;background:#52718e;transition:background .15s,box-shadow .15s}
-nav a:hover,nav a:focus-visible{background:#132d46;color:#fff;border-color:#294c6b}
-nav a.active{background:linear-gradient(90deg,#17466a,#12334e);color:#fff;border-color:#2a5a7d;box-shadow:inset 3px 0 0 var(--cyan)}
-nav a.active::before{background:var(--cyan);box-shadow:0 0 10px #55e0d0aa}
-.nav-empty{display:none;padding:12px;color:#9bb4cc;font-size:12px}
-#navBackdrop{display:none}
-#navToggle{min-width:42px;width:42px;padding:8px;display:grid;place-items:center;font-size:18px;line-height:1;background:#132b42;color:var(--text);border:1px solid #31516e;box-shadow:none}
-#navToggle:hover{background:#1a3b59}
-main{margin-left:var(--sidebar-width);max-width:none;padding:24px clamp(18px,3vw,42px) 54px;transition:margin-left .22s ease}
-body.nav-collapsed nav{width:var(--sidebar-collapsed);padding-left:10px;padding-right:10px}
-body.nav-collapsed header,body.nav-collapsed main{margin-left:var(--sidebar-collapsed)}
-body.nav-collapsed .nav-brand-copy,body.nav-collapsed .nav-search-wrap,body.nav-collapsed .nav-group,body.nav-collapsed .nav-empty{display:none}
-body.nav-collapsed nav a{position:relative;justify-content:center;padding:9px 6px;font-size:0}
-body.nav-collapsed nav a::before{display:none}
-body.nav-collapsed nav a::after{content:attr(data-short);display:block;color:#d9efff;font-size:11px;font-weight:900;letter-spacing:.2px}
-body.nav-collapsed .nav-brand{justify-content:center;padding-left:0;padding-right:0}
-body.nav-collapsed .nav-brand-mark{width:38px;height:38px;flex-basis:38px}
-body.nav-collapsed #navToggle{margin-inline:auto}
-
-main{padding:24px clamp(18px,4vw,64px) 48px;max-width:1800px;margin:auto}.meta{color:var(--muted);font-size:12px;margin-bottom:18px}
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}
-.card{background:linear-gradient(145deg,#122a42ed,#0b1929f2);border:1px solid #284762;border-radius:16px;padding:18px;min-width:0;box-shadow:var(--shadow)}
-.section{margin-top:18px}.section h2{font-size:12px;letter-spacing:1.7px;color:#c3e2fa;margin:0 0 12px;font-weight:800}
-.label{color:#9db5cc;font-size:10px;letter-spacing:1.45px;text-transform:uppercase}.value{font-size:30px;font-weight:800;margin-top:5px;letter-spacing:-.8px}.hint{color:var(--muted);font-size:12px;margin-top:4px}
-.split{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
-.statusline{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #213b54}.statusline:last-child{border:0}
-.pill{font-size:10px;font-weight:850;letter-spacing:.7px;padding:5px 9px;border-radius:99px;background:#153d35;color:var(--green);border:1px solid #2a806d66}
-.pill.warn{background:#493819;color:var(--amber);border-color:#a67b3e66}
-.pill.bad{background:#48232b;color:var(--red);border-color:#a94b5b66}
-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
-th{text-align:left;color:#9db6cf;font-weight:750;padding:12px 10px;border-bottom:1px solid #31516d;background:#10263b;position:sticky;top:0;z-index:1;font-size:10px;letter-spacing:1px}
-td{padding:11px 10px;border-bottom:1px solid #20374d;overflow-wrap:anywhere;color:#dce9f5}
-tbody tr:hover{background:#54b9ff0b}.clickrow{cursor:pointer}.clickrow:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}.scroll{overflow:auto;max-height:420px;border:1px solid #203b55;border-radius:11px}
-.mono{font-family:Consolas,"Cascadia Code",monospace}.muted{color:var(--muted)}.green{color:var(--green)}.amber{color:var(--amber)}.red{color:var(--red)}
-.notice{border:1px solid #80632c;background:#2b2417;color:#f5d58c;padding:13px 15px;border-radius:12px;font-size:12px;margin:14px 0}
-input,select,textarea{font:inherit;outline:none;background:#07111f;color:#e8f1fb;border:1px solid var(--line);padding:9px 12px;border-radius:8px}
-.modal{display:none;position:fixed;inset:0;background:#020812e8;z-index:50;padding:3vh 3vw;overflow:auto;backdrop-filter:blur(8px)}
-.modal.open{display:flex;align-items:flex-start;justify-content:center}
-.modalbox{width:min(1250px,100%);background:#0c1c2d;border:1px solid #3a5f80;border-radius:18px;padding:22px;box-shadow:0 28px 90px #000a}
-.modalhead{display:flex;justify-content:space-between;align-items:center;gap:15px;border-bottom:1px solid var(--line);padding-bottom:14px}
-.profilegrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.device-tabs{display:flex;gap:7px;overflow-x:auto;padding:10px 0 12px;margin:0 0 14px;position:sticky;top:0;z-index:4;background:var(--panel,#101a2a);scrollbar-width:thin}
-.device-tab{white-space:nowrap;border:1px solid var(--line,#29364a);background:transparent;color:var(--muted,#9aa9bd);padding:8px 11px;border-radius:9px;font-size:11px;letter-spacing:.35px}
-.device-tab[aria-selected="true"]{background:var(--accent-soft,#173451);border-color:var(--accent,#49a7ff);color:var(--text,#edf4ff)}
-.device-pane{display:none;min-height:180px}.device-pane.active{display:block}
-.device-pane h3{margin:8px 0 12px}.device-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}
-.device-kpi{border:1px solid var(--line,#29364a);border-radius:11px;padding:12px;background:#0b1422}.device-kpi strong{display:block;font-size:22px;margin-top:5px}
-.device-empty{padding:18px;border:1px dashed var(--line,#29364a);border-radius:10px;color:var(--muted,#9aa9bd)}
-.device-table{width:100%;min-width:640px}.device-pane .notice,.device-pane .hint{margin:10px 0}
-@media(max-width:700px){.device-kpis{grid-template-columns:1fr 1fr}.device-tabs{margin-inline:-3px}.device-tab{padding:8px 9px}}
-@media(max-width:420px){.device-kpis{grid-template-columns:1fr}}
-
-.profileitem{background:#10243a;border:1px solid var(--line);border-radius:11px;padding:12px;min-width:0}
-.profileitem .value{font-size:14px;overflow-wrap:anywhere;margin-top:5px}
-.clickrow{cursor:pointer}.clickrow:hover{background:#173653!important}
-.risk-LOW{color:var(--green)}.risk-MEDIUM{color:var(--amber)}.risk-HIGH{color:var(--red)}.risk-CRITICAL{color:var(--red);font-weight:800}
-@media(max-width:1050px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.split{grid-template-columns:1fr}.profilegrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-/* 11.0.0 Phantom Access layout */
-.sectionhead{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px}.phantom-metrics{margin-top:12px}.phantom-metrics .card{padding:13px}.phantom-metrics .value{font-size:25px}#phantomAccess button{white-space:nowrap}#phantomAccess table td{vertical-align:middle}#paOutput{font:12px/1.6 Consolas,"Cascadia Code",monospace;color:#cce5f8}
-/* 9.5.0 interaction, readability and responsive refinements */
-:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
-button{min-height:40px}button:active{transform:translateY(0) scale(.985)}
-.card{transition:border-color .18s ease,transform .18s ease}.card:hover{border-color:#3c7197}
-nav{scrollbar-width:thin;scrollbar-color:#315675 transparent}nav a{font-weight:750}nav a:focus-visible{background:#183a57}
-input,select,textarea{min-height:40px;width:auto;max-width:100%}input::placeholder{color:#718aa3}
-.scroll{scrollbar-width:thin;scrollbar-color:#315675 #091827}tbody tr:nth-child(even){background:#ffffff03}
-th{backdrop-filter:blur(10px)}
-.value{font-variant-numeric:tabular-nums}.mono{font-variant-numeric:tabular-nums}
-.notice{line-height:1.65}.hint{line-height:1.6}
-@media(max-width:900px){:root{--header-height:74px}header,body.nav-collapsed header{margin-left:0;padding:12px 16px}main,body.nav-collapsed main{margin-left:0;padding:18px 16px 40px}nav,body.nav-collapsed nav{width:min(310px,86vw);transform:translateX(-105%);padding:16px 13px;box-shadow:18px 0 48px #0008}body.nav-open nav{transform:translateX(0)}body.nav-open #navBackdrop{display:block;position:fixed;inset:0;z-index:55;background:#020812b8;backdrop-filter:blur(2px)}body.nav-collapsed .nav-brand-copy,body.nav-collapsed .nav-search-wrap,body.nav-collapsed .nav-group,body.nav-collapsed nav a .nav-label{display:block}body.nav-collapsed nav a{justify-content:flex-start;font-size:11px}body.nav-collapsed nav a::before{display:block}body.nav-collapsed nav a::after{display:none}body.nav-collapsed .nav-brand{justify-content:flex-start}body.nav-collapsed #navToggle{margin-inline:0}html{scroll-padding-top:calc(var(--header-height) + 12px)}}
-@media(max-width:700px){header{padding:12px}.brand{gap:10px}.logo{width:42px;height:42px;border-radius:13px}h1{font-size:16px;letter-spacing:1.2px}.sub{font-size:9px;letter-spacing:1.4px}main{padding:16px 12px 32px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.card{padding:13px;border-radius:13px}.value{font-size:25px}.profilegrid{grid-template-columns:1fr 1fr}.actions{width:auto}.actions button{flex:0 1 auto}.scroll{max-height:360px}table{font-size:11px}th,td{padding:9px 8px}.modal{padding:10px}.modalbox{padding:14px}.modalhead{align-items:flex-start}}
-@media(max-width:420px){.brand .sub{letter-spacing:.8px}.actions{gap:6px}.actions button{padding:8px 9px;font-size:11px}.actions #connection{display:none}.grid{grid-template-columns:1fr 1fr}.profilegrid{grid-template-columns:1fr}.label{font-size:9px}button{padding:9px 11px}}
-@media(max-width:420px){.grid{grid-template-columns:1fr 1fr}.profilegrid{grid-template-columns:1fr}.label{font-size:9px}button{padding:9px 11px}}
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
 
-/* ================================================================
-   NETWORKRADAR 12.0 — NEXUS DESIGN SYSTEM
-   Local-first security operations · responsive layout · accessible UI
-   ================================================================ */
-:root{
- --bg:#07111f;--panel:#0c1b2d;--panel2:#10253c;--line:#25435f;
- --text:#eef6ff;--muted:#93abc3;--blue:#55aaff;--cyan:#5ce4dc;
- --green:#4de0ad;--amber:#ffc66e;--red:#ff7188;
- --shadow:0 18px 52px #0006;--sidebar-width:270px;--sidebar-collapsed:78px;
- --radius-lg:18px;--radius-md:13px;--focus:0 0 0 3px #55aaff35;
-}
-body{background:radial-gradient(ellipse at 12% 0%,#123d65 0,transparent 32%),radial-gradient(ellipse at 88% 8%,#0c4b4c 0,transparent 23%),linear-gradient(160deg,#07111f,#091827 58%,#07111f);background-attachment:fixed}
-header{background:#081827eF;border-bottom:1px solid #3a638255;backdrop-filter:blur(22px)}
-.logo,.nav-brand-mark{background:linear-gradient(145deg,#4da7ff,#62e4d8);box-shadow:0 8px 28px #2c9de755}
-nav{background:linear-gradient(180deg,#071624f7,#081321f8);border-right-color:#244967}
-nav a{min-height:40px;border-radius:11px;letter-spacing:.25px}
-nav a.active{background:linear-gradient(100deg,#174b78,#123c56);box-shadow:inset 3px 0 0 var(--cyan),0 5px 16px #0002}
-main{padding-top:30px;padding-bottom:64px}
-.card{background:linear-gradient(150deg,#112943ed,#0b1a2bf5 72%);border-color:#2a4c69;border-radius:var(--radius-lg);box-shadow:var(--shadow)}
-.card:hover{border-color:#4384ad;transform:translateY(-1px)}
-.section h2{font-size:12px;letter-spacing:1.9px;color:#cbe7ff}
-.grid{gap:16px}
-.phantom-metrics .card{position:relative;overflow:hidden}
-.phantom-metrics .card:after{content:"";position:absolute;width:110px;height:110px;right:-42px;top:-45px;border-radius:50%;background:#55aaff12;border:1px solid #55aaff18}
-button{border-radius:11px;background:linear-gradient(135deg,#2689e8,#4fc8d9);box-shadow:0 7px 20px #168be32a;letter-spacing:.25px}
-button.secondary{background:linear-gradient(145deg,#17344f,#10273d);border-color:#345b7b;color:#eaf5ff;box-shadow:none}
-button.secondary:hover{background:#1a4161;border-color:#5ca8dc}
-button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:0;box-shadow:var(--focus);border-color:#65b9ff}
-input,select,textarea{background:#071522;border-color:#294a67;border-radius:10px}
-input::placeholder,textarea::placeholder{color:#6f8ca7}
-.pill{letter-spacing:.8px;padding:6px 10px}
-.scroll{border-color:#294762;border-radius:13px;background:#07152255}
-th{background:#112a42;color:#b7d4ec}
-td{border-bottom-color:#203d57}
-tbody tr:nth-child(even){background:#ffffff04}
-tbody tr:hover{background:#5bbaff0d}
-.sectionhead{padding-bottom:12px;border-bottom:1px solid #27455f}
-#phantomAccess .notice{background:linear-gradient(100deg,#352b19,#251f18);border-color:#8a6a32;color:#ffe0a1}
-#phantomAccess .profileitem{background:linear-gradient(145deg,#102840,#0b1c2d);border-color:#2a4b68}
-#phantomAccess .pa-row-actions{white-space:nowrap;min-width:220px}
-#phantomAccess .pa-row-actions button{margin:2px;padding:8px 10px;font-size:10px}
-#paOutput{background:#06131f;border-color:#294761;border-radius:13px}
-.terminal-shell{margin-top:18px;padding:0!important;overflow:hidden;border-color:#2b5879!important;background:linear-gradient(150deg,#0c1e31,#081522)!important}
-.terminal-topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 17px;border-bottom:1px solid #2a4a64;background:linear-gradient(90deg,#102c45,#0c2135)}
-.terminal-topbar>div{display:flex;align-items:center;gap:10px;flex-wrap:wrap;letter-spacing:1.2px;font-size:11px}
-.terminal-led{width:9px;height:9px;border-radius:50%;background:#52dfb0;box-shadow:0 0 12px #52dfb088}
-.terminal-subtitle{color:#86a8c4;font-size:9px;letter-spacing:1px}
-.terminal-grid{display:grid;grid-template-columns:minmax(230px,290px) minmax(0,1fr);min-height:430px}
-.terminal-connect{padding:16px;display:flex;flex-direction:column;gap:10px;border-right:1px solid #29445d;background:#0b1a2a}
-.terminal-connect label{display:flex;flex-direction:column;gap:5px;color:#a9c1d8;font-size:10px;font-weight:800;letter-spacing:.9px;text-transform:uppercase}
-.terminal-connect input,.terminal-connect select{width:100%;font-size:12px;min-width:0}
-.terminal-connect button{width:100%;font-size:10px;min-height:38px}
-.ssh-auth-field[hidden]{display:none!important}
-.fingerprint-box{padding:11px;border:1px dashed #416783;border-radius:10px;background:#061421;color:#9dc6e8;font:11px/1.6 Consolas,monospace;overflow-wrap:anywhere;min-height:58px}
-.terminal-connect .hint{font-size:10px;line-height:1.6}
-.terminal-workspace{min-width:0;display:flex;flex-direction:column;padding:12px;background:#050d16}
-.terminal-toolbar,.terminal-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#88a6c0;font:10px/1.4 Consolas,monospace;padding:4px 3px 10px}
-.terminal-toolbar button{font:9px/1.2 "Segoe UI",sans-serif;min-height:30px;padding:6px 10px}
-.terminal-output{flex:1;min-height:300px;max-height:520px;overflow:auto;margin:0;padding:16px;border:1px solid #1d394f;border-radius:10px;background:#02080e;color:#b8e8ce;font:12px/1.65 Consolas,"Cascadia Code",monospace;white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4}
-.terminal-input{width:100%;min-height:58px;resize:vertical;margin-top:8px;border:1px solid #28506a;background:#071522;color:#e4f4ff;font:12px/1.5 Consolas,monospace}
-.terminal-footer{padding:9px 3px 0;font-size:9px;flex-wrap:wrap}
-#paSelectionCount{display:inline-flex;align-items:center;border:1px solid #315c7d;background:#0b2032;color:#a9d8f5;border-radius:99px;padding:5px 10px;font:10px/1.2 Consolas,monospace;margin-top:6px}
-@media(max-width:1000px){.terminal-grid{grid-template-columns:1fr}.terminal-connect{border-right:0;border-bottom:1px solid #29445d;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.terminal-connect .hint,.fingerprint-box{grid-column:1/-1}.terminal-connect button{align-self:end}}
-@media(max-width:700px){main{padding:16px 12px 36px}.card{border-radius:14px}.terminal-connect{grid-template-columns:1fr}.terminal-topbar{align-items:flex-start}.terminal-subtitle{display:none}.terminal-output{min-height:240px}.terminal-workspace{padding:9px}.terminal-footer{font-size:8px}}
-@media(prefers-reduced-motion:reduce){.card:hover,button:hover{transform:none}}
-.phantom-metrics{grid-template-columns:repeat(5,minmax(0,1fr))}
-@media(max-width:1100px){.phantom-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:600px){.phantom-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
-
-.terminal-renderer-note{padding:0 3px 4px;color:#6788a4;font:9px/1.5 "Segoe UI",sans-serif}
-
-
-/* ================================================================
-   NETWORKRADAR 12.0.2 — SIDEBAR + RESPONSIVE LAYOUT HOTFIX
-   Fixes the previous `main { margin:auto }` cascade overriding the
-   navigation offsets. Keep this block last in the stylesheet.
-   ================================================================ */
-:root{
-  --sidebar-width:272px;
-  --sidebar-collapsed:78px;
-  --header-height:78px;
-  --nr-ease:cubic-bezier(.2,.75,.25,1);
-}
-html{scroll-padding-top:calc(var(--header-height) + 18px)}
-body{min-width:320px;overflow-x:hidden}
-header{
-  box-sizing:border-box;
-  width:calc(100% - var(--sidebar-width));
-  margin:0 0 0 var(--sidebar-width)!important;
-  transition:width .24s var(--nr-ease),margin-left .24s var(--nr-ease),padding .2s ease;
-}
-main{
-  box-sizing:border-box;
-  width:calc(100% - var(--sidebar-width));
-  max-width:none!important;
-  margin:0 0 0 var(--sidebar-width)!important;
-  padding:26px clamp(18px,2.8vw,42px) 64px;
-  transition:width .24s var(--nr-ease),margin-left .24s var(--nr-ease),padding .2s ease;
-}
-#sideNavigation{
-  box-sizing:border-box;
-  width:var(--sidebar-width);
-  min-width:0;
-  height:100dvh;
-  transform:translateX(0);
-  transition:width .24s var(--nr-ease),transform .24s var(--nr-ease),padding .24s ease;
-  overscroll-behavior:contain;
-}
-body.nav-collapsed header,body.nav-collapsed main{
-  width:calc(100% - var(--sidebar-collapsed));
-  margin-left:var(--sidebar-collapsed)!important;
-}
-body.nav-collapsed #sideNavigation{
-  width:var(--sidebar-collapsed);
-  padding-left:9px;padding-right:9px;
-}
-body.nav-collapsed #sideNavigation .nav-brand-copy,
-body.nav-collapsed #sideNavigation .nav-search-wrap,
-body.nav-collapsed #sideNavigation .nav-group,
-body.nav-collapsed #sideNavigation .nav-empty{display:none!important}
-body.nav-collapsed #sideNavigation .nav-brand{
-  justify-content:center;padding-inline:0;gap:0;
-}
-body.nav-collapsed #sideNavigation .nav-brand-mark{margin:0}
-body.nav-collapsed #sideNavigation a{
-  width:100%;min-width:0;min-height:43px;padding:8px 4px;
-  justify-content:center;gap:0;overflow:hidden;font-size:0;
-}
-body.nav-collapsed #sideNavigation a .nav-label{
-  display:none!important;
-}
-body.nav-collapsed #sideNavigation a::before{display:none}
-body.nav-collapsed #sideNavigation a::after{
-  content:attr(data-short);display:grid;place-items:center;
-  width:34px;height:30px;border-radius:9px;
-  color:#d9efff;font-size:10px;font-weight:900;letter-spacing:.25px;
-  background:#ffffff08;border:1px solid #ffffff0b;
-}
-body.nav-collapsed #sideNavigation a:hover::after,
-body.nav-collapsed #sideNavigation a.active::after{
-  color:#071522;background:var(--cyan);border-color:var(--cyan);
-}
-#navToggle{flex:0 0 42px;position:relative;z-index:2}
-#navBackdrop{display:none}
-@media(max-width:900px){
-  :root{--header-height:72px}
-  header,body.nav-collapsed header{
-    width:100%;margin:0!important;padding:11px 16px;
-  }
-  main,body.nav-collapsed main{
-    width:100%;margin:0!important;padding:18px 16px 42px;
-  }
-  #sideNavigation,body.nav-collapsed #sideNavigation{
-    position:fixed;inset:0 auto 0 0;
-    width:min(320px,88vw);height:100dvh;max-height:100dvh;
-    padding:16px 13px 24px;
-    transform:translate3d(-105%,0,0);
-    z-index:1002;
-    box-shadow:22px 0 60px #0009;
-  }
-  body.nav-open #sideNavigation{
-    transform:translate3d(0,0,0);
-  }
-  body.nav-collapsed #sideNavigation .nav-brand-copy,
-  body.nav-collapsed #sideNavigation .nav-search-wrap,
-  body.nav-collapsed #sideNavigation .nav-group,
-  body.nav-collapsed #sideNavigation .nav-empty{display:block!important}
-  body.nav-collapsed #sideNavigation a{
-    justify-content:flex-start;gap:10px;font-size:11px;padding:8px 10px;
-  }
-  body.nav-collapsed #sideNavigation a .nav-label{display:inline!important}
-  body.nav-collapsed #sideNavigation a::before{display:block}
-  body.nav-collapsed #sideNavigation a::after{display:none}
-  body.nav-collapsed #sideNavigation .nav-brand{justify-content:flex-start;padding:6px 8px 17px}
-  body.nav-open #navBackdrop{
-    display:block;position:fixed;inset:0;z-index:1001;
-    background:#020812b8;backdrop-filter:blur(3px);
-  }
-}
-@media(max-width:600px){
-  header{gap:10px;align-items:center}
-  header .actions{gap:7px}
-  main{padding:15px 12px 34px}
-}
-@media(prefers-reduced-motion:reduce){
-  #sideNavigation,header,main{transition:none!important}
-}
-
-
-
-/* ================================================================
-   DEVICE INTELLIGENCE MODAL — VIEWPORT FIT & RESPONSIVE CONTENT
-   Fixes: oversized detail panel, clipped lower sections, wide tables,
-   overflowing identity cards, and poor small-screen tab navigation.
-   ================================================================ */
-.modal{
-  padding:clamp(8px,2.2vh,24px) clamp(8px,2vw,24px);
-  overflow-x:hidden;
-  overflow-y:auto;
-  overscroll-behavior:contain;
-}
-.modal.open{
-  align-items:center;
-  justify-content:center;
-}
-.modalbox{
-  display:flex;
-  flex-direction:column;
-  width:min(1240px,100%);
-  max-width:100%;
-  max-height:calc(100dvh - 2 * clamp(8px,2.2vh,24px));
-  min-height:0;
-  padding:clamp(12px,2vw,22px);
-  overflow:hidden;
-}
-.modalhead{
-  flex:0 0 auto;
-  position:relative;
-  z-index:6;
-  gap:12px;
-  padding:0 0 12px;
-}
-.modalhead h2{
-  margin:3px 0 0;
-  font-size:clamp(16px,2vw,22px);
-  line-height:1.3;
-  overflow-wrap:anywhere;
-}
-.modalcontent{
-  flex:1 1 auto;
-  min-width:0;
-  min-height:0;
-  overflow-x:hidden;
-  overflow-y:auto;
-  overscroll-behavior:contain;
-  scrollbar-width:thin;
-  scrollbar-color:#315675 #091827;
-  padding:0 2px 4px 0;
-}
-.device-tabs{
-  position:sticky;
-  top:0;
-  z-index:5;
-  max-width:100%;
-  overflow-x:auto;
-  overflow-y:hidden;
-  flex-wrap:nowrap;
-  padding:10px 2px 12px;
-  margin:0 0 12px;
-  background:#0c1c2d;
-  border-bottom:1px solid #203b55;
-  -webkit-overflow-scrolling:touch;
-  overscroll-behavior-x:contain;
-}
-.device-tab{flex:0 0 auto;min-height:36px}
-.device-pane{min-width:0;overflow-wrap:anywhere}
-.device-pane h3{
-  margin:18px 0 10px;
-  font-size:11px;
-  line-height:1.5;
-  letter-spacing:1.15px;
-  color:#c3e2fa;
-}
-.profilegrid{
-  grid-template-columns:repeat(auto-fit,minmax(min(100%,205px),1fr));
-  align-items:stretch;
-}
-.profileitem,.device-kpi{min-width:0;overflow:hidden}
-.profileitem .value{
-  max-width:100%;
-  overflow-wrap:anywhere;
-  word-break:break-word;
-  line-height:1.45;
-}
-.device-kpis{grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))}
-.device-table{width:100%;min-width:640px;table-layout:auto}
-.device-pane .scroll{
-  width:100%;
-  max-width:100%;
-  max-height:min(42vh,390px);
-  overflow:auto;
-  overscroll-behavior:contain;
-  -webkit-overflow-scrolling:touch;
-}
-.device-pane .scroll table th{position:sticky;top:0;z-index:2}
-.device-pane .scroll td,.device-pane .scroll th{vertical-align:top}
-.device-empty{overflow-wrap:anywhere;line-height:1.65}
-
-@media(max-width:900px){
-  .modal{padding:10px}
-  .modalbox{
-    width:100%;
-    max-height:calc(100dvh - 20px);
-    border-radius:15px;
-  }
-  .device-pane .scroll{max-height:38vh}
-}
-@media(max-width:600px){
-  .modal{padding:6px}
-  .modal.open{align-items:center}
-  .modalbox{
-    max-height:calc(100dvh - 12px);
-    padding:12px;
-    border-radius:13px;
-  }
-  .modalhead{align-items:center;gap:8px;padding-bottom:10px}
-  .modalhead button{flex:0 0 auto;padding:8px 10px;min-height:36px}
-  .modalhead h2{font-size:16px}
-  .device-tabs{margin-inline:-2px;gap:6px;padding:9px 2px 10px}
-  .device-tab{padding:7px 9px;font-size:10px}
-  .profilegrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-  .profileitem{padding:10px}
-  .profileitem .label{font-size:9px;letter-spacing:1px}
-  .profileitem .value{font-size:13px}
-  .device-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-  .device-kpi{padding:10px}
-  .device-kpi strong{font-size:19px}
-  .device-pane .scroll{max-height:34vh}
-}
-@media(max-width:380px){
-  .modalbox{padding:9px}
-  .profilegrid,.device-kpis{grid-template-columns:minmax(0,1fr)}
-  .modalhead h2{font-size:14px}
-  .device-tab{padding:7px 8px;font-size:9px}
-}
-@media(max-height:620px){
-  .modal{padding:6px}
-  .modalbox{max-height:calc(100dvh - 12px)}
-  .device-tabs{padding-top:6px;padding-bottom:8px}
-  .device-pane .scroll{max-height:30vh}
-}
-
-</style></head><body>
-<header><div class="brand"><button id="navToggle" class="secondary" type="button" aria-label="Toggle navigation" aria-expanded="true" title="Collapse or open navigation" onclick="toggleNavigation()">☰</button><div class="logo">NR</div><div><h1>NETWORKRADAR {APP_VERSION}</h1><div class="sub">PHANTOM INTELLIGENCE &amp; NETWORK DEFENCE</div></div></div>
-<div class="actions"><span id="connection" class="pill warn">CONNECTING</span><button id="scanButton" onclick="scanNow()">SCAN NOW</button><button class="secondary" onclick="refreshAll()">REFRESH</button></div></header>
-<nav id="sideNavigation" aria-label="Main navigation">
- <div class="nav-brand"><div class="nav-brand-mark">NR</div><div class="nav-brand-copy">NETWORKRADAR<small>CONTROL CENTRE</small></div></div>
- <div class="nav-search-wrap"><span class="nav-search-icon">⌕</span><input id="navSearch" type="search" placeholder="Find a section…" aria-label="Search navigation sections"></div>
- <div class="nav-group">Overview</div>
- <a href="#cmd" data-short="CC" title="Command centre"><span class="nav-label">Command centre</span></a><a href="#devices" data-short="DV" title="Devices"><span class="nav-label">Devices</span></a><a href="#engines" data-short="EH" title="Engine health"><span class="nav-label">Engine health</span></a>
- <div class="nav-group">Device intelligence</div>
- <a href="#identity" data-short="ID" title="Radar identity"><span class="nav-label">Radar identity</span></a><a href="#continuity" data-short="PT" title="Phantom Track"><span class="nav-label">Phantom Track</span></a><a href="#candidates" data-short="IC" title="Identity candidates"><span class="nav-label">Identity candidates</span></a><a href="#unknownHunter" data-short="UH" title="Unknown Device Hunter"><span class="nav-label">Unknown Device Hunter</span></a><a href="#ipv6" data-short="V6" title="IPv6 intelligence"><span class="nav-label">IPv6 intelligence</span></a>
- <div class="nav-group">Network activity</div>
- <a href="#profiles" data-short="NP" title="Network profiles"><span class="nav-label">Network profiles</span></a><a href="#dns" data-short="DN" title="DNS intelligence"><span class="nav-label">DNS intelligence</span></a><a href="#dhcp" data-short="DH" title="DHCP"><span class="nav-label">DHCP</span></a><a href="#arp" data-short="AR" title="ARP"><span class="nav-label">ARP</span></a><a href="#behaviour" data-short="BH" title="Behaviour"><span class="nav-label">Behaviour</span></a><a href="#changes" data-short="CH" title="Network changes"><span class="nav-label">Network changes</span></a>
- <div class="nav-group">Security &amp; investigations</div>
- <a href="#investigations" data-short="IN" title="Investigations"><span class="nav-label">Investigations</span></a><a href="#alerts" data-short="AL" title="Alert stream"><span class="nav-label">Alert stream</span></a><a href="#config" data-short="AU" title="Configuration audit"><span class="nav-label">Configuration audit</span></a><a href="#hunt" data-short="TH" title="Threat hunt"><span class="nav-label">Threat hunt</span></a><a href="#exposure" data-short="EX" title="Exposure intelligence"><span class="nav-label">Exposure intelligence</span></a>
- <div class="nav-group">Remote management</div>
- <a href="#phantomAccess" data-short="PA" title="Phantom Access"><span class="nav-label">Phantom Access</span></a><a href="#commandCenter" data-short="ME" title="Managed endpoints"><span class="nav-label">Managed endpoints</span></a>
- <div class="nav-group">Tools &amp; reports</div>
- <a href="#assistant" data-short="AI" title="Intelligence assistant"><span class="nav-label">Intelligence assistant</span></a><a href="#reports" data-short="RP" title="Reports"><span class="nav-label">Reports</span></a>
- <div class="nav-empty" id="navEmpty">No matching sections.</div>
-</nav><div id="navBackdrop" aria-hidden="true" onclick="closeNavigation()"></div>
-<main>
-<div class="meta" id="cmd">LOCAL · <span id="network">...</span> · <span id="updated">—</span></div>
-<section class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><div class="label">ENGINE</div><strong id="jobPhase">Init</strong><div class="hint" id="jobMessage">—</div></div><div style="font-size:22px;font-weight:800" id="jobPercent">0%</div></div><div style="height:9px;background:#07111f;border:1px solid var(--line);border-radius:99px;overflow:hidden;margin-top:12px"><div id="jobBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2689ee,#39d6b0);transition:width .35s ease"></div></div></section>
-<div class="grid">
-<div class="card"><div class="label">Devices online</div><div class="value" id="online">—</div><div class="hint" id="deviceHint">—</div></div>
-<div class="card"><div class="label">Historical</div><div class="value" id="historical">—</div><div class="hint">SQLite</div></div>
-<div class="card"><div class="label">Open investigations</div><div class="value" id="openInvestigations">—</div></div>
-<div class="card"><div class="label">Network risk</div><div class="value risk-UNKNOWN" id="networkRisk">—</div></div>
-</div>
-<div class="split">
-<section class="card" id="engines"><h2>ENGINE HEALTH</h2>
-<div class="statusline"><span>Discovery</span><span class="pill" id="nmapStatus">ONLINE</span></div>
-<div class="statusline"><span>DNS</span><span class="pill warn" id="dnsStatus">STARTING</span></div>
-<div class="statusline"><span>DHCP</span><span class="pill warn" id="dhcpStatus">STARTING</span></div>
-<div class="statusline"><span>ARP</span><span class="pill warn" id="arpStatus">STARTING</span></div>
-<div class="statusline"><span>DHCP classification</span><span class="mono" id="dhcpClass">—</span></div>
-<div class="statusline"><span>Network context</span><span class="mono" id="netAuthz">—</span></div>
-<div class="statusline"><span>DB queue</span><span class="mono" id="dbQueue">—</span></div>
-<div class="statusline"><span>Scan quality</span><span class="mono" id="scanQuality">—</span></div>
-</section>
-<section class="card"><h2>NETWORK CONTEXT</h2>
-<div class="profilegrid">
-<div class="profileitem"><div class="label">SUBNET</div><div class="value" id="activeSubnet">...</div></div>
-<div class="profileitem"><div class="label">GATEWAY</div><div class="value" id="defaultGateway">—</div></div>
-<div class="profileitem"><div class="label">FINGERPRINT</div><div class="value mono" id="fingerprint">—</div></div>
-<div class="profileitem"><div class="label">CONFIDENCE</div><div class="value" id="fpConf">—</div></div>
-</div>
-<div class="hint" id="networkWarning" style="margin:12px 0">Loading...</div>
-<button id="authorizeNetwork" onclick="authorizeCurrentNetwork()" style="display:none">AUTHORISE THIS NETWORK</button>
-</section>
-</div>
-<section id="devices" class="section card">
-<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-<h2 style="margin:0">DEVICE INVENTORY</h2>
-<div style="display:flex;gap:8px;flex-wrap:wrap">
-<input id="deviceSearch" oninput="filterDevices()" placeholder="Search IP, name, MAC..." style="min-width:240px">
-<select id="deviceFilter" onchange="filterDevices()"><option value="ALL">All</option><option value="ONLINE">Online</option><option value="OFFLINE">Offline</option><option value="TRUSTED">Trusted</option></select>
-</div></div>
-<div class="muted" style="font-size:12px;margin-bottom:10px">Identity uses multiple evidence sources. NIC manufacturer ≠ device manufacturer. Confidence ≠ certainty.</div>
-<div class="scroll"><table><thead><tr><th>IP</th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>ID</th><th>RISK</th><th>STATUS</th></tr></thead><tbody id="deviceRows"><tr><td colspan="7">Loading...</td></tr></tbody></table></div>
-</section>
-<section id="identity" class="section card"><h2>RADAR IDENTITY INTELLIGENCE</h2>
-<div class="grid" style="margin-top:12px"><div class="card"><div class="label">Devices with evidence</div><div class="value" id="idDevices">—</div></div><div class="card"><div class="label">Evidence records</div><div class="value" id="idEvidence">—</div></div><div class="card"><div class="label">IEEE OUI entries</div><div class="value" id="ouiEntries">—</div></div><div class="card"><div class="label">Last identity run</div><div class="value" style="font-size:14px" id="idLastRun">—</div></div></div>
-<button class="secondary" style="margin-top:10px" onclick="updateOUI()">UPDATE IEEE OUI DATABASE</button>
-</section>
-<section id="continuity" class="section card"><div style="display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap"><div><h2 style="margin:0">PHANTOM TRACK · IDENTITY CONTINUITY</h2><div class="hint">Stable globally administered MACs anchor identity. Randomised MACs remain IP-scoped. Similar hostnames/vendor classes are review candidates only; no automatic merges.</div></div><button class="secondary" id="continuityRun" onclick="runContinuity()">RUN CONTINUITY ANALYSIS</button></div>
-<div class="grid" style="margin-top:14px"><div class="card"><div class="label">Tracked anchors</div><div class="value" id="ctTracked">—</div></div><div class="card"><div class="label">Stable MAC anchors</div><div class="value" id="ctStable">—</div></div><div class="card"><div class="label">Randomised / local</div><div class="value" id="ctRandom">—</div></div><div class="card"><div class="label">Continuity events</div><div class="value" id="ctEvents">—</div></div></div>
-<div class="scroll" style="margin-top:14px"><table><thead><tr><th>ANCHOR</th><th>IP</th><th>CLASS</th><th>HOSTNAME</th><th>VENDOR CLASS</th><th>CONF</th><th>OBS</th><th>LAST SEEN</th></tr></thead><tbody id="continuityRows"><tr><td colspan="8">Run continuity analysis to build observation ledger.</td></tr></tbody></table></div>
-</section>
-<section id="candidates" class="section card"><h2>IDENTITY CANDIDATES (MANUAL REVIEW)</h2>
-<div class="hint">No cross-anchor identity is auto-merged. Similar hostnames/vendor classes are not proof; review requires independent unique evidence.</div>
-<div class="scroll" style="margin-top:10px"><table><thead><tr><th>ID</th><th>DEVICE A</th><th>DEVICE B</th><th>OUTCOME</th><th>SCORE</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody id="candidateRows"><tr><td colspan="7">No candidates.</td></tr></tbody></table></div>
-</section>
-<section id="profiles" class="section card"><h2>NETWORK PROFILES</h2>
-<div class="hint" style="margin-bottom:10px">Keyed by fingerprint. Approved profile + fingerprint confidence ≥ 55% required for active discovery.</div>
-<div class="scroll"><table><thead><tr><th>SUBNET</th><th>FINGERPRINT</th><th>GATEWAY</th><th>APPROVED</th><th>CONF</th><th>LAST SEEN</th></tr></thead><tbody id="profileRows"><tr><td colspan="6">Loading...</td></tr></tbody></table></div>
-</section>
-<div class="split section" id="dns">
-<section class="card"><h2>TOP DOMAINS</h2><div class="scroll"><table><thead><tr><th>DOMAIN</th><th>Q</th><th>RISK</th></tr></thead><tbody id="domainRows"><tr><td colspan="3">—</td></tr></tbody></table></div></section>
-<section class="card"><h2>DNS ALERTS</h2><div class="scroll"><table><thead><tr><th>TIME</th><th>DEVICE</th><th>RULE</th><th>SEV</th></tr></thead><tbody id="alertRows"><tr><td colspan="4">—</td></tr></tbody></table></div></section>
-</div>
-<div class="split section" id="dhcp">
-<section class="card"><h2>DHCP</h2><div class="scroll"><table><thead><tr><th>TIME</th><th>MSG</th><th>MAC</th><th>IP</th><th>SERVER</th><th>HOST</th></tr></thead><tbody id="dhcpRows"><tr><td colspan="6">—</td></tr></tbody></table></div></section>
-<section class="card" id="arp"><h2>ARP</h2><div class="scroll"><table><thead><tr><th>TIME</th><th>OP</th><th>IP</th><th>MAC</th><th>FLAG</th></tr></thead><tbody id="arpRows"><tr><td colspan="5">—</td></tr></tbody></table></div></section>
-</div>
-<section id="behaviour" class="section card"><h2>BEHAVIOUR</h2><div class="hint" id="behaviourStatus">Checking baseline coverage...</div><div class="scroll" style="margin-top:10px"><table><thead><tr><th>DEVICE</th><th>METRIC</th><th>SEV</th><th>OBS</th><th>BASE</th></tr></thead><tbody id="behaviourRows"><tr><td colspan="5">None.</td></tr></tbody></table></div></section>
-<section id="changes" class="section card"><h2>NETWORK CHANGES</h2><div class="scroll"><table><thead><tr><th>TIME</th><th>CHANGE</th><th>CAT</th><th>SEV</th><th>IP</th><th>DETAILS</th></tr></thead><tbody id="changeRows"><tr><td colspan="6">None.</td></tr></tbody></table></div></section>
-<section id="investigations" class="section card"><h2>INVESTIGATIONS</h2><div class="scroll"><table><thead><tr><th>TIME</th><th>TITLE</th><th>SEV</th><th>STATUS</th><th>EVIDENCE</th></tr></thead><tbody id="investigationRows"><tr><td colspan="5">None.</td></tr></tbody></table></div></section>
-<section id="alerts" class="section card"><h2>ALERT STREAM</h2><div class="scroll"><table><thead><tr><th>TIME</th><th>SOURCE</th><th>RULE</th><th>SEV</th><th>TITLE</th><th>COUNT</th><th>INV</th></tr></thead><tbody id="alertStreamRows"><tr><td colspan="7">None.</td></tr></tbody></table></div></section>
-<section id="config" class="section card"><h2>CONFIG AUDIT</h2><div class="scroll"><table><thead><tr><th>SEV</th><th>FINDING</th><th>EVIDENCE</th><th>RECOMMENDATION</th><th>STATUS</th></tr></thead><tbody id="configRows"><tr><td colspan="5">No findings.</td></tr></tbody></table></div></section>
-<section id="hunt" class="section card"><h2>THREAT HUNT</h2>
-<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-<select id="huntTemplate" style="flex:1;min-width:240px"><option value="">Select...</option></select>
-<button onclick="runHunt()">RUN</button></div>
-<div class="hint" id="huntResult">Select a template.</div>
-<div class="scroll" style="margin-top:10px"><table><thead id="huntHead"><tr><th>—</th></tr></thead><tbody id="huntRows"><tr><td>No query.</td></tr></tbody></table></div>
-</section>
-<section id="reports" class="section card"><h2>REPORTS</h2>
-<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-<select id="reportType"><option value="daily">Daily</option><option value="devices">Devices</option><option value="investigations">Investigations</option><option value="changes">Changes</option><option value="threats">Threats</option><option value="health">Health</option><option value="config">Config</option></select>
-<select id="reportFormat"><option value="json">JSON</option><option value="csv">CSV</option><option value="html">HTML</option></select>
-<button onclick="downloadReport()">DOWNLOAD</button></div>
-</section>
-<section class="section card"><h2>RECENT EVENTS</h2><div class="scroll"><table><thead><tr><th>TIME</th><th>DEVICE</th><th>CAT</th><th>EVENT</th><th>DETAILS</th></tr></thead><tbody id="eventRows"><tr><td colspan="5">Loading...</td></tr></tbody></table></div></section>
-
-<section class="section card" id="unknownHunter"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 style="margin:0">UNKNOWN DEVICE HUNTER</h2><div class="hint">Devices with weak or incomplete identity evidence. A low score is uncertainty, not proof of a threat.</div></div><button class="secondary" onclick="investigateUnknown()">INVESTIGATE UNKNOWN DEVICES</button></div><div class="hint" id="unknownInvestigationStatus" style="margin-top:8px">Investigation is read-only and creates low-severity identity-review records.</div><div class="scroll" style="margin-top:12px"><table><thead><tr><th>IP</th><th>NAME</th><th>TYPE</th><th>OS</th><th>CONFIDENCE</th><th>EVIDENCE</th><th>STATUS</th></tr></thead><tbody id="unknownRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div></section>
-<section class="section card" id="ipv6"><h2>IPV6 NEIGHBOUR INTELLIGENCE</h2><div class="hint">Read-only observations from the Windows IPv6 neighbour cache. This does not sweep the IPv6 subnet.</div><div class="scroll" style="margin-top:12px"><table><thead><tr><th>IPV6 ADDRESS</th><th>MAC</th><th>INTERFACE</th><th>STATE</th><th>LAST OBSERVED</th><th>IDENTITY LINK</th></tr></thead><tbody id="ipv6Rows"><tr><td colspan="6">Loading…</td></tr></tbody></table></div></section>
-<section class="section card" id="exposure"><h2>EXPOSURE INTELLIGENCE</h2><div class="notice">These are observed open-service exposures, not confirmed vulnerabilities. No exploitation is performed.</div><div class="scroll"><table><thead><tr><th>IP</th><th>OBSERVATION</th><th>SEVERITY</th><th>PORT</th><th>RECOMMENDATION</th><th>LAST SEEN</th><th>STATUS</th></tr></thead><tbody id="exposureRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div></section>
-<section class="section card" id="assistant"><h2>NETWORKRADAR INTELLIGENCE ASSISTANT</h2><div class="hint">Read-only assistant grounded in the local NetworkRadar database.</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><input id="assistantQuestion" style="flex:1;min-width:220px" placeholder="e.g. Which devices remain unidentified?"/><button onclick="askRadar()">ASK RADAR</button></div><div id="assistantAnswer" class="profileitem">Ask a question to inspect your local inventory.</div><div class="scroll" style="margin-top:12px"><table><thead><tr><th>DETAIL</th><th>VALUE</th></tr></thead><tbody id="assistantRows"></tbody></table></div></section>
-<section class="section card" id="phantomAccess">
-<div class="sectionhead"><div><h2>PHANTOM ACCESS · UNIVERSAL ENDPOINT ACCESS</h2><div class="hint">Multi-protocol access for authorised endpoints: Windows native management, SSH terminal sessions, and a capability-aware access path for other device types.</div></div><button class="secondary" onclick="loadPhantomAccess()">REFRESH INVENTORY</button></div>
-<div class="notice">Agentless access is conditional. An open port indicates a possible service, not successful authentication. WinRM/WMI/RDP must already be enabled and permitted by Windows Firewall and the remote account. NetworkRadar does not enable remote access or store Windows passwords.</div>
-<div class="grid phantom-metrics"><div class="card"><div class="label">Known devices</div><div class="value" id="paKnown">0</div></div><div class="card"><div class="label">Native management candidates</div><div class="value" id="paCandidates">0</div></div><div class="card"><div class="label">SSH reachable</div><div class="value" id="paSshReachable">0</div></div><div class="card"><div class="label">RDP reachable</div><div class="value" id="paRdp">0</div></div><div class="card"><div class="label">Agent-managed</div><div class="value" id="paAgents">0</div></div></div>
-<div class="sectionhead" style="margin:12px 0"><div><strong>QUICK CONTROL · ALL SELECTED ONLINE DEVICES</strong><div class="hint">Select any number of online endpoints. Read-only jobs are automatically split into batches of 12 with per-device results.</div><span id="paSelectionCount">0 selected · 0 online</span></div><div class="actions"><button class="secondary" onclick="phantomBulk('probe')">PROBE SELECTED</button><button class="secondary" onclick="phantomBulk('remote_inventory')">REFRESH SYSTEM INFO</button><button class="secondary" onclick="phantomBulk('remote_network')">NETWORK SNAPSHOT</button><button class="secondary" onclick="phantomBulk('remote_storage')">STORAGE SNAPSHOT</button><button class="secondary" onclick="phantomBulk('remote_security')">SECURITY SNAPSHOT</button></div></div>
-<div class="scroll"><table><thead><tr><th><input type="checkbox" id="paSelectAll" onchange="toggleAllPhantom(this.checked)" aria-label="Select all visible endpoints"></th><th>DEVICE</th><th>IDENTITY</th><th>IP</th><th>WINRM</th><th>WMI/RPC</th><th>SMB</th><th>RDP</th><th>SSH</th><th>READINESS</th><th>ACTIONS</th></tr></thead><tbody id="phantomAccessRows"><tr><td colspan="11">Loading known devices…</td></tr></tbody></table></div>
-<div class="profilegrid" style="margin-top:14px"><div class="profileitem"><div class="label">Selected target</div><div class="value mono" id="paTarget">None selected</div></div><div class="profileitem"><div class="label">Native access method</div><div class="value" id="paMethod">Not tested</div></div><div class="profileitem"><div class="label">Authentication</div><div class="value">Current Windows account</div></div><div class="profileitem"><div class="label">Last operation</div><div class="value" id="paLastAction">None</div></div></div>
-<div class="hint" id="paStatus" style="margin-top:12px">Select a known endpoint, probe its services, then choose an access method supported by that device.</div>
-<div class="terminal-shell card" id="phantomTerminal">
- <div class="terminal-topbar"><div><span class="terminal-led"></span><strong>PHANTOM TERMINAL</strong><span class="terminal-subtitle">AUTHENTICATED SSH · INTERACTIVE SESSION</span></div><span id="paSshState" class="pill warn">DISCONNECTED</span></div>
- <div class="terminal-grid">
-  <div class="terminal-connect">
-   <label>Target IP<input id="paSshIp" type="text" inputmode="decimal" placeholder="Select an endpoint" readonly></label>
-   <label>SSH port<input id="paSshPort" type="number" min="1" max="65535" value="22"></label>
-   <label>Username<input id="paSshUser" type="text" maxlength="128" autocomplete="username" placeholder="SSH account"></label>
-   <label>Authentication<select id="paSshAuth"><option value="agent">SSH agent / default keys</option><option value="key">Private-key file</option><option value="password">Password (memory only)</option></select></label>
-   <label id="paSshKeyWrap" class="ssh-auth-field">Private-key path<input id="paSshKey" type="text" placeholder="C:\Users\you\.ssh\id_ed25519"></label>
-   <label id="paSshPassphraseWrap" class="ssh-auth-field">Key passphrase<input id="paSshPassphrase" type="password" autocomplete="off"></label>
-   <label id="paSshPasswordWrap" class="ssh-auth-field" hidden>Password<input id="paSshPassword" type="password" autocomplete="new-password"></label>
-   <button class="secondary" id="paSshFingerprintBtn" type="button">1 · REVIEW HOST KEY</button>
-   <div id="paSshFingerprint" class="fingerprint-box">Host key not reviewed.</div>
-   <button class="secondary" id="paSshTrustBtn" type="button" disabled>2 · TRUST FINGERPRINT</button>
-   <button id="paSshConnectBtn" type="button" disabled>3 · CONNECT TERMINAL</button>
-   <button class="secondary" id="paSshDisconnectBtn" type="button" disabled>DISCONNECT</button>
-   <div class="hint">SSH credentials are used only to establish this session. Passwords and private-key contents are not stored or written to the audit log. Verify the fingerprint using a trusted source on the target before accepting it. Unknown or changed keys are rejected.</div>
-  </div>
-  <div class="terminal-workspace">
-   <div class="terminal-toolbar"><span id="paSshSessionLabel">No active session</span><button class="secondary" id="paTerminalClear" type="button">CLEAR OUTPUT</button></div>
-   <pre id="paTerminalOutput" class="terminal-output" aria-live="polite">PHANTOM TERMINAL READY
-
-Select an online device with SSH available. Review its host-key fingerprint before trusting it.
-
-This terminal runs with the permissions of the SSH account you authenticate as.</pre>
-   <textarea id="paTerminalInput" class="terminal-input" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="Connect first, then type commands here…" disabled aria-label="SSH terminal keyboard input"></textarea>
-   <div class="terminal-footer"><span>ENTER sends · CTRL+C interrupts · CTRL+D closes input</span><span id="paTerminalLatency">LOCAL SESSION</span></div>
-   <div class="terminal-renderer-note">Interactive PTY shell · basic text renderer · full-screen terminal applications may not display correctly.</div>
-  </div>
- </div>
-</div>
-<div class="scroll" style="margin-top:12px"><table><thead><tr><th>AVAILABLE READ-ONLY OPERATIONS</th><th>DESCRIPTION</th><th>ACTION</th></tr></thead><tbody>
-<tr><td>Remote system inventory</td><td>Windows edition, model, manufacturer, CPU, memory and boot time.</td><td><button class="secondary" onclick="phantomAction('remote_inventory')">RUN</button></td></tr>
-<tr><td>Network configuration</td><td>Adapters, MAC addresses, IP/subnet, gateway, DNS and DHCP state. No packet contents.</td><td><button class="secondary" onclick="phantomAction('remote_network')">RUN</button></td></tr>
-<tr><td>Storage inventory</td><td>Fixed volumes, filesystem, total capacity and free space. No file listing or file contents.</td><td><button class="secondary" onclick="phantomAction('remote_storage')">RUN</button></td></tr>
-<tr><td>BIOS / motherboard</td><td>BIOS vendor/version and motherboard manufacturer/product identifiers.</td><td><button class="secondary" onclick="phantomAction('remote_bios')">RUN</button></td></tr>
-<tr><td>Security posture snapshot</td><td>Firewall profile state and Microsoft Defender protection status where supported. Not a compliance certification.</td><td><button class="secondary" onclick="phantomAction('remote_security')">RUN</button></td></tr>
-<tr><td>Running processes</td><td>Read-only process names, IDs and memory use.</td><td><button class="secondary" onclick="phantomAction('remote_processes')">RUN</button></td></tr>
-<tr><td>Windows services</td><td>Read-only service names, display names and states.</td><td><button class="secondary" onclick="phantomAction('remote_services')">RUN</button></td></tr>
-<tr><td>Test WinRM</td><td>Verifies an authenticated PowerShell Remoting command can execute.</td><td><button class="secondary" onclick="phantomAction('test_winrm')">TEST WINRM</button></td></tr>
-<tr><td>Test WMI/DCOM</td><td>Separately verifies authenticated CIM access over DCOM. WinRM may be unavailable while WMI works.</td><td><button class="secondary" onclick="phantomAction('test_wmi')">TEST WMI/DCOM</button></td></tr>
-<tr><td>Open Remote Desktop</td><td>Launches the local Windows RDP client if port 3389 is reachable.</td><td><button class="secondary" onclick="phantomAction('open_rdp')">OPEN RDP</button></td></tr>
-<tr><td>Restart Windows service</td><td>Requires exact service name, sufficient privileges and confirmation. Core services are blocked.</td><td><button class="secondary" onclick="phantomAction('restart_service')">RESTART SERVICE</button></td></tr>
-<tr><td>Restart / shut down PC</td><td>Disruptive actions require explicit confirmation and working remote permissions.</td><td><button class="secondary" onclick="phantomAction('restart_computer')">RESTART</button> <button class="secondary" onclick="phantomAction('shutdown_computer')">SHUT DOWN</button></td></tr>
-</tbody></table></div>
-<pre id="paOutput" class="profileitem" style="white-space:pre-wrap;overflow:auto;max-height:340px;margin-top:12px">Results from agentless operations will appear here.</pre>
-</section>
-<section class="section card" id="commandCenter"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>NETWORKRADAR COMMAND · MANAGED ENDPOINTS</h2><div class="hint">Explicitly enrolled devices only. No silent access, arbitrary shell or hidden remote control.</div></div><button onclick="createAgentToken()">GENERATE ENROLMENT TOKEN</button></div>
-<div class="notice">Remote agent communications require TLS with certificate pinning. The agent hub is disabled by default. Configure its TLS certificate and explicitly enable it before enrolling another computer. Restart, shutdown, workstation lock and service restart require separate confirmation.</div>
-<div class="grid" style="margin-top:12px"><div class="card"><div class="label">Managed endpoints</div><div class="value" id="agentManaged">0</div></div><div class="card"><div class="label">Recently online</div><div class="value" id="agentOnline">0</div></div><div class="card"><div class="label">Queued actions</div><div class="value" id="agentQueued">0</div></div><div class="card"><div class="label">Agent hub</div><div class="value" style="font-size:18px" id="agentHubState">DISABLED</div></div></div>
-<div id="agentTokenBox" class="profileitem" style="display:none;margin:12px 0"><div class="label">Single-use enrolment token · expires in 15 minutes</div><div class="mono" id="agentToken" style="font-size:18px;overflow-wrap:anywhere"></div><div class="hint">Copy this token to the target computer. It can enrol one agent once.</div></div>
-<div class="scroll"><table><thead><tr><th>DEVICE</th><th>PLATFORM</th><th>STATUS</th><th>LAST SEEN</th><th>CPU</th><th>RAM</th><th>IP</th><th>CONTROLS</th></tr></thead><tbody id="agentRows"><tr><td colspan="8">No endpoints enrolled.</td></tr></tbody></table></div>
-<h2 style="margin-top:20px">COMMAND AUDIT</h2><div class="scroll"><table><thead><tr><th>TIME</th><th>DEVICE ID</th><th>ACTOR</th><th>ACTION</th><th>OUTCOME</th><th>DETAILS</th></tr></thead><tbody id="agentAuditRows"><tr><td colspan="6">No remote-management actions.</td></tr></tbody></table></div>
-<h2 style="margin-top:20px">LATEST COMMAND OUTPUT</h2><div class="hint">Process/service listings and action results returned by enrolled agents appear here.</div><div class="scroll"><table><thead><tr><th>COMMAND</th><th>DEVICE</th><th>ACTION</th><th>STATUS</th><th>COMPLETED</th></tr></thead><tbody id="agentResultRows"><tr><td colspan="5">No command results.</td></tr></tbody></table></div><pre id="agentCommandOutput" class="profileitem" style="white-space:pre-wrap;overflow:auto;max-height:320px">Select a completed command to inspect its result.</pre></section>
-</main>
-<div id="toast" style="display:none;position:fixed;right:20px;bottom:20px;z-index:100;background:#153d35;color:#d8fff0;border:1px solid #35d39a;padding:12px 18px;border-radius:10px"></div>
-<div id="deviceModal" class="modal" onclick="if(event.target===this)closeDevice()"><div class="modalbox"><div class="modalhead"><div><div class="sub">DEVICE</div><h2 id="modalTitle">Device</h2></div><button class="secondary" onclick="closeDevice()">CLOSE</button></div><div id="modalContent" class="modalcontent">Loading...</div></div></div>
-<script src="/assets/dashboard.js?v={APP_VERSION}" defer></script>
-</body></html>"""
-
-# Self-contained dashboard bundle: the HTML no longer depends on a separate
-# dashboard.js file being copied beside networkradar.py.
-DASHBOARD_JS_BUNDLED = 'const $=id=>document.getElementById(id);\n// Startup diagnostics: make a failed dashboard script/API visible instead of leaving skeletons.\ntry{const c=$("connection");if(c){c.textContent="SCRIPT ACTIVE";c.className="pill warn";}}catch(_e){}\nwindow.addEventListener("error",e=>{try{const c=$("connection");if(c){c.textContent="SCRIPT ERROR";c.className="pill bad";}const u=$("updated");if(u)u.textContent="Dashboard error: "+(e.message||"unknown script error");}catch(_x){}});\nwindow.addEventListener("unhandledrejection",e=>{try{const u=$("updated");if(u)u.textContent="Dashboard request error: "+String(e.reason?.message||e.reason||"unknown");}catch(_x){}});\nfunction esc(v){return String(v??"").replace(/[&<>"\']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",\'"\':"&quot;","\'":"&#39;"}[c]));}\nasync function getJSON(p){const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),10000);try{const r=await fetch(p,{cache:"no-store",signal:ctl.signal});if(!r.ok)throw new Error("HTTP "+r.status);return await r.json();}finally{clearTimeout(timer);}}\nfunction pill(el,text,state){el.textContent=text;el.className="pill"+(state==="bad"?" bad":state==="warn"?" warn":"");}\nfunction toast(m){const t=$("toast");t.textContent=m;t.style.display="block";setTimeout(()=>t.style.display="none",3500);}\nlet deviceCache=[];\nfunction filterDevices(){\n const q=($("deviceSearch")?.value||"").toLowerCase().trim();\n const st=$("deviceFilter")?.value||"ALL";\n const rows=deviceCache.filter(x=>{\n  const b=[x.ip,x.device_name,x.manual_name,x.device_type,x.manufacturer,x.mac,x.hostname,x.model].join(" ").toLowerCase();\n  const ok=st==="ALL"||(st==="ONLINE"&&x.status==="ONLINE")||(st==="OFFLINE"&&x.status==="OFFLINE")||(st==="TRUSTED"&&x.trust_state==="TRUSTED");\n  return ok&&(!q||b.includes(q));\n });\n $("deviceRows").innerHTML=rows.map(x=>`<tr class="clickrow" data-open-device="${esc(x.ip)}" tabindex="0" role="button"><td class="mono">${esc(x.ip)}</td><td>${esc(x.manual_name||x.device_name)}</td><td>${esc(x.device_type)}</td><td>${esc(x.manufacturer)}</td><td>${esc(x.identification_confidence)}%</td><td class="risk-${esc(x.risk_band||"UNKNOWN")}">${esc(x.risk_band||"UNKNOWN")}</td><td class="${x.status==="ONLINE"?"green":"muted"}">${esc(x.status)}</td></tr>`).join("")||\'<tr><td colspan="7">No matches.</td></tr>\';\n $("deviceRows").querySelectorAll("[data-open-device]").forEach(row=>{\n  row.addEventListener("click",()=>openDevice(row.dataset.openDevice));\n  row.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openDevice(row.dataset.openDevice);}});\n });\n}\nfunction closeDevice(){$("deviceModal").classList.remove("open");}\nfunction deviceRows(rows, cols, empty="No records available."){\n if(!rows||!rows.length)return `<div class="device-empty">${esc(empty)}</div>`;\n return `<div class="scroll"><table class="device-table"><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${esc((r[c[1]]??"—")=== "" ? "—" : (r[c[1]]??"—"))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;\n}\nfunction deviceProfileCards(items){return \'<div class="profilegrid">\'+items.map(([k,v])=>`<div class="profileitem"><div class="label">${esc(k)}</div><div class="value">${esc(v===0?"0":(v||"Unknown"))}</div></div>`).join("")+\'</div>\';}\nfunction setDeviceTab(name){\n document.querySelectorAll("[data-device-tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.deviceTab===name?"true":"false"));\n document.querySelectorAll("[data-device-pane]").forEach(p=>p.classList.toggle("active",p.dataset.devicePane===name));\n}\nasync function openDevice(ip){\n $("deviceModal").classList.add("open");$("modalTitle").textContent="Device Intelligence · "+ip;$("modalContent").textContent="Loading device intelligence...";\n try{\n  const p=await getJSON("/api/device?ip="+encodeURIComponent(ip));const d=p.device;\n  if(!d){$("modalContent").textContent="Device not found.";return;}\n  const rec=d.recognition||{}, ev=p.identity_evidence||[], ass=p.identity_assessments||[];\n  const tabs=["Overview","Identity","Hardware","Operating System","Network","Services","Behaviour","Relationships","Security","History","Investigations"];\n  let html=\'<div class="device-tabs" role="tablist" aria-label="Device intelligence sections">\'+tabs.map((t,i)=>`<button class="device-tab" role="tab" id="devtab-${i}" aria-controls="devpane-${i}" aria-selected="${i===0?"true":"false"}" data-device-tab="${esc(t)}">${esc(t)}</button>`).join("")+\'</div>\';\n  const pane=(name,body,i)=>`<section class="device-pane ${i===0?"active":""}" role="tabpanel" id="devpane-${i}" aria-labelledby="devtab-${i}" data-device-pane="${esc(name)}">${body}</section>`;\n  const overview=deviceProfileCards([["IP ADDRESS",d.ip],["DEVICE NAME",d.manual_name||d.device_name||d.hostname],["CATEGORY",d.device_type],["MANUFACTURER",d.reported_manufacturer||d.manufacturer||d.oui_manufacturer],["MODEL",d.model],["OPERATING SYSTEM",d.os_guess],["MAC ADDRESS",d.mac],["IDENTITY CONFIDENCE",(d.identification_confidence||0)+"%"],["STATUS",d.status],["RISK",(d.risk_band||"UNKNOWN")+" · "+(d.risk_score||0)],["TRUST",d.trust_state],["FIRST SEEN",d.first_seen],["LAST SEEN",d.last_seen],["IDENTITY BASIS",d.identity_basis],["LAST ASSESSED",d.identity_last_assessed]]);\n  let identity=\'<div class="device-kpis"><div class="device-kpi"><span class="label">Evidence records</span><strong>\'+ev.length+\'</strong></div><div class="device-kpi"><span class="label">Independent assessments</span><strong>\'+ass.length+\'</strong></div><div class="device-kpi"><span class="label">Category confidence</span><strong>\'+(d.identity_category_confidence||0)+\'%</strong></div></div>\';\n  identity+=\'<h3>WHY NETWORKRADAR THINKS THIS IS THIS DEVICE</h3>\';\n  identity+=deviceRows(ass,[[\'ATTRIBUTE\',\'attribute\'],[\'ASSESSED VALUE\',\'value\'],[\'CONFIDENCE\',\'confidence\'],[\'STATUS\',\'status\'],[\'EVIDENCE COUNT\',\'evidence_count\'],[\'INDEPENDENT SOURCES\',\'independent_sources\'],[\'RATIONALE\',\'rationale\']],\'No persisted attribute assessments yet.\');\n  identity+=\'<h3>RAW IDENTITY EVIDENCE</h3>\'+deviceRows(ev,[[\'TIME\',\'timestamp\'],[\'SOURCE\',\'source\'],[\'ATTRIBUTE\',\'attribute\'],[\'OBSERVED VALUE\',\'value\'],[\'CONFIDENCE\',\'confidence\'],[\'CLASS\',\'class\']]);\n  if(rec.category){identity+=`<div class="notice"><b>${esc(rec.category)}</b> · ${esc(rec.confidence||0)}% · ${esc(rec.status||\'UNKNOWN\')}</div>`;identity+=deviceRows(rec.matches||[],[[\'MATCH\',\'matched\'],[\'CLASSIFICATION\',\'category\'],[\'SOURCE FAMILY\',\'source_family\'],[\'WEIGHT\',\'weight\']],\'No signature matches.\');}\n  const hardware=deviceProfileCards([["DEVICE-REPORTED MANUFACTURER",d.reported_manufacturer],["NIC OUI MANUFACTURER",d.oui_manufacturer],["NMAP VENDOR",d.manufacturer],["REPORTED MODEL",d.model],["HOSTNAME",d.hostname],["DEVICE CATEGORY",d.device_type],["MAC ADDRESS",d.mac],["MAC IDENTITY BASIS",d.identity_basis]]);\n  const os=deviceProfileCards([["OS GUESS",d.os_guess],["OS FINGERPRINT CONFIDENCE",d.identification_confidence+"%"],["PASSIVE TCP HINT",rec.passive_tcp_os_hint],["RECOGNITION STATUS",rec.status],["ALTERNATIVE CLASSIFICATIONS",(rec.alternatives||[]).map(x=>x.category+" ("+x.confidence+"%)").join(" · ")],["LIMITATIONS",(rec.limitations||[]).join(" ")]]);\n  const network=deviceProfileCards([["CURRENT IP",d.ip],["CURRENT MAC",d.mac],["IDENTITY KEY",d.device_id],["IDENTITY BASIS",d.identity_basis],["DHCP OBSERVATIONS",(p.dhcp_history||[]).length],["DNS OBSERVATIONS",(p.dns_activity||[]).length]]);\n  let networkHtml=network+\'<h3>DHCP HISTORY</h3>\'+deviceRows(p.dhcp_history,[[\'TIME\',\'timestamp\'],[\'MESSAGE\',\'message\'],[\'HOSTNAME\',\'hostname\'],[\'VENDOR CLASS\',\'vendor_class\'],[\'CLIENT MAC\',\'mac\'],[\'SERVER\',\'server_ip\']]);\n  networkHtml+=\'<h3>IP / MAC HISTORY</h3>\'+deviceRows(p.ip_history,[[\'IP\',\'ip\'],[\'MAC\',\'mac\'],[\'FIRST SEEN\',\'first_seen\'],[\'LAST SEEN\',\'last_seen\']]);\n  const services=deviceProfileCards([["OPEN PORTS",d.open_ports],["SERVICE SUMMARY",d.service_summary],["SERVICE SIGNATURES",(rec.matches||[]).filter(x=>String(x.source_family||"").toLowerCase().includes("service")).length],["TLS CERTIFICATES",(rec.evidence||[]).filter(x=>String(x.source||"").toLowerCase().includes("tls")).length],["SNMP DATA",Object.keys(d.snmp_intel||{}).length?"Available":"Not observed"]]);\n  let serviceHtml=services+\'<h3>IDENTIFIED SERVICE EVIDENCE</h3>\'+deviceRows((rec.evidence||[]).filter(x=>/service|tls|snmp|http|ssh|smb/i.test((x.source||"")+" "+(x.family||""))),[[\'SOURCE\',\'source\'],[\'FAMILY\',\'family\'],[\'OBSERVATION\',\'value\']]);\n  serviceHtml+=\'<h3>PORT SCAN HISTORY</h3>\'+deviceRows(p.port_scan_history,[[\'TIME\',\'timestamp\'],[\'COMPLETED\',\'completed\'],[\'PORTS\',\'ports\'],[\'METHOD\',\'method\'],[\'DETAIL\',\'detail\']]);\n  const behaviour=\'<h3>DNS ACTIVITY (LATEST OBSERVATIONS)</h3>\'+deviceRows(p.dns_activity,[[\'TIME\',\'timestamp\'],[\'DOMAIN\',\'domain\'],[\'TYPE\',\'type\'],[\'RESPONSE\',\'rcode\'],[\'ANSWERS\',\'answers\']]);\n  const behaviour2=\'<h3>BEHAVIOUR ALERTS</h3>\'+deviceRows(p.behaviour_alerts,[[\'TIME\',\'timestamp\'],[\'METRIC\',\'metric\'],[\'OBSERVED\',\'observed\'],[\'BASELINE\',\'baseline\'],[\'SEVERITY\',\'severity\'],[\'STATUS\',\'status\'],[\'DETAILS\',\'details\']]);\n  const relations=\'<h3>DEVICE RELATIONSHIPS</h3>\'+deviceRows(p.relationships,[[\'SOURCE IP\',\'source_ip\'],[\'TARGET IP\',\'target_ip\'],[\'TYPE\',\'type\'],[\'CONFIDENCE\',\'confidence\'],[\'EVIDENCE\',\'evidence\'],[\'LAST SEEN\',\'last_seen\']]);\n  const relations2=\'<h3>TOPOLOGY LINKS</h3>\'+deviceRows(p.topology,[[\'SOURCE\',\'source\'],[\'TARGET\',\'target\'],[\'KIND\',\'kind\'],[\'CONFIDENCE\',\'confidence\'],[\'EVIDENCE\',\'evidence\'],[\'LAST SEEN\',\'last_seen\']]);\n  let security=deviceProfileCards([["RISK SCORE",d.risk_score||0],["RISK BAND",d.risk_band||"UNKNOWN"],["THREAT RISK",d.threat_risk||0],["IDENTITY UNCERTAINTY",d.identification_uncertainty||0],["OPERATIONAL HEALTH",d.operational_health||0],["TRUST STATE",d.trust_state]]);\n  security+=\'<h3>EXPOSURE FINDINGS</h3>\'+deviceRows(p.exposure_findings,[[\'TITLE\',\'title\'],[\'SEVERITY\',\'severity\'],[\'CONFIDENCE\',\'confidence\'],[\'PORTS\',\'ports\'],[\'STATUS\',\'status\'],[\'RECOMMENDATION\',\'recommendation\']]);\n  security+=\'<h3>SECURITY ALERTS</h3>\'+deviceRows(p.alerts,[[\'TIME\',\'timestamp\'],[\'SOURCE\',\'source\'],[\'RULE\',\'rule\'],[\'SEVERITY\',\'severity\'],[\'TITLE\',\'title\'],[\'STATUS\',\'status\']]);\n  if(d.risk_explanation)security+=\'<div class="notice">\'+esc(d.risk_explanation)+\'</div>\';\n  const history=\'<h3>IDENTITY CHANGES</h3>\'+deviceRows(p.identity_history,[[\'TIME\',\'timestamp\'],[\'ATTRIBUTE\',\'attribute\'],[\'OLD VALUE\',\'old\'],[\'NEW VALUE\',\'new\'],[\'REASON\',\'reason\']]);\n  const history2=\'<h3>DISCOVERY OBSERVATIONS</h3>\'+deviceRows(p.observations,[[\'TIME\',\'timestamp\'],[\'METHOD\',\'method\'],[\'OBSERVATION\',\'observation\'],[\'CONFIDENCE\',\'confidence\']]);\n  const investigations=deviceRows(p.investigations,[[\'ID\',\'id\'],[\'CREATED\',\'timestamp\'],[\'TITLE\',\'title\'],[\'SEVERITY\',\'severity\'],[\'CONFIDENCE\',\'confidence\'],[\'STATUS\',\'status\'],[\'DESCRIPTION\',\'description\'],[\'CLOSURE\',\'closure_reason\']]);\n  html+=pane("Overview",overview,0)+pane("Identity",identity,1)+pane("Hardware",hardware,2)+pane("Operating System",os,3)+pane("Network",networkHtml,4)+pane("Services",serviceHtml,5)+pane("Behaviour",behaviour+behaviour2,6)+pane("Relationships",relations+relations2,7)+pane("Security",security,8)+pane("History",history+history2,9)+pane("Investigations",investigations,10);\n  $("modalContent").innerHTML=html;\n  $("modalContent").querySelectorAll("[data-device-tab]").forEach(b=>b.addEventListener("click",()=>setDeviceTab(b.dataset.deviceTab)));\n }catch(err){$("modalContent").textContent="Error loading device intelligence: "+err.message;}\n}\nasync function runContinuity(){\n const b=$("continuityRun");b.disabled=true;b.textContent="ANALYSING...";\n try{\n  const r=await fetch("/api/identity/continuity/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirm:true})});\n  const p=await r.json();if(!r.ok)throw new Error(p.error||"Analysis failed");\n  toast(`PHANTOM TRACK: ${p.result.observed} observations · ${p.result.stable_anchors} stable anchors · ${p.result.randomised} randomised · ${p.result.candidate_groups} review groups.`);\n  await loadContinuity();await loadCandidates();\n }catch(e){toast("Continuity: "+e.message);}finally{b.disabled=false;b.textContent="RUN CONTINUITY ANALYSIS";}\n}\nasync function updateOUI(){\n if(!confirm("Download and cache the official IEEE MAC address registries? Requires internet."))return;\n try{\n  const r=await fetch("/api/intelligence/update-oui",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirm:true})});\n  const p=await r.json();if(!r.ok)throw new Error((p.errors||[]).join("; ")||p.error||"Update failed");\n  toast(`IEEE registry: ${p.updated} prefixes.`);await loadIdentityIntel();\n }catch(e){toast("OUI update: "+e.message);}\n}\nasync function authorizeCurrentNetwork(){\n if(!confirm("Only authorise if you own this network."))return;\n try{\n  const r=await fetch("/api/network/authorize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirm:true})});\n  const j=await r.json();if(!r.ok)throw new Error(j.error||"Failed");\n  toast(j.message);await refreshAll();\n }catch(e){toast(e.message);}\n}\nasync function scanNow(){\n const b=$("scanButton");b.disabled=true;b.textContent="QUEUED...";\n try{await fetch("/api/scan",{method:"POST"});$("updated").textContent="Queued...";}\n catch(e){$("updated").textContent=e.message;}\n finally{setTimeout(()=>{b.disabled=false;b.textContent="SCAN NOW";},2500);}\n}\nasync function loadCandidates(){\n try{\n  const c=await getJSON("/api/identity/candidates?status=PENDING");\n  $("candidateRows").innerHTML=c.map(x=>`<tr><td>${x.id}</td><td class="mono">${esc(x.device_a)}</td><td class="mono">${esc(x.device_b)}</td><td>${esc(x.outcome)}</td><td>${(x.score*100).toFixed(1)}%</td><td>${esc(x.status)}</td><td><button class="secondary" style="padding:3px 8px;font-size:10px" onclick="reviewCandidate(${x.id},\'ACCEPT\')">ACCEPT</button> <button class="secondary" style="padding:3px 8px;font-size:10px" onclick="reviewCandidate(${x.id},\'REJECT\')">REJECT</button></td></tr>`).join("")||\'<tr><td colspan="7">No pending candidates.</td></tr>\';\n }catch(e){$("candidateRows").innerHTML=\'<tr><td colspan="7">Error: \'+esc(e.message)+\'</td></tr>\';}\n}\nasync function reviewCandidate(id,action){\n try{\n  const r=await fetch("/api/identity/candidates/review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,action,reviewer:"local-user"})});\n  const p=await r.json();if(!r.ok)throw new Error(p.error||"Failed");\n  toast("Candidate #"+id+" "+action.toLowerCase()+"d.");await loadCandidates();\n }catch(e){toast(e.message);}\n}\nasync function loadContinuity(){\n try{\n  const [s,d]=await Promise.all([getJSON(\'/api/identity/continuity/summary\'),getJSON(\'/api/identity/continuity/devices\')]);\n  $(\'ctTracked\').textContent=s.tracked||0;$(\'ctStable\').textContent=s.stable_anchors||0;$(\'ctRandom\').textContent=s.randomised_observations||0;$(\'ctEvents\').textContent=s.events||0;\n  $(\'continuityRows\').innerHTML=d.map(x=>`<tr><td class="mono">${esc(x.id)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.anchor_type)}</td><td>${esc(x.hostname||\'—\')}</td><td>${esc(x.vendor_class||\'—\')}</td><td>${esc(x.confidence)}%</td><td>${esc(x.observations)}</td><td>${esc(x.last_seen)}</td></tr>`).join(\'\')||\'<tr><td colspan="8">No identity observations yet.</td></tr>\';\n }catch(e){$(\'continuityRows\').innerHTML=\'<tr><td colspan="8">Continuity service unavailable: \'+esc(e.message)+\'</td></tr>\';}\n}\nasync function loadIdentityIntel(){\n try{\n  const [s,u]=await Promise.all([getJSON("/api/identity/summary"),getJSON("/api/identity/unknown")]);\n  $("idDevices").textContent=s.devices_with_evidence||0;$("idEvidence").textContent=s.evidence_records||0;$("ouiEntries").textContent=s.oui_entries||0;$("idLastRun").textContent=s.last_run?s.last_run.timestamp:"Not run";\n }catch(e){$("idLastRun").textContent="Unavailable";}\n}\nasync function loadProfiles(){\n try{\n  const p=await getJSON("/api/profiles");\n  $("profileRows").innerHTML=p.map(x=>`<tr style="${x.is_current?\'background:#173653\':\'\'}"><td class="mono">${esc(x.network)}${x.is_current?\' <span class="pill">CUR</span>\':\'\'}</td><td class="mono">${esc(x.fingerprint)}</td><td class="mono">${esc(x.gateway)}</td><td>${x.approved?\'<span class="green">YES</span>\':\'<span class="amber">NO</span>\'}</td><td>${esc(x.confidence)}%</td><td>${esc(x.last_seen)}</td></tr>`).join("")||\'<tr><td colspan="6">None.</td></tr>\';\n }catch(e){}\n}\nasync function loadChanges(){\n try{const c=await getJSON("/api/changes");$("changeRows").innerHTML=c.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.change_type)}</td><td>${esc(x.category)}</td><td class="${x.severity==="HIGH"?"red":x.severity==="MEDIUM"?"amber":"muted"}">${esc(x.severity)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.details)}</td></tr>`).join("")||\'<tr><td colspan="6">None.</td></tr>\';}catch(e){}\n}\nasync function loadConfig(){\n try{const c=await getJSON("/api/config_findings");$("configRows").innerHTML=c.map(x=>`<tr><td class="${x.severity==="HIGH"?"red":x.severity==="MEDIUM"?"amber":"muted"}">${esc(x.severity)}</td><td>${esc(x.title)}<div class="muted">${esc(x.description)}</div></td><td style="font-size:11px">${esc(x.evidence)}</td><td style="font-size:11px">${esc(x.recommendation)}</td><td>${esc(x.status)}</td></tr>`).join("")||\'<tr><td colspan="5">No findings.</td></tr>\';}catch(e){}\n}\nasync function loadAlertStream(){\n try{const a=await getJSON("/api/alerts_stream");$("alertStreamRows").innerHTML=a.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.source)}</td><td>${esc(x.rule_id)}</td><td class="${x.severity==="HIGH"?"red":x.severity==="MEDIUM"?"amber":"muted"}">${esc(x.severity)}</td><td>${esc(x.title)}</td><td>${esc(x.occurrence_count||1)}</td><td>${x.investigation_id?\'#\'+x.investigation_id:\'—\'}</td></tr>`).join("")||\'<tr><td colspan="7">None.</td></tr>\';}catch(e){}\n}\nasync function loadHuntTemplates(){\n try{const t=await getJSON("/api/hunt/templates");$("huntTemplate").innerHTML=\'<option value="">Select...</option>\'+t.map(x=>`<option value="${esc(x.key)}">${esc(x.title)}</option>`).join("");}catch(e){}\n}\nasync function runHunt(){\n const tpl=$("huntTemplate").value;if(!tpl){toast("Select template.");return;}\n $("huntResult").textContent="Running...";\n try{const r=await getJSON("/api/hunt/run?template="+encodeURIComponent(tpl));\n  if(r.error){$("huntResult").textContent="Error: "+r.error;return;}\n  $("huntResult").textContent=`${r.title} — ${r.count} results`;\n  $("huntHead").innerHTML=\'<tr>\'+r.columns.map(c=>`<th>${esc(c)}</th>`).join("")+\'</tr>\';\n  $("huntRows").innerHTML=r.results.map(row=>\'<tr>\'+r.columns.map(c=>`<td class="mono">${esc(row[c]??"")}</td>`).join("")+\'</tr>\').join("")||\'<tr><td colspan="\'+r.columns.length+\'">No results.</td></tr>\';\n }catch(e){$("huntResult").textContent="Error: "+e.message;}\n}\nasync function downloadReport(){\n const t=$("reportType").value;const f=$("reportFormat").value;\n window.location.href=`/api/report?type=${encodeURIComponent(t)}&format=${encodeURIComponent(f)}`;\n}\nlet refreshInFlight=false;\nasync function refreshAll(){\n if(refreshInFlight)return;refreshInFlight=true;\n const specs=[\n  ["status","/api/status"],["devices","/api/devices"],["domains","/api/domains"],\n  ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],\n  ["progress","/api/progress"],["investigations","/api/investigations"],\n  ["network","/api/network"],["diagnostics","/api/diagnostics"],\n  ["engine","/api/engine_diagnostics"]\n ];\n try{\n  const settled=await Promise.allSettled(specs.map(([,path])=>getJSON(path)));\n  const data={},failed=[];\n  settled.forEach((r,i)=>{const name=specs[i][0];if(r.status==="fulfilled")data[name]=r.value;else{data[name]=null;failed.push(name+": "+String(r.reason?.message||r.reason||"request failed"));}});\n  const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{};\n  const statusOK=!!data.status;\n  pill($("connection"),!statusOK?"API DEGRADED":(failed.length?"CONNECTED · PARTIAL":"CONNECTED"),!statusOK?"bad":(failed.length?"warn":"ok"));\n  if(!statusOK){$("updated").textContent="Status API unavailable. "+failed.join(" | ");}\n  else{$("updated").textContent="Updated "+(s.timestamp||new Date().toLocaleTimeString())+(failed.length?" · "+failed.length+" API request(s) failed: "+failed.map(x=>x.split(":")[0]).join(", "):"");}\n  $("network").textContent=s.network||n.network||"—";$("activeSubnet").textContent=n.network||s.network||"—";\n  $("defaultGateway").textContent=n.gateway||"—";$("fingerprint").textContent=n.fingerprint||"—";$("fpConf").textContent=(n.confidence||0)+"%";\n  $("networkWarning").textContent=n.warning||(n.authorized?"Authorised.":"Passive only.");$("authorizeNetwork").style.display=n.authorized?"none":"inline-block";$("netAuthz").textContent=n.auth_decision||"—";\n  $("jobPhase").textContent=j.phase||"—";$("jobMessage").textContent=j.message||"Waiting for engine status.";$("jobPercent").textContent=(j.percent??0)+"%";$("jobBar").style.width=(j.percent??0)+"%";\n  $("online").textContent=s.online??"—";$("historical").textContent=s.historical??"—";$("deviceHint").textContent=(s.offline??"—")+" offline";$("openInvestigations").textContent=s.open_investigations??inv.length;\n  const nr=$("networkRisk");nr.textContent=s.network_risk_band||"UNKNOWN";nr.className="value risk-"+(s.network_risk_band||"UNKNOWN");\n  pill($("dnsStatus"),s.dns_status||"UNKNOWN",s.dns_status==="ONLINE"?"ok":"warn");pill($("dhcpStatus"),s.dhcp_status||"UNKNOWN",s.dhcp_status==="ONLINE"?"ok":"warn");pill($("arpStatus"),s.arp_status||"UNKNOWN",s.arp_status==="ONLINE"?"ok":"warn");\n  const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"").slice(0,60);\n  $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";$("scanQuality").textContent=(diag.scan_quality?.score??"—")+"/100 · "+(diag.scan_quality?.band||"—");\n  if(data.devices){deviceCache=d;filterDevices();}else{$("deviceRows").innerHTML=\'<tr><td colspan="7">Device API unavailable. Check server log and /api/devices.</td></tr>\';}\n  $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||\'<tr><td colspan="3">—</td></tr>\';\n  $("alertRows").innerHTML=a.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.client_ip)}</td><td>${esc(x.rule_id)}</td><td class="${x.severity==="HIGH"?"red":"amber"}">${esc(x.severity)}</td></tr>`).join("")||\'<tr><td colspan="4">—</td></tr>\';\n  $("eventRows").innerHTML=e.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.category)}</td><td>${esc(x.event_type)}</td><td>${esc(x.details)}</td></tr>`).join("")||\'<tr><td colspan="5">—</td></tr>\';\n  $("behaviourStatus").textContent=diag.behaviour?.message||"Behaviour diagnostics unavailable.";\n  $("behaviourRows").innerHTML=((diag.behaviour?.baseline_devices||0)>0?\'<tr><td colspan="5">See device detail for samples.</td></tr>\':\'<tr><td colspan="5">Collecting baselines.</td></tr>\');\n  $("investigationRows").innerHTML=inv.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.title)}</td><td>${esc(x.severity)}</td><td>${esc(x.status)}</td><td>${esc(x.evidence_count)}</td></tr>`).join("")||\'<tr><td colspan="5">None.</td></tr>\';\n  loadProfiles();loadChanges();loadConfig();loadAlertStream();loadIdentityIntel();loadContinuity();loadCandidates();loadPhantomPanels();\n }catch(err){pill($("connection"),"DASHBOARD ERROR","bad");$("updated").textContent=err.message||String(err);}\n finally{refreshInFlight=false;}\n}\nloadHuntTemplates();refreshAll();setInterval(refreshAll,5000);\n// Searchable, collapsible navigation with deterministic desktop/mobile state.\nconst nrNavMedia = window.matchMedia(\'(max-width: 900px)\');\nfunction syncNavigationButton(){\n const b=document.getElementById(\'navToggle\');\n if(!b)return;\n const mobile=nrNavMedia.matches;\n const expanded=mobile?document.body.classList.contains(\'nav-open\'):!document.body.classList.contains(\'nav-collapsed\');\n b.setAttribute(\'aria-expanded\',expanded?\'true\':\'false\');\n b.setAttribute(\'aria-label\',mobile?(expanded?\'Close navigation\':\'Open navigation\'):(expanded?\'Collapse navigation\':\'Expand navigation\'));\n b.title=mobile?(expanded?\'Close navigation\':\'Open navigation\'):(expanded?\'Collapse navigation\':\'Expand navigation\');\n b.textContent=mobile?(expanded?\'✕\':\'☰\'):(expanded?\'☰\':\'»\');\n}\nfunction toggleNavigation(){\n if(nrNavMedia.matches){\n  document.body.classList.toggle(\'nav-open\');\n  if(document.body.classList.contains(\'nav-open\')){\n   const first=document.querySelector(\'#sideNavigation a:not([hidden])\');\n   if(first)window.setTimeout(()=>first.focus(),80);\n  }\n }else{\n  document.body.classList.remove(\'nav-open\');\n  document.body.classList.toggle(\'nav-collapsed\');\n  try{localStorage.setItem(\'nr-nav-collapsed\',document.body.classList.contains(\'nav-collapsed\')?\'1\':\'0\');}catch(e){}\n }\n syncNavigationButton();\n}\nfunction closeNavigation(){\n document.body.classList.remove(\'nav-open\');\n syncNavigationButton();\n}\n(function initNavigation(){\n try{if(localStorage.getItem(\'nr-nav-collapsed\')===\'1\'&&!nrNavMedia.matches)document.body.classList.add(\'nav-collapsed\');}catch(e){}\n const search=document.getElementById(\'navSearch\'),nav=document.getElementById(\'sideNavigation\'),empty=document.getElementById(\'navEmpty\');\n if(search&&nav){\n  search.addEventListener(\'input\',()=>{\n   const q=search.value.trim().toLowerCase();let shown=0;\n   nav.querySelectorAll("a[href^=\'#\']").forEach(a=>{const hit=!q||a.textContent.toLowerCase().includes(q);a.hidden=!hit;if(hit)shown++;});\n   nav.querySelectorAll(\'.nav-group\').forEach(g=>{let n=g.nextElementSibling,has=false;while(n&&!n.classList.contains(\'nav-group\')){if(n.matches(\'a\')&&!n.hidden)has=true;n=n.nextElementSibling;}g.hidden=!!q&&!has;});\n   if(empty)empty.style.display=shown?\'none\':\'block\';\n  });\n  nav.querySelectorAll("a[href^=\'#\']").forEach(a=>a.addEventListener(\'click\',()=>{closeNavigation();if(search){search.value=\'\';search.dispatchEvent(new Event(\'input\'));}}));\n }\n document.addEventListener(\'keydown\',e=>{if(e.key===\'Escape\')closeNavigation();});\n window.addEventListener(\'resize\',()=>{if(!nrNavMedia.matches)document.body.classList.remove(\'nav-open\');syncNavigationButton();});\n if(typeof nrNavMedia.addEventListener===\'function\')nrNavMedia.addEventListener(\'change\',()=>{document.body.classList.remove(\'nav-open\');syncNavigationButton();});\n syncNavigationButton();\n})();\n// Keep the navigation highlight aligned with the section currently in view.\nif("IntersectionObserver" in window){\n const navLinks=[...document.querySelectorAll("#sideNavigation a[href^=\'#\']")];\n const sections=navLinks.map(a=>document.querySelector(a.getAttribute("href"))).filter(Boolean);\n const navObserver=new IntersectionObserver(entries=>{\n  const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio)[0];\n  if(!visible)return;navLinks.forEach(a=>a.classList.toggle("active",a.getAttribute("href")==="#"+visible.target.id));\n },{rootMargin:"-16% 0px -70% 0px",threshold:[0,.12,.3]});\n sections.forEach(section=>navObserver.observe(section));\n}\n\nasync function loadPhantomPanels(){\n try{\n  const [u,v,x]=await Promise.all([fetch(\'/api/unknown-hunter\').then(r=>r.json()),fetch(\'/api/ipv6\').then(r=>r.json()),fetch(\'/api/exposure\').then(r=>r.json())]);\n  $(\'unknownRows\').innerHTML=u.map(d=>`<tr><td class="mono">${esc(d.ip)}</td><td>${esc(d.name)}</td><td>${esc(d.device_type)}</td><td>${esc(d.os_guess)}</td><td>${d.confidence}%</td><td>${d.evidence_count} / ${d.independent_sources} sources</td><td>${esc(d.status)}</td></tr>`).join(\'\')||\'<tr><td colspan="7">No low-confidence devices in current inventory.</td></tr>\';\n  $(\'ipv6Rows\').innerHTML=v.map(d=>`<tr><td class="mono">${esc(d.ipv6)}</td><td class="mono">${esc(d.mac||\'—\')}</td><td>${esc(d.interface_alias||\'—\')}</td><td>${esc(d.state)}</td><td>${esc(d.timestamp)}</td><td>${esc(d.linked_device_id||\'Uncorrelated\')}</td></tr>`).join(\'\')||\'<tr><td colspan="6">No IPv6 neighbour observations recorded.</td></tr>\';\n  $(\'exposureRows\').innerHTML=x.map(d=>`<tr><td class="mono">${esc(d.ip)}</td><td>${esc(d.title)}</td><td class="${d.severity===\'HIGH\'?\'red\':\'amber\'}">${esc(d.severity)}</td><td>${esc(d.observed_ports)}</td><td>${esc(d.recommendation)}</td><td>${esc(d.last_seen)}</td><td>${esc(d.status)}</td></tr>`).join(\'\')||\'<tr><td colspan="7">No current or stale exposure observations.</td></tr>\';\n }catch(e){$(\'unknownRows\').innerHTML=\'<tr><td colspan="7">Panel unavailable: \'+esc(e.message)+\'</td></tr>\';}\n}\nasync function investigateUnknown(){\n const status=$("unknownInvestigationStatus");status.textContent="Reviewing local identity evidence…";\n try{const r=await fetch("/api/unknown-hunter/investigate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirm:true,limit:50})});\n  const data=await r.json();if(!r.ok)throw new Error(data.error||("HTTP "+r.status));\n  status.textContent=`Created ${data.created} new and updated ${data.updated} identity-review investigations. These are not threat findings.`;\n  await refreshAll();\n }catch(e){status.textContent="Investigation failed: "+e.message;}\n}\nasync function askRadar(){\n const q=$(\'assistantQuestion\').value.trim(); if(!q)return;\n $(\'assistantAnswer\').textContent=\'Analysing local evidence…\';\n try{const r=await fetch(\'/api/assistant?q=\'+encodeURIComponent(q)).then(x=>x.json());$(\'assistantAnswer\').textContent=r.answer||r.error||\'No answer\';\n const rows=(r.results||[]).slice(0,50);$(\'assistantRows\').innerHTML=rows.map(obj=>`<tr><td>${esc(obj.ip||obj.ipv6||obj.name||\'Record\')}</td><td>${esc(Object.entries(obj).filter(([k])=>![\'ip\',\'ipv6\',\'name\'].includes(k)).map(([k,v])=>k+\': \'+(typeof v===\'object\'?JSON.stringify(v):v)).join(\' · \'))}</td></tr>`).join(\'\')||\'<tr><td colspan="2">No supporting records returned.</td></tr>\';\n }catch(e){$(\'assistantAnswer\').textContent=\'Assistant error: \'+e.message;}\n}\n$(\'assistantQuestion\')?.addEventListener(\'keydown\',e=>{if(e.key===\'Enter\')askRadar();});\n\nlet phantomSelectedIP="";\nlet phantomSshFingerprint="";\nlet phantomSshTrusted=false;\nlet phantomSshSession="";\nlet phantomSshSessionTarget="";\nlet phantomSshTrustedTarget="";\nlet phantomSshSocket=null;\nlet phantomSshResizeObserver=null;\nlet phantomTerminalBuffer=\'\';\nlet phantomTerminalCursor=0;\nlet phantomTerminalPendingCR=false;\nfunction updatePhantomSelectionCount(){\n const selected=document.querySelectorAll(\'.pa-device-check:checked\').length;\n const total=document.querySelectorAll(\'.pa-device-check:not(:disabled)\').length;\n const el=$(\'paSelectionCount\');if(el)el.textContent=`${selected} selected · ${total} online`;\n const all=$(\'paSelectAll\');if(all){all.checked=total>0&&selected===total;all.indeterminate=selected>0&&selected<total;}\n}\nasync function loadPhantomAccess(){\n const body=$(\'phantomAccessRows\'); if(!body)return;\n const previous=new Set([...document.querySelectorAll(\'.pa-device-check:checked\')].map(x=>x.value));\n body.innerHTML=\'<tr><td colspan="11">Loading known devices and previous capability observations…</td></tr>\';\n try{\n  const [data,summary]=await Promise.all([getJSON(\'/api/phantom-access/devices\'),getJSON(\'/api/phantom-access/summary\')]);\n  $(\'paKnown\').textContent=summary.known||0;$(\'paCandidates\').textContent=summary.native_candidates||0;$(\'paSshReachable\').textContent=summary.ssh_reachable||0;$(\'paRdp\').textContent=summary.rdp_reachable||0;$(\'paAgents\').textContent=summary.agent_managed||0;\n  body.innerHTML=(data||[]).map(d=>{const p=d.probes||{};const yes=v=>v===true?\'<span class="green">OPEN</span>\':v===false?\'<span class="muted">CLOSED</span>\':\'<span class="muted">—</span>\';const online=d.status===\'ONLINE\';const checked=previous.has(d.ip);return `<tr data-pa-row="${esc(d.ip)}"><td><input type="checkbox" class="pa-device-check" value="${esc(d.ip)}" ${online?\'\':\'disabled\'} ${checked?\'checked\':\'\'} aria-label="Select ${esc(d.ip)}"></td><td><strong>${esc(d.hostname||d.friendly_name||d.device_name||\'Unknown\')}</strong><div class="hint">${esc(d.manufacturer||\'\')} ${esc(d.model||\'\')}</div></td><td>${esc(d.device_type||\'Unclassified\')}<div class="hint">${esc(d.os_guess||\'Unknown\')}</div></td><td class="mono">${esc(d.ip)}</td><td>${yes(p.winrm_http||p.winrm_https)}</td><td>${yes(p.rpc_endpoint_mapper)}</td><td>${yes(p.smb)}</td><td>${yes(p.rdp)}</td><td>${yes(p.ssh)}</td><td><span class="pill ${d.readiness===\'NATIVE_MGMT_CANDIDATE\'?\'\':\'warn\'}">${esc(d.readiness||\'NOT_PROBED\')}</span><div class="hint">${esc(d.readiness_score??0)}% · ${esc(d.last_probe||\'Not probed\')}</div></td><td class="pa-row-actions"><button class="secondary" data-pa-action="probe" data-ip="${esc(d.ip)}">PROBE</button> <button class="secondary" data-pa-action="select" data-ip="${esc(d.ip)}">SELECT</button> <button class="secondary" data-pa-action="terminal" data-ip="${esc(d.ip)}" ${p.ssh===true&&online?\'\':\'disabled\'}>SSH TERMINAL</button></td></tr>`}).join(\'\')||\'<tr><td colspan="11">No known devices in inventory yet. Run a network scan first.</td></tr>\';\n  updatePhantomSelectionCount();\n }catch(e){body.innerHTML=`<tr><td colspan="11">Could not load Phantom Access: ${esc(e.message)}</td></tr>`;}\n}\nfunction toggleAllPhantom(on){document.querySelectorAll(\'.pa-device-check:not(:disabled)\').forEach(x=>x.checked=on);updatePhantomSelectionCount();}\nfunction selectedPhantomIPs(){return [...document.querySelectorAll(\'.pa-device-check:checked\')].map(x=>x.value);}\nasync function phantomBulk(action){\n const ips=selectedPhantomIPs();if(!ips.length){alert(\'Select at least one online endpoint.\');return;}\n const labels={probe:\'probe\',remote_inventory:\'refresh system inventory\',remote_network:\'collect network snapshots\',remote_storage:\'collect storage snapshots\',remote_security:\'collect security snapshots\'};\n if(!confirm(`Run ${labels[action]||action} on all ${ips.length} selected endpoint(s)? Work will be split into batches of 12 and every result will be recorded.`))return;\n $(\'paStatus\').textContent=`Preparing ${ips.length} endpoint(s)…`;$(\'paOutput\').textContent=\'\';\n const aggregate={action,requested:ips.length,succeeded:0,failed:0,batches:[],results:[]};\n try{\n  for(let offset=0;offset<ips.length;offset+=12){\n   const batch=ips.slice(offset,offset+12);$(\'paStatus\').textContent=`${action.replaceAll(\'_\',\' \')} · batch ${Math.floor(offset/12)+1}/${Math.ceil(ips.length/12)} · ${Math.min(offset+batch.length,ips.length)}/${ips.length} endpoints`;\n   try{const r=await fetch(\'/api/phantom-access/bulk\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({ips:batch,action})});const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);\n    aggregate.succeeded+=d.succeeded||0;aggregate.failed+=d.failed||0;aggregate.batches.push({batch:Math.floor(offset/12)+1,requested:d.requested,succeeded:d.succeeded,failed:d.failed});aggregate.results.push(...(d.results||[]));\n   }catch(batchError){aggregate.failed+=batch.length;aggregate.batches.push({batch:Math.floor(offset/12)+1,requested:batch.length,succeeded:0,failed:batch.length,error:batchError.message});aggregate.results.push(...batch.map(ip=>({ip,success:false,error:\'Batch request failed: \'+batchError.message})));}\n   $(\'paOutput\').textContent=JSON.stringify(aggregate,null,2);\n  }\n  $(\'paStatus\').textContent=`Bulk ${action}: ${aggregate.succeeded} succeeded · ${aggregate.failed} failed · ${aggregate.requested} requested.`;toast(`Phantom Access: ${aggregate.succeeded}/${aggregate.requested} completed.`);await loadPhantomAccess();\n }catch(e){$(\'paStatus\').textContent=\'Bulk operation interrupted: \'+e.message;$(\'paOutput\').textContent=JSON.stringify(aggregate,null,2)+\'\\n\\n\'+e.message;}\n}\nfunction selectPhantom(ip){if(phantomSshSessionTarget&&phantomSshSessionTarget!==ip&&phantomSshSocket&&phantomSshSocket.readyState<2){if(!confirm(\'Disconnect the active SSH terminal before switching to \'+ip+\'?\'))return;sshDisconnect();}phantomSelectedIP=ip;$(\'paTarget\').textContent=ip;$(\'paSshIp\').value=ip;phantomSshFingerprint=\'\';phantomSshTrusted=false;phantomSshTrustedTarget=\'\';$(\'paSshFingerprint\').textContent=\'Host key not reviewed for this endpoint.\';$(\'paSshTrustBtn\').disabled=true;$(\'paSshConnectBtn\').disabled=true;$(\'paStatus\').textContent=\'Selected \'+ip+\'. Probe capabilities before attempting a remote operation.\';}\nasync function probePhantom(ip){selectPhantom(ip);$(\'paStatus\').textContent=\'Testing management service reachability…\';try{const r=await fetch(\'/api/phantom-access/probe\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({ip,confirm:true})});const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);$(\'paMethod\').textContent=d.readiness;$(\'paStatus\').textContent=d.summary;$(\'paOutput\').textContent=JSON.stringify(d,null,2);await loadPhantomAccess();}catch(e){$(\'paStatus\').textContent=\'Probe failed: \'+e.message;}}\nasync function phantomAction(action){\n if(!phantomSelectedIP){alert(\'Select a known device first.\');return;}\n let args={};if(action===\'restart_service\'){const n=prompt(\'Exact Windows service name to restart:\');if(!n)return;args.service_name=n;}\n const disruptive=[\'restart_service\',\'restart_computer\',\'shutdown_computer\'];\n if(disruptive.includes(action)&&!confirm(`Run ${action.replaceAll(\'_\',\' \')} on ${phantomSelectedIP} using your current Windows account? This action will be audited.`))return;\n $(\'paStatus\').textContent=\'Executing \'+action+\' using native Windows management…\';\n try{const r=await fetch(\'/api/phantom-access/action\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({ip:phantomSelectedIP,action,args,confirm:disruptive.includes(action)})});const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);$(\'paLastAction\').textContent=action+\' · \'+(d.method||\'\');$(\'paMethod\').textContent=d.method||$(\'paMethod\').textContent;$(\'paOutput\').textContent=JSON.stringify(d,null,2);$(\'paStatus\').textContent=d.message||\'Operation completed.\';await loadPhantomAccess();}catch(e){$(\'paStatus\').textContent=\'Operation failed: \'+e.message;$(\'paOutput\').textContent=e.message;}\n}\nasync function sshApi(path,payload){const r=await fetch(\'/api/phantom-access/ssh/\'+path,{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw new Error(d.error||`HTTP ${r.status}`);return d;}\nfunction sshSetState(text,state=\'warn\'){pill($(\'paSshState\'),text,state);}\nfunction sshAppend(text){\n const out=$(\'paTerminalOutput\');let raw=String(text).replace(/\\x1b\\][^\\x07]*(?:\\x07|\\x1b\\\\)/g,\'\');raw=raw.replace(/\\x1b\\[([0-?]*)([ -/]*)([@-~])/g,(seq,params,inter,final)=>{if(final===\'J\'&&params===\'2\'){phantomTerminalBuffer=\'\';phantomTerminalCursor=0;phantomTerminalPendingCR=false;}else if((final===\'H\'||final===\'f\')&&!params){phantomTerminalCursor=0;}else if(final===\'K\'){phantomTerminalBuffer=phantomTerminalBuffer.slice(0,phantomTerminalCursor);}return \'\';});const clean=raw;\n for(const ch of clean){\n  if(ch===\'\\r\'){const lineStart=phantomTerminalBuffer.lastIndexOf(\'\\n\',Math.max(0,phantomTerminalCursor-1))+1;phantomTerminalCursor=lineStart;phantomTerminalPendingCR=true;continue;}\n  if(ch===\'\\n\'){\n   if(phantomTerminalPendingCR){phantomTerminalBuffer+=\'\\n\';phantomTerminalCursor=phantomTerminalBuffer.length;}\n   else{phantomTerminalBuffer=phantomTerminalBuffer.slice(0,phantomTerminalCursor)+\'\\n\'+phantomTerminalBuffer.slice(phantomTerminalCursor);phantomTerminalCursor++;}\n   phantomTerminalPendingCR=false;continue;\n  }\n  if(phantomTerminalPendingCR){phantomTerminalBuffer=phantomTerminalBuffer.slice(0,phantomTerminalCursor);phantomTerminalPendingCR=false;}\n  if(ch===\'\\b\'){\n   const lineStart=phantomTerminalBuffer.lastIndexOf(\'\\n\',Math.max(0,phantomTerminalCursor-1))+1;\n   if(phantomTerminalCursor>lineStart){phantomTerminalBuffer=phantomTerminalBuffer.slice(0,phantomTerminalCursor-1)+phantomTerminalBuffer.slice(phantomTerminalCursor);phantomTerminalCursor--;}\n   continue;\n  }\n  if(ch===\'\\t\'){const spaces=4-(phantomTerminalCursor-(phantomTerminalBuffer.lastIndexOf(\'\\n\')+1))%4;for(let i=0;i<spaces;i++){phantomTerminalBuffer=phantomTerminalBuffer.slice(0,phantomTerminalCursor)+\' \'+phantomTerminalBuffer.slice(phantomTerminalCursor);phantomTerminalCursor++;}continue;}\n  const code=ch.charCodeAt(0);if(code<32||code===127)continue;\n  if(phantomTerminalCursor<phantomTerminalBuffer.length&&phantomTerminalBuffer[phantomTerminalCursor]!==\'\\n\')phantomTerminalBuffer=phantomTerminalBuffer.slice(0,phantomTerminalCursor)+ch+phantomTerminalBuffer.slice(phantomTerminalCursor+1);\n  else phantomTerminalBuffer=phantomTerminalBuffer.slice(0,phantomTerminalCursor)+ch+phantomTerminalBuffer.slice(phantomTerminalCursor);\n  phantomTerminalCursor++;\n }\n if(phantomTerminalBuffer.length>220000){const trim=phantomTerminalBuffer.length-180000;phantomTerminalBuffer=phantomTerminalBuffer.slice(trim);phantomTerminalCursor=Math.max(0,phantomTerminalCursor-trim);}\n out.textContent=phantomTerminalBuffer;out.scrollTop=out.scrollHeight;\n}\nasync function sshReviewHostKey(){\n const ip=$(\'paSshIp\').value||phantomSelectedIP;if(!ip){alert(\'Select an online endpoint first.\');return;}\n try{$(\'paSshFingerprintBtn\').disabled=true;$(\'paSshFingerprint\').textContent=\'Performing SSH protocol handshake…\';phantomSshFingerprint=\'\';phantomSshTrusted=false;$(\'paSshTrustBtn\').disabled=true;$(\'paSshConnectBtn\').disabled=true;\n  const d=await sshApi(\'hostkey\',{ip,port:Number($(\'paSshPort\').value||22)});phantomSshFingerprint=d.fingerprint;phantomSshTrustedTarget=\'\';$(\'paSshFingerprint\').textContent=`${d.key_type}\\n${d.fingerprint}\\n\\nVerify this fingerprint on the target device through a trusted channel before accepting it.`;$(\'paSshTrustBtn\').disabled=false;toast(\'SSH host key retrieved. Verify the fingerprint before trusting it.\');\n }catch(e){$(\'paSshFingerprint\').textContent=\'Host-key review failed: \'+e.message;$(\'paStatus\').textContent=e.message;}finally{$(\'paSshFingerprintBtn\').disabled=false;}\n}\nasync function sshTrustHostKey(){\n if(!phantomSshFingerprint||!confirm(\'Trust this exact SSH server fingerprint for this IP and port? Only continue after independently verifying it.\'))return;\n try{$(\'paSshTrustBtn\').disabled=true;const d=await sshApi(\'trust\',{ip:$(\'paSshIp\').value,port:Number($(\'paSshPort\').value||22),fingerprint:phantomSshFingerprint,confirm:true});phantomSshTrusted=!!d.trusted;phantomSshTrustedTarget=($(\'paSshIp\').value||phantomSelectedIP)+\':\'+Number($(\'paSshPort\').value||22);$(\'paSshConnectBtn\').disabled=!phantomSshTrusted;sshAppend(`\\n[TRUSTED HOST KEY] ${d.fingerprint}\\n`);toast(\'SSH host key trusted. You can now authenticate.\');}\n catch(e){$(\'paSshTrustBtn\').disabled=false;$(\'paSshConnectBtn\').disabled=true;$(\'paStatus\').textContent=\'Host-key trust failed: \'+e.message;}\n}\nfunction sshAuthFields(){const mode=$(\'paSshAuth\').value;$(\'paSshKeyWrap\').hidden=mode!==\'key\';$(\'paSshPassphraseWrap\').hidden=mode!==\'key\';$(\'paSshPasswordWrap\').hidden=mode!==\'password\';}\nasync function sshConnect(){\n const targetIp=$(\'paSshIp\').value||phantomSelectedIP;const targetPort=Number($(\'paSshPort\').value||22);if(!phantomSshTrusted||phantomSshTrustedTarget!==targetIp+\':\'+targetPort){alert(\'Review and trust the SSH host key for this exact IP and port first.\');return;}\n const payload={ip:targetIp,port:targetPort,username:$(\'paSshUser\').value,auth_type:$(\'paSshAuth\').value};\n if(payload.auth_type===\'password\')payload.password=$(\'paSshPassword\').value;\n if(payload.auth_type===\'key\'){payload.key_path=$(\'paSshKey\').value;payload.passphrase=$(\'paSshPassphrase\').value;}\n try{$(\'paSshConnectBtn\').disabled=true;sshSetState(\'AUTHENTICATING\',\'warn\');phantomTerminalBuffer=\'\';phantomTerminalCursor=0;phantomTerminalPendingCR=false;$(\'paTerminalOutput\').textContent=\'Connecting to authenticated SSH shell…\\n\';\n  const d=await sshApi(\'connect\',payload);phantomSshSession=d.session_token;phantomSshSessionTarget=targetIp;$(\'paSshPassword\').value=\'\';$(\'paSshPassphrase\').value=\'\';$(\'paSshDisconnectBtn\').disabled=false;$(\'paSshSessionLabel\').textContent=`${d.username}@${d.ip}:${d.port}`;$(\'paTerminalInput\').disabled=false;$(\'paTerminalInput\').focus();\n  const proto=location.protocol===\'https:\'?\'wss:\':\'ws:\';phantomSshSocket=new WebSocket(`${proto}//${location.host}/api/phantom-access/ssh/terminal?token=${encodeURIComponent(phantomSshSession)}`);\n  phantomSshSocket.onopen=()=>{sshSetState(\'CONNECTED\',\'ok\');$(\'paTerminalLatency\').textContent=\'SSH SESSION ACTIVE\';$(\'paTerminalInput\').focus();sshResizeTerminal();if(window.ResizeObserver){phantomSshResizeObserver=new ResizeObserver(sshResizeTerminal);phantomSshResizeObserver.observe($(\'paTerminalOutput\'));}};\n  phantomSshSocket.onmessage=e=>{try{const m=JSON.parse(e.data);if(m.type===\'output\')sshAppend(m.data);else if(m.type===\'status\'&&m.state===\'closed\')sshSetState(\'CLOSED\',\'warn\');}catch(_){sshAppend(e.data);}};\n  phantomSshSocket.onerror=()=>{sshSetState(\'CONNECTION ERROR\',\'bad\');};\n  phantomSshSocket.onclose=()=>{if(phantomSshResizeObserver){phantomSshResizeObserver.disconnect();phantomSshResizeObserver=null;}sshSetState(\'DISCONNECTED\',\'warn\');$(\'paTerminalInput\').disabled=true;$(\'paSshDisconnectBtn\').disabled=true;$(\'paSshConnectBtn\').disabled=false;$(\'paTerminalLatency\').textContent=\'SESSION CLOSED\';phantomSshSocket=null;phantomSshSession=\'\';phantomSshSessionTarget=\'\';};\n }catch(e){sshSetState(\'AUTH FAILED\',\'bad\');$(\'paTerminalOutput\').textContent=\'SSH connection failed: \'+e.message+\'\\n\';$(\'paSshConnectBtn\').disabled=false;$(\'paSshPassword\').value=\'\';$(\'paSshPassphrase\').value=\'\';}\n}\nfunction sshSend(data){if(phantomSshSocket&&phantomSshSocket.readyState===WebSocket.OPEN)phantomSshSocket.send(JSON.stringify({type:\'input\',data}));}\nfunction sshResizeTerminal(){if(!phantomSshSocket||phantomSshSocket.readyState!==WebSocket.OPEN)return;const box=$(\'paTerminalOutput\');const cols=Math.max(40,Math.min(240,Math.floor(box.clientWidth/8)));const rows=Math.max(10,Math.min(100,Math.floor(box.clientHeight/19)));phantomSshSocket.send(JSON.stringify({type:\'resize\',cols,rows}));}\nfunction sshDisconnect(){if(phantomSshSocket){try{if(phantomSshSocket.readyState===WebSocket.OPEN)phantomSshSocket.send(JSON.stringify({type:\'close\'}));}catch(_){}try{phantomSshSocket.close();}catch(_){}}else if(phantomSshSession){sshApi(\'close\',{session_token:phantomSshSession}).catch(()=>{});phantomSshSession=\'\';phantomSshSessionTarget=\'\';}}\nfunction sshTerminalKeydown(e){\n if(!phantomSshSocket||phantomSshSocket.readyState!==WebSocket.OPEN)return;\n const map={Enter:\'\\r\',Backspace:\'\\x7f\',Tab:\'\\t\',Escape:\'\\x1b\',ArrowUp:\'\\x1b[A\',ArrowDown:\'\\x1b[B\',ArrowRight:\'\\x1b[C\',ArrowLeft:\'\\x1b[D\',Home:\'\\x1b[H\',End:\'\\x1b[F\',Delete:\'\\x1b[3~\',PageUp:\'\\x1b[5~\',PageDown:\'\\x1b[6~\'};\n if(e.ctrlKey&&e.key.toLowerCase()===\'c\'){e.preventDefault();sshSend(\'\\x03\');return;}\n if(e.ctrlKey&&e.key.toLowerCase()===\'d\'){e.preventDefault();sshSend(\'\\x04\');return;}\n if(e.ctrlKey&&e.key.toLowerCase()===\'l\'){e.preventDefault();sshSend(\'\\x0c\');return;}\n if(e.ctrlKey&&e.key.toLowerCase()===\'a\'){e.preventDefault();sshSend(\'\\x01\');return;}\n if(e.ctrlKey&&e.key.toLowerCase()===\'e\'){e.preventDefault();sshSend(\'\\x05\');return;}\n if(e.ctrlKey&&e.key.toLowerCase()===\'u\'){e.preventDefault();sshSend(\'\\x15\');return;}\n if(e.ctrlKey&&e.key.toLowerCase()===\'w\'){e.preventDefault();sshSend(\'\\x17\');return;}\n if(map[e.key]){e.preventDefault();sshSend(map[e.key]);return;}\n if(e.key.length===1&&!e.altKey&&!e.metaKey){e.preventDefault();sshSend(e.key);}\n}\nfunction sshTerminalPaste(e){if(!phantomSshSocket||phantomSshSocket.readyState!==WebSocket.OPEN)return;const text=e.clipboardData?.getData(\'text\');if(text){e.preventDefault();sshSend(text.replace(/\\r?\\n/g,\'\\r\'));}}\nfunction bindPhantomTerminal(){\n $(\'phantomAccessRows\')?.addEventListener(\'change\',e=>{if(e.target.matches(\'.pa-device-check\'))updatePhantomSelectionCount();});\n $(\'phantomAccessRows\')?.addEventListener(\'click\',e=>{const b=e.target.closest(\'[data-pa-action]\');if(!b)return;const ip=b.dataset.ip;const action=b.dataset.paAction;if(action===\'probe\')probePhantom(ip);else if(action===\'select\')selectPhantom(ip);else if(action===\'terminal\'){selectPhantom(ip);$(\'phantomTerminal\').scrollIntoView({behavior:\'smooth\',block:\'center\'});$(\'paSshFingerprintBtn\').focus();}});\n $(\'paSshFingerprintBtn\')?.addEventListener(\'click\',sshReviewHostKey);$(\'paSshTrustBtn\')?.addEventListener(\'click\',sshTrustHostKey);$(\'paSshConnectBtn\')?.addEventListener(\'click\',sshConnect);$(\'paSshDisconnectBtn\')?.addEventListener(\'click\',sshDisconnect);$(\'paSshAuth\')?.addEventListener(\'change\',sshAuthFields);$(\'paSshPort\')?.addEventListener(\'change\',()=>{phantomSshFingerprint=\'\';phantomSshTrusted=false;phantomSshTrustedTarget=\'\';$(\'paSshFingerprint\').textContent=\'Port changed. Review the SSH host key again.\';$(\'paSshTrustBtn\').disabled=true;$(\'paSshConnectBtn\').disabled=true;});$(\'paTerminalClear\')?.addEventListener(\'click\',()=>{phantomTerminalBuffer=\'\';phantomTerminalCursor=0;phantomTerminalPendingCR=false;$(\'paTerminalOutput\').textContent=\'\';});$(\'paTerminalInput\')?.addEventListener(\'keydown\',sshTerminalKeydown);$(\'paTerminalInput\')?.addEventListener(\'paste\',sshTerminalPaste);sshAuthFields();\n}\nbindPhantomTerminal();\n\nfunction bindCommandCenterEvents(){\n $(\'agentRows\')?.addEventListener(\'click\',e=>{const b=e.target.closest(\'[data-agent-action]\');if(!b)return;const id=b.dataset.agentId;const action=b.dataset.agentAction;if(action===\'restart_computer\')restartRemote(id);else if(action===\'shutdown_computer\')shutdownRemote(id);else if(action===\'restart_service\')restartRemoteService(id);else if(action===\'revoke\')revokeAgent(id);else agentAction(id,action,{},action===\'lock_workstation\');});\n $(\'agentResultRows\')?.addEventListener(\'click\',e=>{const row=e.target.closest(\'[data-command-id]\');if(row)showAgentResult(Number(row.dataset.commandId));});\n $(\'agentResultRows\')?.addEventListener(\'keydown\',e=>{if(e.key===\'Enter\'||e.key===\' \'){const row=e.target.closest(\'[data-command-id]\');if(row){e.preventDefault();showAgentResult(Number(row.dataset.commandId));}}});\n}\nbindCommandCenterEvents();\n\nasync function loadCommandCenter(){\n try{\n  const [agents,summary,audit,results]=await Promise.all([fetch(\'/api/command/agents\').then(r=>r.json()),fetch(\'/api/command/summary\').then(r=>r.json()),fetch(\'/api/command/audit\').then(r=>r.json()),fetch(\'/api/command/results\').then(r=>r.json())]);\n  $(\'agentManaged\').textContent=summary.managed||0;$(\'agentOnline\').textContent=summary.online||0;$(\'agentQueued\').textContent=summary.queued_commands||0;$(\'agentHubState\').textContent=summary.hub?.state||\'UNKNOWN\';\n  $(\'agentRows\').innerHTML=agents.map(a=>{const inv=a.inventory||{};const cpu=inv.cpu_percent??\'—\';const ram=inv.memory_percent??\'—\';const id=esc(a.agent_id);const controls=a.status===\'REVOKED\'?\'Revoked\':`<button class="secondary" data-agent-action="refresh_inventory" data-agent-id="${id}">Refresh</button> <button class="secondary" data-agent-action="list_processes" data-agent-id="${id}">Processes</button> <button class="secondary" data-agent-action="list_services" data-agent-id="${id}">Services</button> <button class="secondary" data-agent-action="lock_workstation" data-agent-id="${id}">Lock</button> <button class="secondary" data-agent-action="restart_computer" data-agent-id="${id}">Restart PC</button> <button class="secondary" data-agent-action="shutdown_computer" data-agent-id="${id}">Shut down</button> <button class="secondary" data-agent-action="restart_service" data-agent-id="${id}">Restart service</button> <button class="secondary" data-agent-action="revoke" data-agent-id="${id}">Revoke</button>`;return `<tr><td><strong>${esc(a.hostname)}</strong><div class="hint mono">${id}</div></td><td>${esc(a.platform)}<div class="hint">${esc(a.inventory?.manufacturer||\'\')} ${esc(a.inventory?.model||\'\')}</div><div class="hint">${esc(a.os_version)}</div></td><td><span class="pill ${a.status===\'REVOKED\'?\'bad\':(a.status===\'ONLINE\'?\'\':\'warn\')}">${esc(a.status)}</span></td><td>${esc(a.last_seen||\'—\')}</td><td>${esc(cpu)}${cpu===\'—\'?\'\':\'%\'}</td><td>${esc(ram)}${ram===\'—\'?\'\':\'%\'}</td><td class="mono">${esc(a.last_ip||\'—\')}</td><td>${controls}</td></tr>`}).join(\'\')||\'<tr><td colspan="8">No endpoints enrolled. Generate a one-time enrolment token to begin.</td></tr>\';\n  $(\'agentAuditRows\').innerHTML=audit.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.agent_id)}</td><td>${esc(x.actor)}</td><td>${esc(x.action)}</td><td>${esc(x.outcome)}</td><td>${esc(x.details)}</td></tr>`).join(\'\')||\'<tr><td colspan="6">No audit records.</td></tr>\';\n  $(\'agentResultRows\').innerHTML=results.map(x=>`<tr class="clickrow" tabindex="0" role="button" data-command-id="${Number(x.command_id)||0}"><td>#${Number(x.command_id)||0}</td><td>${esc(x.hostname)}</td><td>${esc(x.action)}</td><td>${esc(x.status)}</td><td>${esc(x.completed_at||\'—\')}</td></tr>`).join(\'\')||\'<tr><td colspan="5">No command results.</td></tr>\';window.agentCommandResults=results;\n }catch(e){$(\'agentRows\').innerHTML=\'<tr><td colspan="8">Command Centre unavailable: \'+esc(e.message)+\'</td></tr>\';}\n}\nfunction showAgentResult(id){const item=(window.agentCommandResults||[]).find(x=>x.command_id===id);if(item)$(\'agentCommandOutput\').textContent=JSON.stringify({command_id:item.command_id,device:item.hostname,action:item.action,status:item.status,result:item.result},null,2);}\nasync function createAgentToken(){\n if(!confirm(\'Generate a one-time enrolment token valid for 15 minutes?\'))return;\n try{const r=await fetch(\'/api/command/enrol-token\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({confirm:true})});const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);$(\'agentToken\').textContent=d.token;$(\'agentTokenBox\').style.display=\'block\';await loadCommandCenter();}catch(e){alert(\'Could not create token: \'+e.message);}\n}\nasync function agentAction(id,action,args={},confirmation=false){\n const risky=[\'restart_computer\',\'shutdown_computer\',\'restart_service\',\'lock_workstation\'];\n if(risky.includes(action)&&!confirm(`Queue ${action.replaceAll(\'_\',\' \')} for ${id}? The action will be recorded in the audit log.`))return;\n try{const r=await fetch(`/api/command/agents/${encodeURIComponent(id)}/commands`,{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({action,args,confirm:confirmation||risky.includes(action)})});const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);alert(`Action queued. Command #${d.command_id}`);await loadCommandCenter();}catch(e){alert(\'Action not queued: \'+e.message);}\n}\nasync function restartRemote(id){if(!confirm(\'Restart \'+id+\'? The endpoint will schedule a restart in 60 seconds.\'))return;await agentAction(id,\'restart_computer\',{},true);}\nasync function shutdownRemote(id){if(!confirm(\'Shut down \'+id+\'? The endpoint will schedule shutdown in 60 seconds.\'))return;await agentAction(id,\'shutdown_computer\',{},true);}\nasync function restartRemoteService(id){const name=prompt(\'Exact Windows service name to restart (protected core services are blocked):\');if(!name)return;if(!confirm(\'Restart Windows service \'+name+\' on \'+id+\'?\'))return;await agentAction(id,\'restart_service\',{service_name:name},true);}\nasync function revokeAgent(id){if(!confirm(`Immediately revoke ${id}? Its future requests will be rejected and queued commands cancelled.`))return;try{const r=await fetch(`/api/command/agents/${encodeURIComponent(id)}/revoke`,{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({confirm:true})});const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);await loadCommandCenter();}catch(e){alert(e.message);}}\n\nloadCommandCenter();setInterval(loadCommandCenter,10000);loadPhantomAccess();setInterval(loadPhantomAccess,30000);\n'
 
 # ============================================================
 # NETWORKRADAR COMMAND — AUTHENTICATED ENDPOINT MANAGEMENT
@@ -6076,6 +5031,8 @@ class AgentHubHandler(BaseHTTPRequestHandler):
         try:
             raw,payload=_agent_json_body(self)
             if self.path == "/agent/v1/enrol":
+                if not is_authorized():
+                    return self._reply({"error":"Endpoint enrolment is disabled until the current network is authorised."},403)
                 token=str(payload.get("token",""))
                 if len(token)<32 or len(token)>128: return self._reply({"error":"Invalid enrolment token."},401)
                 token_hash=_agent_hash(token); agent_id="nr-"+uuid.uuid4().hex[:20]
@@ -6091,7 +5048,12 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                     conn.execute("INSERT INTO remote_agents(agent_id,hostname,platform,os_version,agent_version,secret_hash,status,enrolled_at,last_seen,last_ip,capabilities_json) VALUES(?,?,?,?,?,?,'ONLINE',?,?,?,?)",(agent_id,hostname,platform_name,os_version,agent_version,secret_hash,now_text(),now_text(),self.client_address[0],json.dumps(["inventory","processes","services","lock","power-control"])) )
                     conn.execute("INSERT INTO agent_audit_events(timestamp,agent_id,actor,action,outcome,details) VALUES(?,?,?,?,?,?)",(now_text(),agent_id,"endpoint","ENROL","SUCCESS",hostname))
                 DB_MANAGER.write(_enrol)
-                return self._reply({"agent_id":agent_id,"secret":agent_secret,"auth_pepper":_agent_pepper().hex(),"message":"Enrolled. Store this secret securely; it will not be shown again."},201)
+                # Give this endpoint only its own derived HMAC key. Never disclose
+                # the server-wide pepper: a shared pepper would let one enrolled
+                # endpoint plus a database copy impersonate every other agent.
+                agent_auth_key = _agent_hmac_key(secret_hash).hex()
+                return self._reply({"agent_id":agent_id,"auth_key":agent_auth_key,
+                    "message":"Enrolled. Store this per-agent key securely; it will not be shown again."},201)
             if self.path == "/agent/v1/report":
                 agent_id=_verify_agent_request(self,raw)
                 inventory=payload.get("inventory",{})
@@ -6219,6 +5181,8 @@ class AgentHubHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             if self.path.startswith("/agent/v1/commands"):
+                if not is_authorized():
+                    return self._reply({"error":"Command delivery is disabled until the current network is authorised."},403)
                 agent_id=_verify_agent_request(self,b"")
                 def _take(conn):
                     conn.execute("UPDATE agent_commands SET status='EXPIRED' WHERE agent_id=? AND status IN ('QUEUED','DELIVERED') AND expires_at<?",(agent_id,now_text()))
@@ -6241,6 +5205,8 @@ def stop_agent_hub():
 
 
 def start_agent_hub_status():
+    if not is_authorized():
+        return {"state":"BLOCKED","reason":"The current network profile is not authorised."}
     if AGENT_HUB is not None:
         return {"state":"ONLINE","address":str(AGENT_HUB.server_address)}
     if os.environ.get("NETWORKRADAR_AGENT_ENABLED","0")!="1": return {"state":"DISABLED"}
@@ -6249,6 +5215,8 @@ def start_agent_hub_status():
 
 def start_agent_hub():
     global AGENT_HUB, AGENT_HUB_THREAD
+    if not is_authorized():
+        return {"state":"BLOCKED","reason":"The current network profile is not authorised; endpoint management remains disabled."}
     if AGENT_HUB is not None:
         return {"state":"ONLINE","address":str(AGENT_HUB.server_address),"note":"Agent hub is already running."}
     if os.environ.get("NETWORKRADAR_AGENT_ENABLED", "0") != "1":
@@ -6276,6 +5244,8 @@ def start_agent_hub():
 
 
 def create_agent_enrollment_token(actor="local-user"):
+    if not is_authorized():
+        raise RuntimeError("The current network profile is not authorised; endpoint enrolment is disabled.")
     token=secrets.token_urlsafe(36); created=datetime.now(); expires=created+timedelta(minutes=15)
     def _w(conn):
         conn.execute("INSERT INTO agent_enrollment_tokens(token_hash,created_at,expires_at,created_by) VALUES(?,?,?,?)",(_agent_hash(token),created.strftime("%Y-%m-%d %H:%M:%S"),expires.strftime("%Y-%m-%d %H:%M:%S"),_clean(actor,80)))
@@ -6285,6 +5255,8 @@ def create_agent_enrollment_token(actor="local-user"):
 
 
 def queue_agent_command(agent_id, action, args=None, actor="local-user", confirmed=False):
+    if not is_authorized():
+        raise ValueError("The current network profile is not authorised; endpoint commands are disabled.")
     agent_id=str(agent_id or "")
     if not re.fullmatch(r"nr-[a-f0-9]{20}",agent_id): raise ValueError("Invalid agent identifier.")
     action=str(action or "").strip().lower(); spec=AGENT_ACTIONS.get(action)
@@ -6938,12 +5910,7 @@ class Handler(BaseHTTPRequestHandler):
             if not asset.is_file(): return self.send_json({"error": "Dashboard script is missing."}, 404)
             return self._send_bytes(asset.read_bytes(), 200, "application/javascript; charset=utf-8")
         if self.path == "/" or p.path == "/index.html":
-            page = WEB_PAGE.replace("{APP_VERSION}", APP_VERSION)
-            external_tag = f'<script src="/assets/dashboard.js?v={APP_VERSION}" defer></script>'
-            inline_script = "<!-- Bundled dashboard script; compatibility asset remains at /assets/dashboard.js -->\n<script>\n" + DASHBOARD_JS_BUNDLED.replace("</script", "<\\/script") + "\n</script>"
-            # Inline the exact tested dashboard bundle so missing/stale sidecar JS
-            # cannot leave the page permanently stuck at CONNECTING/Loading.
-            page = page.replace(external_tag, inline_script)
+            page = (ROOT / "index.html").read_text(encoding="utf-8").replace("{APP_VERSION}", APP_VERSION)
             b = page.encode("utf-8")
             return self._send_bytes(b, 200, "text/html; charset=utf-8")
         try:
@@ -7970,17 +6937,18 @@ def _main_inner():
         sys.exit(1)
 
     initialize_database()
-    # Optional remote-agent listener; it is inert unless explicitly enabled with TLS files.
-    try:
-        print("ENDPOINT AGENT HUB:", json.dumps(start_agent_hub()))
-    except Exception as _agent_exc:
-        print("ENDPOINT AGENT HUB STARTUP WARNING:", _clean(_agent_exc, 240))
     repair_dns_domain_classification()
     load_oui_cache()
     try:
         refresh_network_context()
     except Exception as e:
         print("NET CONTEXT WARNING:", _clean(e, 220))
+    # Network approval must be loaded before the optional management listener
+    # evaluates whether endpoint management is permitted on this network.
+    try:
+        print("ENDPOINT AGENT HUB:", json.dumps(start_agent_hub()))
+    except Exception as _agent_exc:
+        print("ENDPOINT AGENT HUB STARTUP WARNING:", _clean(_agent_exc, 240))
     print("DATABASE INITIALISED (serialized writer active).")
 
     web = start_web()

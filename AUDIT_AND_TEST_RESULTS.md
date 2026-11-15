@@ -1,3 +1,5 @@
+> **Historical report:** This document records verification of the earlier 8.4.0 recovery artifact based on an 8.2.0 source archive. It does not audit or certify the current 12.0.3 repository snapshot. The code has subsequently diverged; use the current README, architecture notes and audit-branch tests for the present state.
+
 # NetworkRadar 8.4.0 — Recovery audit and verification
 
 ## Source examined

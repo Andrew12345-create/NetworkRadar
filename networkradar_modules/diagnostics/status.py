@@ -1,21 +1,26 @@
 """Normalise engine health without inventing activity or success."""
 from __future__ import annotations
 
-TERMINAL = {"FAILED", "STOPPED", "DISABLED", "NOT_CONFIGURED"}
-KNOWN = {"ONLINE", "DEGRADED", "FAILED", "STOPPED", "STARTING",
-         "DISABLED", "NOT_CONFIGURED", "OBSERVING", "RUNNING"}
 
-
-def engine_record(name: str, reported_status: str, *, last_error: str = "",
-                  configured: bool = True, details: dict | None = None) -> dict:
+def engine_record(
+    name: str,
+    reported_status: str,
+    *,
+    last_error: str = "",
+    configured: bool = True,
+    details: dict | None = None,
+) -> dict:
+    """Return the established NetworkRadar engine-health response shape."""
     raw = str(reported_status or "UNKNOWN").upper()
     if not configured:
         state = "NOT_CONFIGURED"
     elif raw in {"RUNNING", "OBSERVING"}:
-        # Preserve the engine's own state; process existence alone is not proof
-        # of successful observations.
+        # Process existence alone is not proof of successful observations.
         state = "DEGRADED" if last_error else "ONLINE"
-    elif raw in KNOWN:
+    elif raw in {
+        "ONLINE", "DEGRADED", "FAILED", "STOPPED", "STARTING",
+        "DISABLED", "NOT_CONFIGURED",
+    }:
         state = raw
     else:
         state = "UNKNOWN"

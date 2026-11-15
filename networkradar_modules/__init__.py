@@ -1,2 +1,3 @@
-"""NetworkRadar modular intelligence package."""
-__version__ = "8.4.0"
+"""NetworkRadar application package and version metadata."""
+
+__version__ = "12.0.3"
