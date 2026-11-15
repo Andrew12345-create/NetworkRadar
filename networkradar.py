@@ -1517,6 +1517,32 @@ def persist_identity(conn, device, ts):
     device["device_id"] = did
     device["identity_basis"] = basis
 
+    # Preserve network-scoped sightings separately from the legacy IP-keyed inventory.
+    with NET_LOCK:
+        workspace_id = NET_CTX.get("network_id", "")
+        active_fp = NET_CTX.get("fingerprint", "")
+    if workspace_id:
+        sighting = conn.execute(
+            "SELECT id FROM network_device_sightings "
+            "WHERE network_id=? AND ip=? AND device_id=? ORDER BY id DESC LIMIT 1",
+            (workspace_id, device["ip"], did),
+        ).fetchone()
+        if sighting:
+            conn.execute(
+                "UPDATE network_device_sightings SET fingerprint=?,mac=?,hostname=?,"
+                "last_seen=?,status='ONLINE' WHERE id=?",
+                (active_fp, device.get("mac", ""), device.get("hostname", ""),
+                 ts, sighting[0]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO network_device_sightings(network_id,fingerprint,ip,device_id,"
+                "mac,hostname,first_seen,last_seen,status,source) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (workspace_id, active_fp, device["ip"], did,
+                 device.get("mac", ""), device.get("hostname", ""), ts, ts,
+                 "ONLINE", "inventory"),
+            )
+
 def infer_type(device, ssdp=None):
     """Classify a device using observed evidence and its current network role."""
     with NET_LOCK:
@@ -6577,6 +6603,75 @@ class Handler(BaseHTTPRequestHandler):
                         "dns_servers": r[10], "adapter_mac": r[11],
                         "confidence": r[12] or 0,
                         "is_current": r[1] == cur_fp} for r in rows])
+
+                if p.path == "/api/networks/workspaces":
+                    with NET_LOCK:
+                        current_network_id = NET_CTX.get("network_id", "")
+                    rows = conn.execute("""
+                        SELECT w.network_id,w.display_name,w.network_type,w.created_at,
+                               w.last_seen,w.current_fingerprint,w.status,w.notes,
+                               (SELECT COUNT(*) FROM network_fingerprint_history f
+                                WHERE f.network_id=w.network_id) AS fingerprint_count,
+                               (SELECT COUNT(DISTINCT d.ip) FROM network_device_sightings d
+                                WHERE d.network_id=w.network_id) AS device_count
+                        FROM network_workspaces w
+                        ORDER BY CASE WHEN w.network_id=? THEN 0 ELSE 1 END,
+                                 w.last_seen DESC
+                        LIMIT 200
+                    """, (current_network_id,)).fetchall()
+                    return self.send_json([{
+                        "network_id":r[0],"display_name":r[1],"network_type":r[2],
+                        "created_at":r[3],"last_seen":r[4],"current_fingerprint":r[5],
+                        "status":r[6],"notes":r[7],"fingerprint_count":r[8],
+                        "device_count":r[9],"is_current":r[0]==current_network_id
+                    } for r in rows])
+
+                if p.path == "/api/networks/interfaces":
+                    q = parse_qs(p.query)
+                    selected_id = q.get("network_id", [""])[0]
+                    query = """
+                        SELECT n.network_id,n.timestamp,n.interface_index,n.interface_name,
+                               n.interface_guid,n.interface_description,n.interface_type,
+                               n.status,n.ip,n.prefix,n.network,n.gateway,n.gateway_mac,
+                               n.dns_servers,n.dhcp,n.ssid,n.bssid,n.route_metric,
+                               n.adapter_mac,n.is_primary
+                        FROM network_interface_observations n
+                        WHERE n.id IN (
+                            SELECT MAX(id) FROM network_interface_observations
+                            GROUP BY network_id,interface_index,interface_guid
+                        )
+                    """
+                    params = ()
+                    if selected_id:
+                        query += " AND n.network_id=?"
+                        params = (selected_id,)
+                    query += " ORDER BY n.is_primary DESC,n.interface_type,n.interface_name LIMIT 200"
+                    rows = conn.execute(query, params).fetchall()
+                    return self.send_json([{
+                        "network_id":r[0],"timestamp":r[1],"interface_index":r[2],
+                        "interface":r[3],"interface_guid":r[4],"description":r[5],
+                        "interface_type":r[6],"status":r[7],"ip":r[8],"prefix":r[9],
+                        "network":r[10],"gateway":r[11],"gateway_mac":r[12],
+                        "dns_servers":r[13],"dhcp":r[14],"ssid":r[15],"bssid":r[16],
+                        "route_metric":r[17],"adapter_mac":r[18],"is_primary":bool(r[19])
+                    } for r in rows])
+
+                if p.path == "/api/networks/devices":
+                    q = parse_qs(p.query)
+                    selected_id = q.get("network_id", [""])[0]
+                    if not selected_id:
+                        return self.send_json({"error":"network_id required"},400)
+                    rows = conn.execute("""
+                        SELECT ip,device_id,mac,hostname,first_seen,last_seen,status,fingerprint
+                        FROM network_device_sightings WHERE network_id=?
+                        ORDER BY CASE status WHEN 'ONLINE' THEN 0 ELSE 1 END,last_seen DESC
+                        LIMIT 1000
+                    """, (selected_id,)).fetchall()
+                    return self.send_json([{
+                        "ip":r[0],"device_id":r[1],"mac":r[2],"hostname":r[3],
+                        "first_seen":r[4],"last_seen":r[5],"status":r[6],
+                        "fingerprint":r[7]
+                    } for r in rows])
 
                 if p.path == "/api/hunt/templates":
                     return self.send_json([{"key": k, "title": v["title"]}
