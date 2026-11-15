@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 12.0.3 — local-first network discovery and device intelligence.
+NetworkRadar 12.1.0 — local-first network discovery and device intelligence.
 Modular runtime + established intelligence core. Authorised networks only.\n\n
 12.0.1 changes:
   - Adds Phantom Terminal with authenticated interactive SSH sessions over a
