@@ -945,7 +945,8 @@ def _parse_wifi_interface_blocks(output, preferred_name):
         if key == "name":
             if current:
                 blocks.append(current)
-            current = {}
+            current = {"name": value}
+            continue
         if current:
             current[key] = value
     if current:
