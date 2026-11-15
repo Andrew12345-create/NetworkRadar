@@ -390,6 +390,18 @@ class PowerShellDiagnosticTests(unittest.TestCase):
         self.assertEqual(app._PS_DIAGNOSTICS.records[0]["state"], "EMPTY")
         self.assertEqual(app._PS_DIAGNOSTICS.records[0]["operation"], "Get-NetAdapter")
 
+
+    @patch.object(app.subprocess, "run")
+    def test_helper_does_not_bypass_host_execution_policy(self, run):
+        run.return_value.returncode = 0
+        run.return_value.stdout = "[]"
+        run.return_value.stderr = ""
+        app._PS_DIAGNOSTICS.records = []
+        self.assertEqual(app._ps("Get-NetAdapter", label="Get-NetAdapter"), [])
+        args = run.call_args.args[0]
+        self.assertNotIn("-ExecutionPolicy", args)
+        self.assertNotIn("Bypass", args)
+
     @patch.object(app.subprocess, "run")
     def test_powershell_failure_is_reported_without_raw_command(self, run):
         run.return_value.returncode = 1
