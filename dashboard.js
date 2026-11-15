@@ -267,11 +267,43 @@ async function renderNetworkWorkspace(networkId){
 }
 
 let refreshInFlight=false;
+
+/* NIGHTWATCH live presentation: all values come from existing local APIs. */
+function nwSet(id,value){const el=$(id);if(el)el.textContent=value==null?"—":String(value);}
+function nwPortCount(rows){const ports=new Set();(rows||[]).forEach(d=>String(d.open_ports||"").split(/[;,\\s]+/).forEach(t=>{const m=t.trim().match(/^(\\d{1,5})(?:\\/(?:tcp|udp))?$/i);if(m)ports.add(m[1]);}));return ports.size;}
+function nwTopology(data){
+ const svg=$("nwTopology");if(!svg)return;
+ const nodes=Array.isArray(data.nodes)?data.nodes.slice(0,40):[],edges=Array.isArray(data.edges)?data.edges.slice(0,100):[];
+ const pos=new Map(),cx=500,cy=245,rx=390,ry=175;
+ nodes.forEach((n,i)=>{const a=-Math.PI/2+2*Math.PI*i/Math.max(nodes.length,1);pos.set(String(n.id),{x:cx+Math.cos(a)*rx,y:cy+Math.sin(a)*ry});});
+ let out='<circle cx="500" cy="245" r="92" class="nw-map-core"/><text x="500" y="241" text-anchor="middle" class="nw-core-label">NETWORK</text><text x="500" y="262" text-anchor="middle" class="nw-core-sub">OBSERVED ACTIVITY</text>',count=0;
+ edges.forEach(e=>{const a=pos.get(String(e.source)),b=pos.get(String(e.target));if(!a||!b)return;const t=String(e.type||"").toUpperCase(),cl=t.includes("DHCP")?"dhcp":t.includes("MDNS")||t.includes("LLMNR")?"discovery":"dns";out+='<line x1="'+a.x+'" y1="'+a.y+'" x2="'+b.x+'" y2="'+b.y+'" class="nw-edge '+cl+'"/>';count++;});
+ nodes.forEach(n=>{const p=pos.get(String(n.id));if(!p)return;const ip=String(n.id||""),label=String(n.label||ip).slice(0,22),kind=String(n.kind||"");const cl=/resolver|multicast|dhcp_server/.test(kind)?"resolver":kind==="observed"?"observed":"device";const clickable=/^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(ip);out+='<g class="nw-node '+cl+'" '+(clickable?'data-nw-ip="'+esc(ip)+'" role="button" tabindex="0"':'')+'><circle cx="'+p.x+'" cy="'+p.y+'" r="13" class="nw-node-halo"/><circle cx="'+p.x+'" cy="'+p.y+'" r="6" class="nw-node-dot"/><text x="'+p.x+'" y="'+(p.y+27)+'" text-anchor="middle" class="nw-node-label">'+esc(label)+'</text></g>';});
+ if(!nodes.length)out='<text x="500" y="230" text-anchor="middle" class="nw-svg-empty">NO NETWORK RELATIONSHIPS OBSERVED YET</text><text x="500" y="258" text-anchor="middle" class="nw-svg-sub">Run discovery and allow local observations to accumulate.</text>';
+ svg.innerHTML=out;svg.querySelectorAll("[data-nw-ip]").forEach(el=>{const go=()=>openDevice(el.getAttribute("data-nw-ip"));el.addEventListener("click",go);el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go();}});});
+ nwSet("nwTopologyNote",nodes.length+" nodes · "+count+" observed relationships");nwSet("nwRadarCount",nodes.length+" SIGNALS");
+}
+function nwActivity(events,alerts){
+ const el=$("nwActivityFeed");if(!el)return;const items=[];
+ (events||[]).forEach(x=>items.push({time:x.timestamp,ip:x.ip,title:x.event_type||"Network event",detail:x.details||x.category||"Recorded observation",severity:x.severity||"INFO"}));
+ (alerts||[]).forEach(x=>items.push({time:x.timestamp,ip:x.client_ip,title:x.rule_id||"Network alert",detail:x.details||x.domain||"Recorded alert",severity:x.severity||"INFO"}));
+ items.sort((a,b)=>String(b.time||"").localeCompare(String(a.time||"")));
+ const list=items.slice(0,12);el.innerHTML=list.length?list.map(x=>{const s=String(x.severity).toUpperCase(),cl=s==="HIGH"||s==="CRITICAL"?"high":s==="MEDIUM"?"medium":"info";return '<article class="nw-feed-item"><time>'+esc(x.time||"Time unavailable")+'</time><div><b>'+esc(x.title)+'</b><small>'+esc(x.detail)+'</small></div><span>'+esc(x.ip||"LOCAL")+'</span><em class="'+cl+'">'+esc(s)+'</em></article>';}).join(""):'<div class="nw-feed-empty">No recent events or alerts have been recorded. This does not mean the network is threat-free.</div>';
+}
+function renderNightwatch(s,n,d,dns,a,e,t){
+ const online=d.filter(x=>String(x.status||"").toUpperCase()==="ONLINE").length;
+ const unknown=d.filter(x=>/unknown|unclassified|unidentified/i.test(String(x.device_type||""))||Number(x.identification_confidence||0)<25).length;
+ nwSet("nwNetwork",n.network||s.network||"Network not identified");nwSet("nwGateway",n.gateway||"Not observed");nwSet("nwLastSync",new Date().toLocaleTimeString());
+ nwSet("nwDevices",d.length);nwSet("nwOnline",online);nwSet("nwUnknown",unknown);nwSet("nwPorts",nwPortCount(d));nwSet("nwDns",dns.length);nwSet("nwAlerts",a.length);
+ nwSet("nwScanState",s.scan_status||s.discovery_status||"ENGINE ONLINE");nwSet("nwAuthState",n.authorized?"NETWORK AUTHORISED":"PASSIVE / NOT AUTHORISED");nwSet("nwEngineState","LOCAL API CONNECTED");
+ const auth=$("nwAuthState");if(auth)auth.classList.toggle("authorised",!!n.authorized);nwTopology(t||{});nwActivity(e,a);
+}
+
 async function refreshAll(){
  if(refreshInFlight)return;refreshInFlight=true;
  const specs=[
   ["status","/api/status"],["devices","/api/devices"],["domains","/api/domains"],
-  ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],
+  ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],["topology","/api/topology"],
   ["progress","/api/progress"],["investigations","/api/investigations"],
   ["network","/api/network"],["diagnostics","/api/diagnostics"],
   ["engine","/api/engine_diagnostics"]
@@ -280,7 +312,7 @@ async function refreshAll(){
   const settled=await Promise.allSettled(specs.map(([,path])=>getJSON(path)));
   const data={},failed=[];
   settled.forEach((r,i)=>{const name=specs[i][0];if(r.status==="fulfilled")data[name]=r.value;else{data[name]=null;failed.push(name+": "+String(r.reason?.message||r.reason||"request failed"));}});
-  const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{};
+  const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{};
   const statusOK=!!data.status;
   pill($("connection"),!statusOK?"API DEGRADED":(failed.length?"CONNECTED · PARTIAL":"CONNECTED"),!statusOK?"bad":(failed.length?"warn":"ok"));
   if(!statusOK){$("updated").textContent="Status API unavailable. "+failed.join(" | ");}
@@ -298,6 +330,7 @@ async function refreshAll(){
   $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||'<tr><td colspan="3">—</td></tr>';
   $("alertRows").innerHTML=a.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.client_ip)}</td><td>${esc(x.rule_id)}</td><td class="${x.severity==="HIGH"?"red":"amber"}">${esc(x.severity)}</td></tr>`).join("")||'<tr><td colspan="4">—</td></tr>';
   $("eventRows").innerHTML=e.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.category)}</td><td>${esc(x.event_type)}</td><td>${esc(x.details)}</td></tr>`).join("")||'<tr><td colspan="5">—</td></tr>';
+  renderNightwatch(s,n,d,dnsRows,a,e,topology);
   $("behaviourStatus").textContent=diag.behaviour?.message||"Behaviour diagnostics unavailable.";
   $("behaviourRows").innerHTML=((diag.behaviour?.baseline_devices||0)>0?'<tr><td colspan="5">See device detail for samples.</td></tr>':'<tr><td colspan="5">Collecting baselines.</td></tr>');
   $("investigationRows").innerHTML=inv.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.title)}</td><td>${esc(x.severity)}</td><td>${esc(x.status)}</td><td>${esc(x.evidence_count)}</td></tr>`).join("")||'<tr><td colspan="5">None.</td></tr>';
