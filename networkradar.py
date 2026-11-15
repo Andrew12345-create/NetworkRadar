@@ -913,11 +913,13 @@ def _ps(cmd, timeout=15):
         return []
     return data if isinstance(data, list) else [data]
 
-def _gateway_mac_via_neighbor(gw_ip):
+def _gateway_mac_via_neighbor(gw_ip, interface_index=None):
     if not gw_ip:
         return None
-    rows = _ps(f"Get-NetNeighbor -AddressFamily IPv4 -IPAddress '{gw_ip}' | "
-               f"Select-Object IPAddress,LinkLayerAddress,State | ConvertTo-Json -Depth 3")
+    interface_filter = (f" -InterfaceIndex {int(interface_index)}"
+                        if interface_index is not None else "")
+    rows = _ps(f"Get-NetNeighbor -AddressFamily IPv4{interface_filter} -IPAddress '{gw_ip}' | "
+               f"Select-Object IPAddress,InterfaceIndex,LinkLayerAddress,State | ConvertTo-Json -Depth 3")
     for r in rows:
         ll = _norm_mac(r.get("LinkLayerAddress"))
         st = str(r.get("State") or "")
@@ -925,7 +927,8 @@ def _gateway_mac_via_neighbor(gw_ip):
             return ll
     return None
 
-def _wifi_details():
+def _wifi_details(interface_name=None):
+    """Return SSID/BSSID for the requested WLAN interface, never another adapter."""
     try:
         p = subprocess.run(["netsh", "wlan", "show", "interfaces"],
                            capture_output=True, text=True, timeout=8,
@@ -934,17 +937,15 @@ def _wifi_details():
         return "", ""
     if p.returncode != 0:
         return "", ""
-    ssid = bssid = ""
-    for line in p.stdout.splitlines():
-        if ":" not in line:
-            continue
-        k, v = line.split(":", 1)
-        k = k.strip().lower(); v = v.strip()
-        if k == "ssid" and not ssid:
-            ssid = v
-        elif k == "bssid" and not bssid:
-            bssid = v
-    return ssid, bssid
+    rows = parse_netsh_wlan_interfaces(p.stdout)
+    if interface_name:
+        target = str(interface_name).strip().casefold()
+        match = next((row for row in rows
+                      if str(row.get("name", "")).strip().casefold() == target), None)
+        return (match.get("ssid", ""), match.get("bssid", "")) if match else ("", "")
+    if rows:
+        return rows[0].get("ssid", ""), rows[0].get("bssid", "")
+    return "", ""
 
 def detect_network():
     """Return network context as a legacy dict (8.1.0 compatible shape).
@@ -964,7 +965,7 @@ def detect_network():
                     "dns_servers": "", "adapter_mac": "",
                     "gateway_mac": "", "fingerprint": "", "fingerprint_raw": "",
                     "confidence": 0, "confidence_notes": "manual override",
-                    "_classification": {"gateway": Conf.MISSING,
+                    "interfaces": [], "_classification": {"gateway": Conf.MISSING,
                                         "gateway_mac": Conf.MISSING,
                                         "dns": Conf.MISSING,
                                         "dhcp": Conf.MISSING,
@@ -1023,6 +1024,7 @@ def detect_network():
                          "description": str(a.get("InterfaceDescription") or ""),
                          "guid": str(a.get("InterfaceGuid") or ""),
                          "status": status,
+                         "media_type": str(a.get("MediaType") or ""),
                          "mac": mac_val if _is_real_mac(mac_val) else "",
                          "ip": ip_val, "prefix": pfx})
 
@@ -1037,89 +1039,93 @@ def detect_network():
                 "dns_servers": "", "adapter_mac": "", "gateway_mac": "",
                 "fingerprint": "", "fingerprint_raw": "",
                 "confidence": 0, "confidence_notes": "no active adapter with IPv4",
-                "_classification": {"gateway": Conf.MISSING,
+                "interfaces": [], "_classification": {"gateway": Conf.MISSING,
                                     "gateway_mac": Conf.MISSING,
                                     "dns": Conf.MISSING,
                                     "dhcp": Conf.MISSING,
                                     "fingerprint": Conf.MISSING}}
 
-    # Gateway — NEVER invented
-    gateway_val = ""
-    gw_mac = ""
-    gw_class = Conf.MISSING
-    if primary["idx"] in default_routes:
-        nh = default_routes[primary["idx"]].get("NextHop")
-        if nh and nh not in ("0.0.0.0", ""):
-            gateway_val = nh
-            gw_class = Conf.CONFIRMED
-            gw_mac = _gateway_mac_via_neighbor(nh) or ""
-    gw_mac_class = Conf.CONFIRMED if gw_mac else Conf.MISSING
-
-    dns_servers = sorted(set(dns_by_idx.get(primary["idx"], [])))
-    dns_class = Conf.CONFIRMED if dns_servers else Conf.MISSING
-
-    dhcp_flag = dhcp_by_idx.get(primary["idx"])
-    dhcp_class = (Conf.CONFIRMED if dhcp_flag in ("Enabled", "Disabled")
-                  else Conf.MISSING)
-
-    ssid, bssid = _wifi_details()
-
-    try:
-        subnet_str = str(ipaddress.ip_network(
-            f"{primary['ip']}/{int(primary['prefix'])}", strict=False))
-    except (ValueError, TypeError):
-        subnet_str = ""
-
-    components = {
-        "subnet": subnet_str or None,
-        "gateway": gateway_val or None,
-        "gateway_mac": gw_mac or None,
-        "dns": dns_servers or None,
-        "dhcp": dhcp_flag if dhcp_flag in ("Enabled", "Disabled") else None,
-        "ssid": ssid or None,
-        "bssid": bssid or None,
-    }
-    weight = sum(FP_WEIGHTS[k] for k, v in components.items() if v is not None)
-    has_strong = components["gateway_mac"] is not None or components["bssid"] is not None
-
-    if weight == 0:
-        fingerprint = ""
-        fp_class = Conf.MISSING
-    else:
-        fingerprint = hashlib.sha256(
+    def _context_for_adapter(adapter):
+        idx = adapter["idx"]
+        gateway_val = ""
+        gw_mac = ""
+        gw_class = Conf.MISSING
+        route = default_routes.get(idx)
+        if route:
+            next_hop = route.get("NextHop")
+            if next_hop and next_hop not in ("0.0.0.0", ""):
+                gateway_val = str(next_hop)
+                gw_class = Conf.CONFIRMED
+                gw_mac = _gateway_mac_via_neighbor(gateway_val, idx) or ""
+        dns_servers = sorted(set(dns_by_idx.get(idx, [])))
+        dhcp_flag = dhcp_by_idx.get(idx, "")
+        ssid, bssid = _wifi_details(adapter["name"])
+        try:
+            subnet_str = str(ipaddress.ip_network(
+                f"{adapter['ip']}/{int(adapter['prefix'])}", strict=False))
+        except (ValueError, TypeError):
+            subnet_str = ""
+        components = {
+            "subnet": subnet_str or None,
+            "gateway": gateway_val or None,
+            "gateway_mac": gw_mac or None,
+            "dns": dns_servers or None,
+            "dhcp": dhcp_flag if dhcp_flag in ("Enabled", "Disabled") else None,
+            "ssid": ssid or None,
+            "bssid": bssid or None,
+        }
+        weight = sum(FP_WEIGHTS[k] for k, value in components.items()
+                     if value is not None)
+        has_strong = (components["gateway_mac"] is not None
+                      or components["bssid"] is not None)
+        fingerprint = (hashlib.sha256(
             json.dumps(components, sort_keys=True).encode()).hexdigest()[:24]
+            if weight > 0 else "")
         fp_class = (Conf.CONFIRMED if weight >= 0.75 and has_strong
                     else Conf.INFERRED if weight >= 0.40
                     else Conf.MISSING)
+        try:
+            prefix_value = int(adapter["prefix"])
+        except (ValueError, TypeError):
+            prefix_value = None
+        return {
+            "network": subnet_str, "ip": adapter.get("ip") or "",
+            "gateway": gateway_val, "interface": adapter["name"],
+            "interface_description": adapter.get("description", ""),
+            "interface_guid": adapter.get("guid", ""),
+            "interface_type": classify_interface_type(
+                adapter["name"], adapter.get("description", ""),
+                adapter.get("media_type", "")),
+            "interface_index": idx, "status": adapter.get("status", ""),
+            "prefix": prefix_value, "ssid": ssid, "bssid": bssid,
+            "mode": "AUTO", "dns_servers": ",".join(dns_servers),
+            "dhcp": dhcp_flag, "adapter_mac": adapter.get("mac", ""),
+            "gateway_mac": gw_mac, "fingerprint": fingerprint,
+            "fingerprint_raw": json.dumps(components, sort_keys=True),
+            "confidence": int(round(weight * 100)),
+            "confidence_notes": ("Strong anchor present." if has_strong
+                                 else "No gateway MAC or BSSID observed; confidence capped."),
+            "route_metric": int(route.get("_metric", 999999)) if route else 999999,
+            "_classification": {
+                "gateway": gw_class,
+                "gateway_mac": Conf.CONFIRMED if gw_mac else Conf.MISSING,
+                "dns": Conf.CONFIRMED if dns_servers else Conf.MISSING,
+                "dhcp": (Conf.CONFIRMED if dhcp_flag in ("Enabled", "Disabled")
+                         else Conf.MISSING),
+                "fingerprint": fp_class,
+            },
+        }
 
-    return {
-        "network": subnet_str,
-        "ip": primary["ip"] or "",
-        "gateway": gateway_val,
-        "interface": primary["name"],
-        "interface_description": primary.get("description", ""),
-        "interface_guid": primary.get("guid", ""),
-        "prefix": int(primary["prefix"]) if isinstance(primary["prefix"], int) else None,
-        "ssid": ssid,
-        "bssid": bssid,
-        "mode": "AUTO",
-        "dns_servers": ",".join(dns_servers),
-        "adapter_mac": primary["mac"],
-        "gateway_mac": gw_mac,
-        "fingerprint": fingerprint,
-        "fingerprint_raw": json.dumps(components, sort_keys=True),
-        "confidence": int(round(weight * 100)),
-        "confidence_notes": (
-            "Strong anchor present." if has_strong
-            else "No gateway MAC or BSSID observed; confidence capped."),
-        "_classification": {
-            "gateway": gw_class,
-            "gateway_mac": gw_mac_class,
-            "dns": dns_class,
-            "dhcp": dhcp_class,
-            "fingerprint": fp_class,
-        },
-    }
+    interface_contexts = [_context_for_adapter(adapter) for adapter in up]
+    primary_context = next(
+        (row for row in interface_contexts
+         if row.get("interface_index") == primary["idx"]), None)
+    if primary_context is None:
+        raise RuntimeError("Primary adapter context could not be constructed.")
+    for row in interface_contexts:
+        row["is_primary"] = row.get("interface_index") == primary["idx"]
+
+    return {**primary_context, "interfaces": interface_contexts}
 
 def _profile_authorization_fresh(profile, now=None):
     """Approval expires from last_authorized, never from routine last_seen updates."""
