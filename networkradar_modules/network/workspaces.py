@@ -50,6 +50,10 @@ def parse_netsh_wlan_interfaces(output):
             continue
         key, value = line.split(":", 1)
         key, value = key.strip().casefold(), value.strip()
+        # Windows netsh uses "AP BSSID" for the connected access-point MAC.
+        # Accept that label and the shorter "BSSID" form.
+        if key == "ap bssid":
+            key = "bssid"
         if key == "name":
             finish()
             current = {"name": value, "ssid": "", "bssid": "", "state": ""}
