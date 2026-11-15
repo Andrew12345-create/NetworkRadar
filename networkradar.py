@@ -933,7 +933,7 @@ def _ps(cmd, timeout=15, label="PowerShell query"):
     try:
         p = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive",
-             "-ExecutionPolicy", "Bypass", "-Command", cmd],
+             "-Command", cmd],
             capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace")
     except Exception as exc:
@@ -5028,7 +5028,7 @@ def collect_ipv6_neighbours():
                "Select-Object IPAddress,LinkLayerAddress,InterfaceIndex,InterfaceAlias,State "
                "| ConvertTo-Json -Compress")
     try:
-        proc = subprocess.run([exe,"-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass",
+        proc = subprocess.run([exe,"-NoProfile","-NonInteractive",
                                "-Command",command],capture_output=True,text=True,timeout=15,
                               encoding="utf-8",errors="replace")
         if proc.returncode != 0:
