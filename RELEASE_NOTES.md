@@ -5,7 +5,7 @@
 - Added an opt-in Windows endpoint inventory client at `agent/networkradar_agent.py`.
 - Added read-only CIM collection for manufacturer, exact system model/family, CPU, physical memory, BIOS version, disks, OS version/build/architecture and network adapters.
 - Serial numbers are excluded by default and are collected only when the operator explicitly supplies `--include-serial`.
-- Added HTTPS leaf-certificate SHA-256 pinning. The agent verifies the configured pin before sending the HTTP request, including during enrolment.
+- Added HTTPS leaf-certificate SHA-256 pinning. The agent verifies the configured pin before sending the HTTP request, including during enrolment, and supports verified pin rotation after a certificate renewal.
 - Added single-use token enrolment using the existing 15-minute enrolment-token flow.
 - Added signed inventory reports using the existing per-agent HMAC protocol, timestamp validation and replay-resistant nonce handling.
 - Agent credentials are stored using Windows DPAPI for the current Windows user; the enrolment token is prompted for and is not persisted.
