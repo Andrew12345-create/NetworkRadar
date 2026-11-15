@@ -5343,7 +5343,7 @@ def _agent_json_body(handler, maximum=65536):
 
 
 class AgentHubHandler(BaseHTTPRequestHandler):
-    server_version = "NetworkRadar-AgentHub/11.0.1"
+    server_version = "NetworkRadar-AgentHub/12.3.0"
     def log_message(self, *args):
         pass
     def _reply(self, obj, status=200):
