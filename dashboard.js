@@ -303,10 +303,17 @@ function renderFirewall(f){
   '<p class="fw-message">'+esc(f.message||"Firewall status unavailable.")+'</p>';
 }
 function renderNightwatch(s,n,d,dns,a,e,t){
- const online=d.filter(x=>String(x.status||"").toUpperCase()==="ONLINE").length;
+ const statusOf=x=>String(x.status||"UNKNOWN").toUpperCase();
+ const online=d.filter(x=>statusOf(x)==="ONLINE").length;
+ const offline=d.filter(x=>statusOf(x)==="OFFLINE").length;
+ const other=d.length-online-offline;
  const unknown=d.filter(x=>/unknown|unclassified|unidentified/i.test(String(x.device_type||""))||Number(x.identification_confidence||0)<25).length;
  nwSet("nwNetwork",n.network||s.network||"Network not identified");nwSet("nwGateway",n.gateway||"Not observed");nwSet("nwLastSync",new Date().toLocaleTimeString());
  nwSet("nwDevices",d.length);nwSet("nwOnline",online);nwSet("nwUnknown",unknown);nwSet("nwPorts",nwPortCount(d));nwSet("nwDns",dns.length);nwSet("nwAlerts",a.length);
+ const statusNote=$("nwInventoryStatus");
+ if(statusNote)statusNote.textContent=online+" ONLINE · "+offline+" OFFLINE · "+other+" OTHER / UNVERIFIED — totals reconcile to "+d.length+" known assets.";
+ const nodes=Array.isArray(t?.nodes)?t.nodes:[];
+ nwSet("nwRadarCount",nodes.length+" SIGNALS");
  nwSet("nwScanState",s.scan_status||s.discovery_status||"ENGINE ONLINE");nwSet("nwAuthState",n.authorized?"NETWORK AUTHORISED":"PASSIVE / NOT AUTHORISED");nwSet("nwEngineState","LOCAL API CONNECTED");
  const auth=$("nwAuthState");if(auth)auth.classList.toggle("authorised",!!n.authorized);nwTopology(t||{});nwActivity(e,a);
 }
@@ -336,7 +343,7 @@ async function refreshAll(){
   $("online").textContent=s.online??"—";$("historical").textContent=s.historical??"—";$("deviceHint").textContent=(s.offline??"—")+" offline";$("openInvestigations").textContent=s.open_investigations??inv.length;
   const nr=$("networkRisk");nr.textContent=s.network_risk_band||"UNKNOWN";nr.className="value risk-"+(s.network_risk_band||"UNKNOWN");
   pill($("dnsStatus"),s.dns_status||"UNKNOWN",s.dns_status==="ONLINE"?"ok":"warn");pill($("dhcpStatus"),s.dhcp_status||"UNKNOWN",s.dhcp_status==="ONLINE"?"ok":"warn");pill($("arpStatus"),s.arp_status||"UNKNOWN",s.arp_status==="ONLINE"?"ok":"warn");
-  const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"").slice(0,60);
+  const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"");$("dhcpClass").title=dhcp.reason||"No DHCP diagnostic detail returned.";
   $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";$("scanQuality").textContent=(diag.scan_quality?.score??"—")+"/100 · "+(diag.scan_quality?.band||"—");
   if(data.devices){deviceCache=d;filterDevices();}else{$("deviceRows").innerHTML='<tr><td colspan="7">Device API unavailable. Check server log and /api/devices.</td></tr>';}
   $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||'<tr><td colspan="3">—</td></tr>';
