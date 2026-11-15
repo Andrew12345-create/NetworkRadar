@@ -371,8 +371,9 @@ class NetworkFingerprintDiagnosticsTests(unittest.TestCase):
                     "reason": "Manual scope only."
                 }
             })
-            with self.assertRaisesRegex(RuntimeError, "NETWORKRADAR_NETWORK"):
-                app.authorize_current()
+            with patch.object(app, "refresh_network_context"):
+                with self.assertRaisesRegex(RuntimeError, "NETWORKRADAR_NETWORK"):
+                    app.authorize_current()
         finally:
             app.NET_CTX.clear()
             app.NET_CTX.update(original)
