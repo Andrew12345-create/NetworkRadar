@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 12.1.0 — local-first network discovery and device intelligence.
+NetworkRadar 12.2.0 — local-first network discovery and device intelligence.
 Modular runtime + established intelligence core. Authorised networks only.\n\n
 12.0.1 changes:
   - Adds Phantom Terminal with authenticated interactive SSH sessions over a
@@ -218,6 +218,10 @@ from networkradar_modules.discovery.probes import (
     netbios_name as _netbios_name, ssdp_scan as _ssdp_scan,
 )
 from networkradar_modules.discovery.mdns import discover_mdns as _discover_mdns
+from networkradar_modules.network.workspaces import (
+    classify_interface_type, parse_netsh_wlan_interfaces, ensure_workspace,
+    record_interface_observation, upsert_legacy_network_profile,
+)
 
 def _score_identity_evidence(candidate, *, now=None, thresholds=None,
                               half_life_days=30.0, group_cap=0.45,
@@ -675,6 +679,44 @@ def initialize_database():
         ])
         for s in schemas:
             conn.execute(s)
+
+        # 12.2.0 multi-network foundation. Legacy tables remain intact.
+        conn.execute("""CREATE TABLE IF NOT EXISTS network_workspaces(
+            network_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
+            network_type TEXT DEFAULT 'OTHER', created_at TEXT NOT NULL,
+            last_seen TEXT NOT NULL, current_fingerprint TEXT DEFAULT '',
+            status TEXT DEFAULT 'SEEN', notes TEXT DEFAULT '')""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS network_fingerprint_history(
+            fingerprint TEXT PRIMARY KEY, network_id TEXT NOT NULL,
+            first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+            network TEXT DEFAULT '', gateway TEXT DEFAULT '', gateway_mac TEXT DEFAULT '',
+            dns_servers TEXT DEFAULT '', ssid TEXT DEFAULT '', bssid TEXT DEFAULT '',
+            interface_name TEXT DEFAULT '', interface_guid TEXT DEFAULT '',
+            confidence INTEGER DEFAULT 0, fingerprint_raw TEXT DEFAULT '',
+            FOREIGN KEY(network_id) REFERENCES network_workspaces(network_id))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS network_interface_observations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, network_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL, interface_index INTEGER DEFAULT 0,
+            interface_name TEXT DEFAULT '', interface_guid TEXT DEFAULT '',
+            interface_description TEXT DEFAULT '', interface_type TEXT DEFAULT 'OTHER',
+            status TEXT DEFAULT '', ip TEXT DEFAULT '', prefix INTEGER,
+            network TEXT DEFAULT '', gateway TEXT DEFAULT '', gateway_mac TEXT DEFAULT '',
+            dns_servers TEXT DEFAULT '', dhcp TEXT DEFAULT '', ssid TEXT DEFAULT '',
+            bssid TEXT DEFAULT '', route_metric INTEGER DEFAULT 0,
+            adapter_mac TEXT DEFAULT '', is_primary INTEGER DEFAULT 0,
+            FOREIGN KEY(network_id) REFERENCES network_workspaces(network_id))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS network_device_sightings(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, network_id TEXT NOT NULL,
+            fingerprint TEXT DEFAULT '', ip TEXT NOT NULL, device_id TEXT DEFAULT '',
+            mac TEXT DEFAULT '', hostname TEXT DEFAULT '', first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL, status TEXT DEFAULT 'SEEN',
+            source TEXT DEFAULT 'inventory',
+            FOREIGN KEY(network_id) REFERENCES network_workspaces(network_id))""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nwh_last_seen ON network_workspaces(last_seen)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nfh_network ON network_fingerprint_history(network_id,last_seen)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nio_network_time ON network_interface_observations(network_id,timestamp DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nds_network_ip ON network_device_sightings(network_id,ip,last_seen DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nds_device ON network_device_sightings(device_id,last_seen DESC)")
 
         # 9.0.0 additive intelligence tables. Existing records are untouched.
         conn.execute("""CREATE TABLE IF NOT EXISTS ipv6_observations(
@@ -1171,38 +1213,37 @@ def refresh_network_context():
              "", detected.get("_classification", {}).get("dhcp", Conf.MISSING),
              detected.get("ssid", ""), detected.get("bssid", ""),
              detected.get("fingerprint_raw", "")))
-        # Upsert profile — never overwrites approval
-        conn.execute("""
-            INSERT INTO network_profiles(network, first_seen, last_seen,
-                interface, gateway, ssid, approved, fingerprint, gateway_mac,
-                adapter_mac, dns_servers, bssid, confidence)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(network) DO UPDATE SET
-                last_seen=excluded.last_seen,
-                interface=excluded.interface,
-                gateway=excluded.gateway,
-                ssid=excluded.ssid,
-                fingerprint=excluded.fingerprint,
-                gateway_mac=excluded.gateway_mac,
-                adapter_mac=excluded.adapter_mac,
-                dns_servers=excluded.dns_servers,
-                bssid=excluded.bssid,
-                confidence=excluded.confidence
-        """, (detected.get("network", ""), now_text(), now_text(),
-              detected.get("interface", ""), detected.get("gateway", ""),
-              detected.get("ssid", ""), detected.get("fingerprint", ""),
-              detected.get("gateway_mac", ""), detected.get("adapter_mac", ""),
-              detected.get("dns_servers", ""), detected.get("bssid", ""),
-              int(detected.get("confidence", 0))))
+        # Legacy subnet-keyed row retained for compatibility. Approval is reset
+        # whenever its fingerprint changes, so same-CIDR networks cannot inherit it.
+        if detected.get("fingerprint"):
+            upsert_legacy_network_profile(conn, detected, now_text())
+
+        # Store every independently fingerprinted interface as its own workspace.
+        workspace_id = ""
+        for iface in detected.get("interfaces", []):
+            wid = ensure_workspace(conn, iface, now_text())
+            if wid:
+                record_interface_observation(
+                    conn, wid, iface, now_text(),
+                    is_primary=bool(iface.get("is_primary")))
+            if iface.get("is_primary"):
+                workspace_id = wid
+        if not workspace_id and detected.get("fingerprint"):
+            workspace_id = ensure_workspace(conn, detected, now_text())
+            if workspace_id:
+                record_interface_observation(conn, workspace_id, detected, now_text(), True)
         rows = conn.execute(
             "SELECT network, approved, last_seen, last_authorized, fingerprint "
             "FROM network_profiles WHERE fingerprint=?",
             (detected.get("fingerprint", ""),)).fetchall()
-        return [{"id": r[0], "approved": bool(r[1]),
-                 "last_seen": r[2], "last_authorized": r[3],
-                 "fingerprint": r[4]} for r in rows]
+        return ([
+            {"id": r[0], "approved": bool(r[1]), "last_seen": r[2],
+             "last_authorized": r[3], "fingerprint": r[4]} for r in rows
+        ], workspace_id)
 
-    profiles = DB_MANAGER.write(_persist) if detected.get("fingerprint") else []
+    persisted, workspace_id = DB_MANAGER.write(_persist) if detected.get("fingerprint") else ([], "")
+    profiles = persisted
+    detected["network_id"] = workspace_id
     authorised, decision, reasons, pid = _authz_decision(detected, profiles)
 
     with NET_LOCK:
