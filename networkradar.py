@@ -697,6 +697,12 @@ def initialize_database():
             network_type TEXT DEFAULT 'OTHER', created_at TEXT NOT NULL,
             last_seen TEXT NOT NULL, current_fingerprint TEXT DEFAULT '',
             status TEXT DEFAULT 'SEEN', notes TEXT DEFAULT '')""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS network_workspace_authorizations(
+            network_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+            approved INTEGER DEFAULT 0, last_authorized TEXT DEFAULT '',
+            approved_by TEXT DEFAULT '', updated_at TEXT NOT NULL,
+            PRIMARY KEY(network_id,fingerprint),
+            FOREIGN KEY(network_id) REFERENCES network_workspaces(network_id))""")
         conn.execute("""CREATE TABLE IF NOT EXISTS network_fingerprint_history(
             fingerprint TEXT PRIMARY KEY, network_id TEXT NOT NULL,
             first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
@@ -725,6 +731,7 @@ def initialize_database():
             FOREIGN KEY(network_id) REFERENCES network_workspaces(network_id))""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nwh_last_seen ON network_workspaces(last_seen)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nfh_network ON network_fingerprint_history(network_id,last_seen)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nwa_fingerprint ON network_workspace_authorizations(fingerprint,approved,last_authorized)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nio_network_time ON network_interface_observations(network_id,timestamp DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nds_network_ip ON network_device_sightings(network_id,ip,last_seen DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nds_device ON network_device_sightings(device_id,last_seen DESC)")
@@ -1257,9 +1264,9 @@ def refresh_network_context():
             if workspace_id:
                 record_interface_observation(conn, workspace_id, detected, now_text(), True)
         rows = conn.execute(
-            "SELECT network, approved, last_seen, last_authorized, fingerprint "
-            "FROM network_profiles WHERE fingerprint=?",
-            (detected.get("fingerprint", ""),)).fetchall()
+            "SELECT network_id,approved,updated_at,last_authorized,fingerprint "
+            "FROM network_workspace_authorizations WHERE network_id=? AND fingerprint=?",
+            (workspace_id, detected.get("fingerprint", ""))).fetchall()
         return ([
             {"id": r[0], "approved": bool(r[1]), "last_seen": r[2],
              "last_authorized": r[3], "fingerprint": r[4]} for r in rows
@@ -1309,6 +1316,7 @@ def authorize_current(actor="local-user"):
         current_context = dict(NET_CTX)
         fp = NET_CTX.get("fingerprint", "")
         network = NET_CTX.get("network", "")
+        network_id = NET_CTX.get("network_id", "")
         conf = int(NET_CTX.get("confidence", 0) or 0)
     if not fp:
         raise RuntimeError("No fingerprint — cannot authorise")
@@ -1323,16 +1331,25 @@ def authorize_current(actor="local-user"):
             f"the minimum {int(MIN_FP_CONFIDENCE*100)}%. "
             "Improve evidence (connect through the gateway, run a fresh scan, "
             "confirm DNS) before approving.")
+    if not network_id:
+        raise RuntimeError("No saved network workspace is associated with this fingerprint. Refresh network detection and try again.")
     def _w(conn):
-        cur = conn.execute("UPDATE network_profiles SET approved=1, last_seen=?, "
-                           "last_authorized=? WHERE fingerprint=?",
-                           (now_text(), now_text(), fp))
+        ts = now_text()
+        cur = conn.execute(
+            "UPDATE network_workspace_authorizations SET approved=1,last_authorized=?,"
+            "approved_by=?,updated_at=? WHERE network_id=? AND fingerprint=?",
+            (ts, actor, ts, network_id, fp))
         if cur.rowcount < 1:
-            raise RuntimeError("The current network profile no longer exists. Refresh network detection and try again.")
+            raise RuntimeError("The current workspace authorisation record no longer exists. Refresh network detection and try again.")
+        # Keep the legacy profile flag aligned for older dashboard/API consumers.
+        conn.execute(
+            "UPDATE network_profiles SET approved=1,last_seen=?,last_authorized=? "
+            "WHERE fingerprint=?",
+            (ts, ts, fp))
         conn.execute(
             "INSERT INTO network_approval_history(timestamp, fingerprint, "
             "network, action, actor, reason) VALUES (?, ?, ?, 'APPROVED', ?, ?)",
-            (now_text(), fp, network, actor, f"fp_confidence={conf}%"))
+            (ts, fp, network, actor, f"fp_confidence={conf}%; network_id={network_id}"))
     DB_MANAGER.write(_w)
     with NET_LOCK:
         NET_CTX["authorized"] = True
