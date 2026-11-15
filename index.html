@@ -55,10 +55,10 @@
 <h2 class="m-0">DEVICE INVENTORY</h2>
 <div class="button-row">
 <input id="deviceSearch" oninput="filterDevices()" placeholder="Search IP, name, MAC..." class="min-w-240">
-<select id="deviceFilter" onchange="filterDevices()"><option value="ALL">All</option><option value="ONLINE">Online</option><option value="OFFLINE">Offline</option><option value="TRUSTED">Trusted</option></select>
+<select id="deviceFilter" onchange="filterDevices()"><option value="ALL">All</option><option value="ONLINE">Online</option><option value="OFFLINE">Offline</option><option value="TRUSTED">Trusted</option><option value="UNKNOWN">Unknown / low evidence</option><option value="HIGH_CONFIDENCE">High confidence</option></select>
 </div></div>
 <div class="muted small-note mb-10">Identity uses multiple evidence sources. NIC manufacturer ≠ device manufacturer. Confidence ≠ certainty.</div>
-<div class="scroll"><table><thead><tr><th>IP</th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>ID</th><th>RISK</th><th>STATUS</th></tr></thead><tbody id="deviceRows"><tr><td colspan="7">Loading...</td></tr></tbody></table></div>
+<div class="scroll"><table><thead><tr><th>IP</th><th>NAME</th><th>TYPE</th><th>MODEL</th><th>NIC / VENDOR</th><th>ID</th><th>RISK</th><th>STATUS</th></tr></thead><tbody id="deviceRows"><tr><td colspan="8">Loading...</td></tr></tbody></table></div>
 </section>
 <section id="identity" class="section card"><h2>RADAR IDENTITY INTELLIGENCE</h2>
 <div class="grid mt-12"><div class="card"><div class="label">Devices with evidence</div><div class="value" id="idDevices">—</div></div><div class="card"><div class="label">Evidence records</div><div class="value" id="idEvidence">—</div></div><div class="card"><div class="label">IEEE OUI entries</div><div class="value" id="ouiEntries">—</div></div><div class="card"><div class="label">Last identity run</div><div class="value text-14" id="idLastRun">—</div></div></div>
