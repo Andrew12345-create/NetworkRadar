@@ -9,7 +9,7 @@
 - Added single-use token enrolment using the existing 15-minute enrolment-token flow.
 - Added signed inventory reports using the existing per-agent HMAC protocol, timestamp validation and replay-resistant nonce handling.
 - Agent credentials are stored using Windows DPAPI for the current Windows user; the enrolment token is prompted for and is not persisted.
-- Added per-agent capability allowlisting. The supplied client advertises only `inventory`; the server blocks unsupported command queueing and filters unsupported commands before delivery.
+- Added per-agent capability allowlisting. The supplied client advertises only `inventory-report`; the server blocks unsupported command queueing and filters unsupported commands before delivery.
 - Linked the latest non-revoked endpoint inventory to the device dossier by observed source IP, with hostname as a secondary association clue.
 - Added a hardware dossier section that distinguishes authenticated endpoint-reported inventory from network-derived guesses.
 - Added protocol, URL-validation, certificate-pin, HMAC and capability-boundary regression tests.
