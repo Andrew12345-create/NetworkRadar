@@ -193,6 +193,7 @@ from networkradar_modules.identity.fusion import score_evidence as _modular_scor
 from networkradar_modules.identity.dhcp import analyse_dhcp_identity as _analyse_dhcp_identity
 from networkradar_modules.identity.oui import parse_ieee_registry, lookup_ieee_assignment
 from networkradar_modules.identity.recognition import recognition_family_compatible
+from networkradar_modules.identity.quality import assess_identity_quality
 from networkradar_modules.identity.fingerprints import (
     derive_identity as _derive_identity_core,
     dhcp_fingerprint as _dhcp_fingerprint_core,
@@ -1859,6 +1860,7 @@ def advanced_device_recognition(device):
                         "Open ports alone do not establish device identity.",
                         "Exact hardware model is shown only when explicitly reported by a device or service."]
     }
+    result["intelligence_quality"] = assess_identity_quality(device, facts=facts, recognition=result)
     device["recognition"] = result
     if confidence >= 55 and not conflict:
         device["device_type"] = category
