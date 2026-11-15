@@ -42,6 +42,10 @@ def parse_netsh_wlan_interfaces(output):
             current["bssid"] = ""
         elif not _valid_anchor_mac(current.get("bssid")):
             current["bssid"] = ""
+        else:
+            # Canonicalise case and separators so the same AP does not create
+            # a different network fingerprint across output variations.
+            current["bssid"] = str(current["bssid"]).strip().upper().replace("-", ":")
         rows.append(current.copy())
 
     for raw in str(output or "").splitlines():
