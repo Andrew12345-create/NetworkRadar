@@ -101,7 +101,7 @@ On startup, the application creates its local `data/` and `database/` directorie
 
 - Back up your own `data/` and `database/` folders before upgrading.
 - When updating application code, retain your existing local database and data folders.
-- Older approved profiles without a valid `last_authorized` timestamp will require a one-time re-approval.
+- After upgrading to 12.2.0, re-authorise each network you intend to scan. Workspace-specific approvals start unapproved because legacy subnet-keyed approvals cannot be safely assigned to individual networks.
 - Do not commit scan output, packet captures, database files, SSH known-host records, agent secrets, certificates or private keys.
 
 This repository does **not** ship a live SQLite database.
