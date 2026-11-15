@@ -6416,6 +6416,15 @@ class Handler(BaseHTTPRequestHandler):
             page = (ROOT / "index.html").read_text(encoding="utf-8").replace("{APP_VERSION}", APP_VERSION)
             b = page.encode("utf-8")
             return self._send_bytes(b, 200, "text/html; charset=utf-8")
+        if p.path == "/api/firewall":
+            try:
+                from networkradar_modules.security.firewall import get_firewall_snapshot
+                return self.send_json(get_firewall_snapshot())
+            except Exception as exc:
+                return self.send_json({"supported": True, "status": "DEGRADED",
+                    "default_device_policy": "ALLOW", "automatic_blocking": False,
+                    "profiles": [], "rule_counts": {},
+                    "message": _clean(exc, 500)}, 200)
         try:
             if p.path == "/api/phantom-access/devices":
                 return self.send_json(phantom_access_inventory())
