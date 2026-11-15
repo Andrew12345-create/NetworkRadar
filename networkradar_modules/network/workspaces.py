@@ -5,6 +5,7 @@ linked to a workspace; IP subnets are deliberately not used as primary keys.
 """
 from __future__ import annotations
 import uuid
+import re
 
 def classify_interface_type(name="", description="", media_type=""):
     text = " ".join(str(x or "") for x in (name, description, media_type)).lower()
@@ -18,25 +19,44 @@ def classify_interface_type(name="", description="", media_type=""):
         return "ETHERNET"
     return "OTHER"
 
+def _valid_anchor_mac(value):
+    """Accept only syntactically valid, unicast, non-zero MAC addresses."""
+    clean = str(value or "").strip().upper().replace("-", ":")
+    if not re.fullmatch(r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}", clean):
+        return False
+    first_octet = int(clean[:2], 16)
+    return not (first_octet & 1) and clean not in {
+        "00:00:00:00:00:00", "FF:FF:FF:FF:FF:FF"
+    }
+
+
 def parse_netsh_wlan_interfaces(output):
-    """Parse netsh WLAN output into interface-specific SSID/BSSID rows."""
+    """Parse netsh WLAN output, retaining BSSID only for connected interfaces."""
     rows, current = [], None
+
+    def finish():
+        if current is None:
+            return
+        if str(current.get("state", "")).strip().casefold() != "connected":
+            current["ssid"] = ""
+            current["bssid"] = ""
+        elif not _valid_anchor_mac(current.get("bssid")):
+            current["bssid"] = ""
+        rows.append(current.copy())
+
     for raw in str(output or "").splitlines():
         line = raw.strip()
         if ":" not in line:
             continue
         key, value = line.split(":", 1)
-        key, value = key.strip().lower(), value.strip()
+        key, value = key.strip().casefold(), value.strip()
         if key == "name":
-            if current:
-                rows.append(current)
-            current = {"name": value, "ssid": "", "bssid": ""}
-        elif current is not None and key == "ssid" and not current["ssid"]:
-            current["ssid"] = value
-        elif current is not None and key == "bssid" and not current["bssid"]:
-            current["bssid"] = value
-    if current:
-        rows.append(current)
+            finish()
+            current = {"name": value, "ssid": "", "bssid": "", "state": ""}
+        elif current is not None and key in {"ssid", "bssid", "state"}:
+            if not current.get(key):
+                current[key] = value
+    finish()
     return rows
 
 def ensure_workspace(conn, detected, timestamp):
@@ -125,7 +145,7 @@ def upsert_legacy_network_profile(conn, detected, timestamp):
     )
 
 def has_strong_network_anchor(detected):
-    """Require a gateway MAC or BSSID before a fingerprint can authorise active discovery."""
+    """Require a valid unicast gateway MAC or connected-interface BSSID."""
     import json
     raw = detected.get("fingerprint_raw") or {}
     if isinstance(raw, str):
@@ -135,4 +155,5 @@ def has_strong_network_anchor(detected):
             return False
     if not isinstance(raw, dict):
         return False
-    return bool(raw.get("gateway_mac") or raw.get("bssid"))
+    return (_valid_anchor_mac(raw.get("gateway_mac"))
+            or _valid_anchor_mac(raw.get("bssid")))
