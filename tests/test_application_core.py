@@ -296,6 +296,10 @@ class GatewayNeighbourRefreshTests(unittest.TestCase):
                          ["ping", "-n", "1", "-w", "900", "192.168.1.1"])
         self.assertIn("-InterfaceIndex 7", ps.call_args_list[0].args[0])
         self.assertIn("-InterfaceIndex 7", ps.call_args_list[1].args[0])
+        # Get-NetNeighbor does not support -IPAddress; exact IP matching
+        # is performed against the selected interface rows in Python.
+        self.assertNotIn("-IPAddress", ps.call_args_list[0].args[0])
+        self.assertNotIn("-IPAddress", ps.call_args_list[1].args[0])
 
     @patch.object(app.subprocess, "run")
     @patch.object(app, "_ps")
