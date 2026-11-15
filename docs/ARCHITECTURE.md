@@ -102,6 +102,8 @@ Network detection now gathers each active IPv4 adapter independently. Route metr
 
 A fingerprint is a snapshot key, not a guaranteed permanent identity. Exact fingerprints reuse a workspace. A changed fingerprint currently creates a separate workspace pending future correlation or explicit merge. This avoids silently joining two networks merely because they share a subnet or SSID.
 
+Active discovery now also requires a strong fingerprint anchor: a gateway MAC or interface-specific BSSID. Subnet, gateway IP, DNS, DHCP and SSID alone cannot authorise active discovery, even if their combined weight passes the older numeric threshold.
+
 The legacy network_profiles table remains subnet-keyed for compatibility. Its upsert now resets approved and last_authorized whenever the fingerprint changes. This is fail-closed and prevents approval transfer between different networks that reuse the same CIDR. The dashboard workspace selector is a historical read-only browser; it does not change the active scan target or authorisation context.
 
 Legacy devices remains IP-keyed, and many historical event/telemetry queries are not yet workspace-scoped. New sightings are recorded separately to provide a safe foundation for the later full data-scope migration. Do not interpret this milestone as complete multi-network concurrent scanning.
