@@ -378,5 +378,29 @@ class NetworkFingerprintDiagnosticsTests(unittest.TestCase):
             app.NET_CTX.update(original)
 
 
+class PowerShellDiagnosticTests(unittest.TestCase):
+    @patch.object(app.subprocess, "run")
+    def test_empty_query_result_is_reported(self, run):
+        run.return_value.returncode = 0
+        run.return_value.stdout = ""
+        run.return_value.stderr = ""
+        app._PS_DIAGNOSTICS.records = []
+        self.assertEqual(app._ps("Get-NetAdapter", label="Get-NetAdapter"), [])
+        self.assertEqual(app._PS_DIAGNOSTICS.records[0]["state"], "EMPTY")
+        self.assertEqual(app._PS_DIAGNOSTICS.records[0]["operation"], "Get-NetAdapter")
+
+    @patch.object(app.subprocess, "run")
+    def test_powershell_failure_is_reported_without_raw_command(self, run):
+        run.return_value.returncode = 1
+        run.return_value.stdout = ""
+        run.return_value.stderr = "Access is denied."
+        app._PS_DIAGNOSTICS.records = []
+        self.assertEqual(app._ps("Get-NetAdapter", label="Get-NetAdapter"), [])
+        record = app._PS_DIAGNOSTICS.records[0]
+        self.assertEqual(record["state"], "ERROR")
+        self.assertEqual(record["detail"], "Access is denied.")
+        self.assertNotIn("Get-NetAdapter", record["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()
