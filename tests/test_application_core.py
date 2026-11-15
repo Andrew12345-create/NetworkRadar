@@ -78,6 +78,78 @@ class EndpointManagementAuthorizationTests(unittest.TestCase):
             app.is_authorized = original
 
 
+class EndpointAgentCapabilityTests(unittest.TestCase):
+    def test_inventory_only_client_cannot_receive_remote_control_capabilities(self):
+        self.assertEqual(app._normalise_agent_capabilities(["inventory-report"]), ["inventory-report"])
+        self.assertFalse(app._agent_supports_action(["inventory-report"], "list_processes"))
+        self.assertFalse(app._agent_supports_action(["inventory-report"], "restart_computer"))
+        self.assertFalse(app._agent_supports_action(["inventory-report"], "refresh_inventory"))
+
+    def test_requested_capabilities_are_allowlisted(self):
+        self.assertEqual(
+            app._normalise_agent_capabilities(["inventory-report", "power-control", "unknown"]),
+            ["inventory-report", "power-control"],
+        )
+        self.assertEqual(app._normalise_agent_capabilities([]), ["inventory-report"])
+
+    def test_legacy_agents_without_capability_field_keep_compatibility(self):
+        capabilities = app._normalise_agent_capabilities(None)
+        self.assertIn("inventory", capabilities)
+        self.assertIn("processes", capabilities)
+        self.assertIn("power-control", capabilities)
+        self.assertTrue(app._agent_supports_action(capabilities, "restart_computer"))
+
+    def test_unsupported_or_unknown_actions_fail_closed(self):
+        self.assertFalse(app._agent_supports_action(["inventory", "power-control"], "arbitrary_shell"))
+        self.assertFalse(app._agent_supports_action(["inventory"], "restart_service"))
+
+
+class EndpointInventoryAssociationTests(unittest.TestCase):
+    def test_exact_observed_ip_can_associate_inventory(self):
+        self.assertEqual(
+            app._endpoint_inventory_association_basis(
+                "192.168.1.20", "00:11:22:33:44:55", "192.168.1.20", {}
+            ),
+            "OBSERVED_SOURCE_IP",
+        )
+
+    def test_matching_adapter_mac_can_follow_a_dhcp_ip_change(self):
+        inventory = {"network_adapters": [{"mac": "AA-BB-CC-DD-EE-FF"}]}
+        self.assertEqual(
+            app._endpoint_inventory_association_basis(
+                "192.168.1.20", "aa:bb:cc:dd:ee:ff", "192.168.1.99", inventory
+            ),
+            "MATCHED_ADAPTER_MAC",
+        )
+
+    def test_hostname_is_never_used_as_an_association_key(self):
+        self.assertEqual(
+            app._endpoint_inventory_association_basis(
+                "192.168.1.20", "00:11:22:33:44:55", "192.168.1.99",
+                {"hostname": "same-name", "network_adapters": []},
+            ),
+            "",
+        )
+
+    def test_conflicting_adapter_mac_blocks_ip_only_join(self):
+        inventory = {"network_adapters": [{"mac": "AA:BB:CC:DD:EE:FF"}]}
+        self.assertEqual(
+            app._endpoint_inventory_association_basis(
+                "192.168.1.20", "00:11:22:33:44:55", "192.168.1.20", inventory
+            ),
+            "",
+        )
+
+    def test_ip_match_with_no_adapter_mac_remains_usable(self):
+        self.assertEqual(
+            app._endpoint_inventory_association_basis(
+                "192.168.1.20", "00:11:22:33:44:55", "192.168.1.20",
+                {"network_adapters": []},
+            ),
+            "OBSERVED_SOURCE_IP",
+        )
+
+
 class TSharkInterfaceSelectionTests(unittest.TestCase):
     def test_active_adapter_guid_beats_first_wifi_interface(self):
         interfaces = [

@@ -1,4 +1,4 @@
-# NetworkRadar 12.2.0
+# NetworkRadar 12.3.0
 
 NetworkRadar is a Windows-focused, local-first network discovery and device-intelligence application. It combines authorised network discovery, device inventory, DNS/DHCP/ARP observations, identity evidence, historical tracking, exposure observations, investigations and a localhost dashboard. Optional management features include SSH terminal access and Windows/endpoint-management integrations.
 
@@ -95,6 +95,18 @@ NetworkRadar does not silently change ports. To explicitly permit a search of th
 
 The primary dashboard is intended to bind to loopback (`127.0.0.1`). Do not expose it through port forwarding or a reverse proxy without a separate security review.
 
+## Authenticated endpoint inventory agent (12.3.0)
+
+NetworkRadar now includes an optional Windows endpoint inventory client in `agent/networkradar_agent.py`. It complements network-based fingerprinting with device-reported manufacturer, exact system model/family, CPU, RAM, BIOS version, disks, OS build and network-adapter details. This is the recommended route to exact hardware identification when the device owner can explicitly enrol the endpoint.
+
+The client is inventory-only. It does not execute remote commands, install itself as a service, enumerate user files, collect browser history or capture packets. BIOS and disk serial numbers are omitted unless the operator explicitly supplies `--include-serial`.
+
+The agent hub remains disabled by default. To use the client, configure `NETWORKRADAR_AGENT_ENABLED=1`, a TLS certificate/key, an explicit LAN bind address and a firewall rule limited to the endpoints you administer. Generate a one-time enrolment token in the dashboard, calculate the SHA-256 fingerprint of the hub's DER leaf certificate, then enrol the target using the instructions in [agent deployment guide](agent/README.md). The endpoint validates the pinned certificate before sending requests, authenticates inventory reports with its per-agent HMAC key, and stores that key with Windows DPAPI for the current Windows user.
+
+New inventory reports are associated with the network device dossier using the observed source IP, with hostname as a secondary clue. Device details show endpoint-reported hardware separately from network-derived guesses. The endpoint agent advertises only the `inventory-report` capability; the server rejects commands that the enrolled agent has not advertised. The agent does not poll the remote command queue.
+
+The client reports immediately and then every five minutes by default. It requires Windows 10/11 and Python 3.10+. It does not automatically install or start itself; run it manually or configure a reviewed Task Scheduler job under the intended Windows account.
+
 ## Data and database
 
 On startup, the application creates its local `data/` and `database/` directories when needed. These directories are intentionally excluded from Git because they contain local network inventory, observations, captures, credentials/trust material and runtime database files.
@@ -114,7 +126,7 @@ From the repository root:
 python -m unittest discover -s tests -v
 ```
 
-The suite includes isolated tests for startup, SQLite database management, identity, diagnostics, Nmap XML parsing, ARP parsing, adapter selection, device-family classification, identity evidence coverage, mDNS/DNS-SD packet parsing and SSDP URL validation, plus application regression tests for identity scoring and network-approval freshness. UPnP descriptions are capped at 256 KiB, DTD/entity declarations are rejected, and description URLs/redirects are restricted to the responding private IP; advertised model strings remain unverified observations. IEEE MAC identity uses the MA-L, MA-M and MA-S public listings with longest-prefix matching; the assignee is not treated as definitive device-manufacturer evidence. Device-category rules also enforce source-family compatibility so a NIC registrant cannot, by itself, classify a router, phone or computer. Actual Windows discovery, packet capture, browser and remote-management behaviour still requires testing on a real Windows host.
+The suite includes isolated tests for startup, SQLite database management, identity, diagnostics, Nmap XML parsing, ARP parsing, adapter selection, device-family classification, identity evidence coverage, mDNS/DNS-SD packet parsing, SSDP URL validation, endpoint-agent TLS pin and HMAC protocol handling, and per-agent capability boundaries, plus application regression tests for identity scoring and network-approval freshness. UPnP descriptions are capped at 256 KiB, DTD/entity declarations are rejected, and description URLs/redirects are restricted to the responding private IP; advertised model strings remain unverified observations. IEEE MAC identity uses the MA-L, MA-M and MA-S public listings with longest-prefix matching; the assignee is not treated as definitive device-manufacturer evidence. Device-category rules also enforce source-family compatibility so a NIC registrant cannot, by itself, classify a router, phone or computer. Actual Windows discovery, packet capture, browser and remote-management behaviour still requires testing on a real Windows host.
 
 ## Security and authorised use
 
@@ -123,7 +135,7 @@ The suite includes isolated tests for startup, SQLite database management, ident
 - Open ports and service banners are observations, not proof of vulnerabilities or compromise.
 - SSH host keys must be reviewed and explicitly trusted before authentication.
 - Remote actions can affect availability. Review targets and confirm disruptive actions carefully.
-- The optional endpoint-agent hub is disabled by default and requires TLS configuration. This repository snapshot does not yet provide a separately packaged endpoint-agent client installer; do not treat the hub alone as a complete deployable agent solution.
+- The optional endpoint-agent hub is disabled by default and requires TLS configuration, certificate pinning, verified certificate-pin rotation, a one-time enrolment token and a firewall rule restricted to authorised endpoint devices. The supplied client is inventory-only and does not implement remote command execution.
 
 ## Project structure
 
@@ -131,7 +143,7 @@ The suite includes isolated tests for startup, SQLite database management, ident
 - `index.html` — dashboard markup and page structure. The page uses external CSS/JS assets and contains no inline style attributes.
 - `networkradar.css` — standalone responsive dashboard stylesheet.
 - `dashboard.js` — standalone dashboard client and interactions.
-- `networkradar_modules/` — reusable identity, startup, database, diagnostics and discovery components. Identity quality reporting provides domain-level evidence coverage for hardware, OS, network identity, services, classification and evidence diversity; coverage is explicitly not a probability of correct identification. Discovery modules cover Nmap XML/scanning, ARP parsing, adapter selection, evidence-based device-family classification, reverse-DNS/NetBIOS probes, SSDP/UPnP discovery with bounded device-description parsing (manufacturer, model, UDN and embedded-device records), and bounded active mDNS/DNS-SD browsing.
+- `agent/` — opt-in Windows endpoint inventory client and deployment instructions.\n- `networkradar_modules/` — reusable identity, startup, database, diagnostics and discovery components. Identity quality reporting provides domain-level evidence coverage for hardware, OS, network identity, services, classification and evidence diversity; coverage is explicitly not a probability of correct identification. Discovery modules cover Nmap XML/scanning, ARP parsing, adapter selection, evidence-based device-family classification, reverse-DNS/NetBIOS probes, SSDP/UPnP discovery with bounded device-description parsing (manufacturer, model, UDN and embedded-device records), and bounded active mDNS/DNS-SD browsing.
 - `migrations/` — additive database schema migrations.
 - `tests/` — unit and application regression tests.
 - `docs/` — architecture and audit notes.

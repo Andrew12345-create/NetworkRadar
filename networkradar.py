@@ -5203,6 +5203,63 @@ AGENT_ACTIONS = {
     "shutdown_computer": {"confirmation": True, "description": "Shut down the computer after a 60-second delay"},
     "restart_service": {"confirmation": True, "description": "Restart one explicitly named non-critical Windows service"},
 }
+
+_AGENT_CAPABILITIES = frozenset({"inventory", "inventory-report", "processes", "services", "lock", "power-control"})
+_AGENT_ACTION_CAPABILITY = {
+    "refresh_inventory": "inventory",
+    "list_processes": "processes",
+    "list_services": "services",
+    "lock_workstation": "lock",
+    "restart_computer": "power-control",
+    "shutdown_computer": "power-control",
+    "restart_service": "services",
+}
+
+
+def _normalise_agent_capabilities(raw):
+    """Constrain an agent's advertised capabilities to known server features.
+
+    Older agents that omit the field retain the historical capability set.
+    New clients must explicitly request only the capabilities they implement.
+    """
+    if raw is None:
+        return sorted(_AGENT_CAPABILITIES)
+    if not isinstance(raw, list):
+        return ["inventory-report"]
+    selected = {
+        str(item).strip().lower()
+        for item in raw
+        if isinstance(item, str) and str(item).strip().lower() in _AGENT_CAPABILITIES
+    }
+    return sorted(selected or {"inventory-report"})
+
+
+def _agent_supports_action(capabilities, action):
+    required = _AGENT_ACTION_CAPABILITY.get(str(action or "").strip().lower())
+    return bool(required and required in set(capabilities or []))
+
+def _endpoint_inventory_association_basis(device_ip, device_mac, agent_last_ip, inventory):
+    """Join endpoint inventory only by observed IP or an exact adapter MAC.
+
+    Hostnames are intentionally excluded because they are client-supplied,
+    frequently duplicated, and may change independently of the hardware.
+    """
+    normalised_device_mac = _normalise_mac(device_mac or "")
+    adapters = inventory.get("network_adapters", []) if isinstance(inventory, dict) else []
+    if not isinstance(adapters, list):
+        adapters = []
+    adapter_macs = {
+        _normalise_mac(item.get("mac", ""))
+        for item in adapters if isinstance(item, dict) and item.get("mac")
+    }
+    adapter_macs.discard("")
+    ip_match = str(agent_last_ip or "") == str(device_ip or "")
+    mac_match = bool(normalised_device_mac and normalised_device_mac in adapter_macs)
+    if not ip_match and not mac_match:
+        return ""
+    if ip_match and normalised_device_mac and adapter_macs and not mac_match:
+        return ""
+    return "OBSERVED_SOURCE_IP" if ip_match else "MATCHED_ADAPTER_MAC"
 _AGENT_CRITICAL_SERVICES = {"rpcss", "dcomlaunch", "lsass", "winlogon", "eventlog", "samss", "plugplay", "power", "profsvc", "winmgmt"}
 
 
@@ -5286,7 +5343,7 @@ def _agent_json_body(handler, maximum=65536):
 
 
 class AgentHubHandler(BaseHTTPRequestHandler):
-    server_version = "NetworkRadar-AgentHub/11.0.1"
+    server_version = "NetworkRadar-AgentHub/12.3.0"
     def log_message(self, *args):
         pass
     def _reply(self, obj, status=200):
@@ -5308,11 +5365,12 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                 platform_name=_clean(payload.get("platform","unknown"),80)
                 os_version=_clean(payload.get("os_version",""),160)
                 agent_version=_clean(payload.get("agent_version",""),40)
+                capabilities = _normalise_agent_capabilities(payload.get("capabilities"))
                 def _enrol(conn):
                     row=conn.execute("SELECT expires_at,used_at FROM agent_enrollment_tokens WHERE token_hash=?",(token_hash,)).fetchone()
                     if not row or row[1] or row[0] < now_text(): raise PermissionError("Enrolment token is invalid, expired or already used.")
                     conn.execute("UPDATE agent_enrollment_tokens SET used_at=? WHERE token_hash=?",(now_text(),token_hash))
-                    conn.execute("INSERT INTO remote_agents(agent_id,hostname,platform,os_version,agent_version,secret_hash,status,enrolled_at,last_seen,last_ip,capabilities_json) VALUES(?,?,?,?,?,?,'ONLINE',?,?,?,?)",(agent_id,hostname,platform_name,os_version,agent_version,secret_hash,now_text(),now_text(),self.client_address[0],json.dumps(["inventory","processes","services","lock","power-control"])) )
+                    conn.execute("INSERT INTO remote_agents(agent_id,hostname,platform,os_version,agent_version,secret_hash,status,enrolled_at,last_seen,last_ip,capabilities_json) VALUES(?,?,?,?,?,?,'ONLINE',?,?,?,?)",(agent_id,hostname,platform_name,os_version,agent_version,secret_hash,now_text(),now_text(),self.client_address[0],json.dumps(capabilities)) )
                     conn.execute("INSERT INTO agent_audit_events(timestamp,agent_id,actor,action,outcome,details) VALUES(?,?,?,?,?,?)",(now_text(),agent_id,"endpoint","ENROL","SUCCESS",hostname))
                 DB_MANAGER.write(_enrol)
                 # Give this endpoint only its own derived HMAC key. Never disclose
@@ -5325,11 +5383,26 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                 agent_id=_verify_agent_request(self,raw)
                 inventory=payload.get("inventory",{})
                 if not isinstance(inventory,dict): return self._reply({"error":"inventory must be an object"},400)
-                safe=json.dumps(inventory,ensure_ascii=False,default=str)[:50000]
+                safe=json.dumps(inventory,ensure_ascii=False,default=str)
+                if len(safe.encode("utf-8")) > 50000:
+                    return self._reply({"error":"Inventory report exceeds the 50 KiB storage limit."},413)
                 def _report(conn):
+                    row=conn.execute("SELECT status,capabilities_json FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
+                    if not row or row[0]=="REVOKED":
+                        return "MISSING"
+                    try:
+                        capabilities=json.loads(row[1] or "[]")
+                    except (TypeError, ValueError):
+                        capabilities=[]
+                    if not ({"inventory-report", "inventory"} & set(capabilities)):
+                        return "UNSUPPORTED"
                     cur=conn.execute("UPDATE remote_agents SET status='ONLINE',last_seen=?,last_ip=?,inventory_json=? WHERE agent_id=? AND status!='REVOKED'",(now_text(),self.client_address[0],safe,agent_id))
-                    return cur.rowcount
-                if not DB_MANAGER.write(_report): return self._reply({"error":"Agent is revoked or no longer enrolled."},401)
+                    return "UPDATED" if cur.rowcount else "MISSING"
+                report_status=DB_MANAGER.write(_report)
+                if report_status=="UNSUPPORTED":
+                    return self._reply({"error":"Agent does not advertise inventory-report capability."},403)
+                if report_status!="UPDATED":
+                    return self._reply({"error":"Agent is revoked or no longer enrolled."},401)
                 return self._reply({"ok":True,"server_time":int(time.time())})
             if self.path == "/agent/v1/result":
                 agent_id=_verify_agent_request(self,raw)
@@ -5453,9 +5526,23 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                 agent_id=_verify_agent_request(self,b"")
                 def _take(conn):
                     conn.execute("UPDATE agent_commands SET status='EXPIRED' WHERE agent_id=? AND status IN ('QUEUED','DELIVERED') AND expires_at<?",(agent_id,now_text()))
-                    rows=conn.execute("SELECT id,action,args_json FROM agent_commands WHERE agent_id=? AND status='QUEUED' AND expires_at>=? ORDER BY id LIMIT 5",(agent_id,now_text())).fetchall()
-                    for row in rows: conn.execute("UPDATE agent_commands SET status='DELIVERED' WHERE id=? AND status='QUEUED'",(row[0],))
-                    return [{"id":r[0],"action":r[1],"args":json.loads(r[2] or "{}")} for r in rows]
+                    agent=conn.execute("SELECT capabilities_json FROM remote_agents WHERE agent_id=? AND status!='REVOKED'",(agent_id,)).fetchone()
+                    if not agent: return []
+                    try:
+                        capabilities=json.loads(agent[0] or "[]")
+                    except (TypeError, ValueError):
+                        capabilities=[]
+                    rows=conn.execute("SELECT id,action,args_json FROM agent_commands WHERE agent_id=? AND status='QUEUED' AND expires_at>=? ORDER BY id LIMIT 20",(agent_id,now_text())).fetchall()
+                    deliver=[]
+                    for row in rows:
+                        if not _agent_supports_action(capabilities, row[1]):
+                            conn.execute("UPDATE agent_commands SET status='REJECTED' WHERE id=? AND status='QUEUED'",(row[0],))
+                            conn.execute("INSERT INTO agent_audit_events(timestamp,agent_id,actor,action,outcome,details) VALUES(?,?,?,?,?,?)",(now_text(),agent_id,"server",row[1],"REJECTED","Agent capability does not include this action."))
+                            continue
+                        if len(deliver)<5:
+                            conn.execute("UPDATE agent_commands SET status='DELIVERED' WHERE id=? AND status='QUEUED'",(row[0],))
+                            deliver.append({"id":row[0],"action":row[1],"args":json.loads(row[2] or "{}")})
+                    return deliver
                 return self._reply({"commands":DB_MANAGER.write(_take)})
             return self._reply({"error":"Not found"},404)
         except PermissionError as exc: return self._reply({"error":str(exc)},401)
@@ -5537,8 +5624,15 @@ def queue_agent_command(agent_id, action, args=None, actor="local-user", confirm
             raise ValueError("Invalid or protected Windows service name.")
         clean_args={"service_name":name}
     def _w(conn):
-        row=conn.execute("SELECT status FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
+        row=conn.execute("SELECT status,capabilities_json FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
         if not row or row[0]=="REVOKED": raise ValueError("Agent not found or revoked.")
+        try:
+            capabilities=json.loads(row[1] or "[]")
+        except (TypeError, ValueError):
+            capabilities=[]
+        if not _agent_supports_action(capabilities, action):
+            required=_AGENT_ACTION_CAPABILITY.get(action, "unknown")
+            raise ValueError(f"Agent does not advertise the required '{required}' capability.")
         cur=conn.execute("INSERT INTO agent_commands(agent_id,action,args_json,status,created_at,expires_at,approved_by) VALUES(?,?,?,'QUEUED',?,?,?)",(agent_id,action,json.dumps(clean_args),now_text(),(datetime.now()+timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"),_clean(actor,80)))
         conn.execute("INSERT INTO agent_audit_events(timestamp,agent_id,actor,action,outcome,details) VALUES(?,?,?,?,?,?)",(now_text(),agent_id,_clean(actor,80),action,"QUEUED",json.dumps(clean_args)))
         return cur.lastrowid
@@ -5855,7 +5949,7 @@ def phantom_probe_device(ip):
         summary = "No tested native management service is reachable. Device discovery remains available."
     # Presence of an agent takes precedence over inferred agentless capability.
     with DB_MANAGER.read() as conn:
-        agent = conn.execute("SELECT agent_id FROM remote_agents WHERE last_ip=? AND status!='REVOKED' AND last_seen>=? ORDER BY last_seen DESC LIMIT 1", (target, (datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"))).fetchone()
+        agent = conn.execute("SELECT agent_id FROM remote_agents WHERE last_ip=? AND status!='REVOKED' AND last_seen>=? ORDER BY last_seen DESC LIMIT 1", (target, (datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"))).fetchone()
     if agent:
         readiness, score = "AGENT_MANAGED", 100
         summary = "A NetworkRadar agent is enrolled for this endpoint. Agentless capabilities remain separately visible."
@@ -5894,7 +5988,7 @@ def phantom_access_inventory():
             a.last_probe,a.probes_json,a.readiness,a.readiness_score
             FROM devices d LEFT JOIN agentless_device_access a ON a.ip=d.ip
             ORDER BY CASE d.status WHEN 'ONLINE' THEN 0 ELSE 1 END,d.ip""").fetchall()
-        agents = {r[0] for r in conn.execute("SELECT last_ip FROM remote_agents WHERE status!='REVOKED' AND last_ip!='' AND last_seen>=?", ((datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()}
+        agents = {r[0] for r in conn.execute("SELECT last_ip FROM remote_agents WHERE status!='REVOKED' AND last_ip!='' AND last_seen>=?", ((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()}
         recent_reads = {}
         cutoff = (datetime.now()-timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
         for audit in conn.execute("""SELECT timestamp,action,details FROM agent_audit_events
@@ -6187,7 +6281,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(phantom_access_summary())
             with DB_MANAGER.read() as conn:
                 if p.path == "/api/command/agents":
-                    rows=conn.execute("SELECT agent_id,hostname,platform,os_version,agent_version,CASE WHEN status='REVOKED' THEN status WHEN last_seen<? THEN 'OFFLINE' ELSE status END AS display_status,enrolled_at,last_seen,last_ip,inventory_json,capabilities_json,revoked_at FROM remote_agents ORDER BY last_seen DESC",((datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
+                    rows=conn.execute("SELECT agent_id,hostname,platform,os_version,agent_version,CASE WHEN status='REVOKED' THEN status WHEN last_seen<? THEN 'OFFLINE' ELSE status END AS display_status,enrolled_at,last_seen,last_ip,inventory_json,capabilities_json,revoked_at FROM remote_agents ORDER BY last_seen DESC",((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
                     out=[]
                     for r in rows:
                         try: inv=json.loads(r[9] or "{}")
@@ -6196,7 +6290,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(out)
                 if p.path == "/api/command/summary":
                     total=conn.execute("SELECT COUNT(*) FROM remote_agents WHERE status!='REVOKED'").fetchone()[0]
-                    online=conn.execute("SELECT COUNT(*) FROM remote_agents WHERE status!='REVOKED' AND last_seen>=?",((datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchone()[0]
+                    online=conn.execute("SELECT COUNT(*) FROM remote_agents WHERE status!='REVOKED' AND last_seen>=?",((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchone()[0]
                     pending=conn.execute("SELECT COUNT(*) FROM agent_commands WHERE status='QUEUED'").fetchone()[0]
                     hub=start_agent_hub_status()
                     return self.send_json({"managed":total,"online":online,"queued_commands":pending,"hub":hub})
@@ -6579,6 +6673,47 @@ class Handler(BaseHTTPRequestHandler):
                         if rr:
                             risk_expl = rr[0] or ""
                             tr, ir, hr = rr[1] or 0, rr[2] or 0, rr[3] or 0
+                    endpoint_agent = None
+                    agent_rows = _rows_or_empty("""SELECT agent_id,hostname,platform,os_version,
+                        agent_version,CASE WHEN last_seen<? THEN 'OFFLINE' ELSE status END,
+                        last_seen,last_ip,inventory_json,capabilities_json
+                        FROM remote_agents WHERE status!='REVOKED'
+                        ORDER BY last_seen DESC LIMIT 500""",
+                        ((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),))
+                    device_mac = _normalise_mac(d[1] or "")
+                    agent_matches = []
+                    for ar in agent_rows:
+                        try:
+                            agent_inventory = json.loads(ar[8] or "{}")
+                            if not isinstance(agent_inventory, dict):
+                                agent_inventory = {}
+                        except (TypeError, ValueError):
+                            agent_inventory = {}
+                        association_basis = _endpoint_inventory_association_basis(
+                            ip, device_mac, ar[7], agent_inventory
+                        )
+                        if not association_basis:
+                            continue
+                        score = 2 if association_basis == "OBSERVED_SOURCE_IP" else 1
+                        try:
+                            agent_capabilities = json.loads(ar[9] or "[]")
+                            if not isinstance(agent_capabilities, list):
+                                agent_capabilities = []
+                        except (TypeError, ValueError):
+                            agent_capabilities = []
+                        agent_matches.append((score, str(ar[6] or ""), ar,
+                                              agent_inventory, agent_capabilities,
+                                              association_basis))
+                    if agent_matches:
+                        agent_matches.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                        _, _, ar, agent_inventory, agent_capabilities, association_basis = agent_matches[0]
+                        endpoint_agent = {
+                            "agent_id": ar[0], "hostname": ar[1], "platform": ar[2],
+                            "os_version": ar[3], "agent_version": ar[4], "status": ar[5],
+                            "last_seen": ar[6], "last_ip": ar[7],
+                            "capabilities": agent_capabilities, "inventory": agent_inventory,
+                            "association_basis": association_basis,
+                        }
                     return self.send_json({
                         "device": {"ip": d[0], "mac": d[1], "manufacturer": d[2],
                             "hostname": d[3], "first_seen": d[4], "last_seen": d[5],
@@ -6607,6 +6742,7 @@ class Handler(BaseHTTPRequestHandler):
                         "identity_evidence": [{"timestamp": r[0], "source": r[1],
                             "attribute": r[2], "value": r[3], "confidence": r[4],
                             "class": r[5]} for r in identity_rows],
+                        "endpoint_agent": endpoint_agent,
                         "identity_assessments": [{"attribute":r[0],"value":r[1],"confidence":r[2],
                             "status":r[3],"sources":json.loads(r[4] or "[]"),
                             "conflicts":json.loads(r[5] or "[]"),"evidence_count":r[6],

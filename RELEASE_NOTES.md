@@ -1,3 +1,35 @@
+# NetworkRadar 12.3.0 — Authenticated Endpoint Inventory
+
+## Delivered
+
+- Added an opt-in Windows endpoint inventory client at `agent/networkradar_agent.py`.
+- Added read-only CIM collection for manufacturer, exact system model/family, CPU, physical memory, BIOS version, disks, OS version/build/architecture and network adapters.
+- Serial numbers are excluded by default and are collected only when the operator explicitly supplies `--include-serial`.
+- Added HTTPS leaf-certificate SHA-256 pinning. The agent verifies the configured pin before sending the HTTP request, including during enrolment, and supports verified pin rotation after a certificate renewal.
+- Added single-use token enrolment using the existing 15-minute enrolment-token flow.
+- Added signed inventory reports using the existing per-agent HMAC protocol, timestamp validation and replay-resistant nonce handling.
+- Agent credentials are stored using Windows DPAPI for the current Windows user; the enrolment token is prompted for and is not persisted.
+- Added per-agent capability allowlisting. The supplied client advertises only `inventory-report`; the server blocks unsupported command queueing and filters unsupported commands before delivery.
+- Linked the latest non-revoked endpoint inventory to the device dossier by observed source IP, with hostname as a secondary association clue.
+- Added a hardware dossier section that distinguishes authenticated endpoint-reported inventory from network-derived guesses.
+- Added protocol, URL-validation, certificate-pin, HMAC and capability-boundary regression tests.
+- Documented secure LAN deployment, certificate pin generation, enrolment, reporting and serial-number opt-in in `agent/README.md`.
+
+## Security and privacy boundaries
+
+- The endpoint agent is inventory-only. It does not poll the remote command queue, execute remote commands, install a service or modify endpoint settings.
+- The hub remains disabled by default, requires TLS configuration and current network authorisation, and should be bound to a specific LAN address with a firewall allowlist.
+- The endpoint validates a pinned certificate before transmitting data. A changed certificate causes a fail-closed error.
+- Per-agent credentials are DPAPI-protected on the endpoint and HMAC-authenticated on every report.
+- Exact hardware details are device-reported inventory, not proof against a compromised endpoint or malicious firmware.
+- Serial-number collection is explicitly opt-in.
+
+## Validation boundary
+
+Automated CI checks syntax, unit tests, dashboard JavaScript and protocol helpers. A real Windows deployment, TLS certificate pin exercise, endpoint enrolment and hardware-inventory smoke test still need to be performed on the user's authorised LAN before production use.
+
+---
+
 # NetworkRadar 12.2.0 — Multi-Network Intelligence foundation
 
 ## Delivered

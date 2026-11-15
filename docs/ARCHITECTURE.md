@@ -1,4 +1,4 @@
-# NetworkRadar architecture — repository snapshot 12.2.0
+# NetworkRadar architecture — repository snapshot 12.3.0
 
 ## Runtime overview
 
@@ -49,9 +49,22 @@ Malformed timestamps are ignored as evidence. Materially future-dated observatio
 
 The packet-capture interface selector matches the selected Windows adapter by interface GUID, then adapter name/description, rather than blindly selecting the first Wi-Fi device. An explicit TShark interface override remains available. The main dashboard server is configured for loopback. Its request handler validates the Host header and, when present, the Origin header. The optional agent hub is a separate TLS listener, disabled unless explicitly enabled and configured with a certificate and private key. Its enrolment response provides a per-agent derived HMAC key; the server-wide pepper is never sent to endpoints. Enrolment, command polling and command queuing are blocked unless the current network profile is authorised.
 
-The endpoint-agent hub code is present, but this repository snapshot does not include a separately packaged endpoint-agent client/installer. Treat the client/server lifecycle as incomplete until the client is added, its certificate-pinning and request-signing protocol are documented, and the complete enrol/report/command/revocation flow is tested.
+Version 12.3.0 adds a separately packaged, inventory-only Windows endpoint client with certificate pinning, DPAPI-protected credentials, signed inventory reports and revocation support through the existing hub. The supplied client intentionally does not implement remote command execution; legacy server-side command capabilities remain available only to agents that explicitly advertise the required capability. The endpoint client/server lifecycle still requires a real Windows LAN enrolment and revocation smoke test.
 
 Remote SSH and Windows-management functions are high-impact features. Their host validation, credentials, authorisation, confirmation gates, audit events and transport protections require ongoing security review. The localhost dashboard does not provide per-user login/authentication. Any local account or process able to connect to the loopback port may be able to reach its APIs. Treat it as a single-user workstation application, not a multi-user security boundary.
+
+
+## Authenticated endpoint inventory (12.3.0)
+
+The optional `agent/networkradar_agent.py` client provides an endpoint-reported hardware inventory for Windows computers that an administrator explicitly enrols. It is separate from network fingerprint inference. The client collects Windows CIM information (system manufacturer/model/family, CPU, memory, BIOS, disks, OS build and network adapters) and sends it to the existing agent hub.
+
+The agent hub remains disabled by default and requires a configured TLS certificate/private key plus current network authorisation. The endpoint validates a configured SHA-256 pin of the presented DER leaf certificate before sending any HTTP request. Enrolment consumes a single-use, 15-minute token. Subsequent reports are authenticated using the per-agent HMAC key, timestamp and nonce; the server rejects invalid signatures, stale timestamps and replayed nonces. The endpoint stores its configuration encrypted with Windows DPAPI for the current user.
+
+The supplied client advertises only the `inventory-report` capability. It does not poll the command queue and contains no remote command executor. The server stores an allowlisted capability set per agent, checks it before queuing a command, and filters unsupported queued actions before delivery. Legacy clients that omit the capability field retain the historical capability set for compatibility; new clients should always advertise their implemented capabilities.
+
+The device dossier associates a non-revoked agent inventory by the server-observed source IP or a matching endpoint network-adapter MAC; hostname alone is never used as a join key. Endpoint-reported manufacturer/model and hardware details are displayed separately from network-derived identity assessments. They are stronger evidence of exact hardware than MAC OUI or port-based guesses, but remain self-reported by the endpoint and do not prove firmware integrity or resistance to a compromised host. Serial numbers are omitted unless the endpoint operator explicitly enables `--include-serial`.
+
+The client does not install itself as a service or configure persistence. It must be run manually or placed in a separately reviewed Task Scheduler job by the endpoint administrator. The hub should bind to a specific LAN address and be protected by a firewall allowlist; it must not be exposed to the public internet.
 
 ## Data layout
 
