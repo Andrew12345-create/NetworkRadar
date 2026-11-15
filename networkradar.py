@@ -1,6 +1,10 @@
 ﻿"""
-NetworkRadar 12.4.0 — local-first network discovery and device intelligence.
-NetworkRadar 12.4.0 changes:
+NetworkRadar 12.4.1 — local-first network discovery and device intelligence.
+NetworkRadar 12.4.1 changes:
+  - Explains missing fingerprint causes, including manual scope override mode.
+  - Preserves per-query Windows adapter collection diagnostics for troubleshooting.
+  - Removes an accidental startup-time approval reset hard-coded to one subnet.
+  - Keeps manual network overrides explicitly non-authorising.
   - Fixes gateway MAC discovery by removing the unsupported Get-NetNeighbor
     -IPAddress parameter and filtering the selected interface's neighbour rows
     against the exact gateway IP.
@@ -905,9 +909,6 @@ def initialize_database():
 
         conn.execute("UPDATE alerts SET first_seen=timestamp WHERE first_seen='' OR first_seen IS NULL")
         conn.execute("UPDATE alerts SET last_seen=timestamp WHERE last_seen='' OR last_seen IS NULL")
-        conn.execute(
-            "UPDATE network_profiles SET approved=0 WHERE network=?",
-            ("192.168.100.0/24",))
 
     DB_MANAGER.write(_init)
 
@@ -924,22 +925,50 @@ class Conf(str):
 FP_WEIGHTS = {"subnet": 0.30, "gateway": 0.20, "gateway_mac": 0.25,
               "dns": 0.10, "dhcp": 0.05, "ssid": 0.05, "bssid": 0.05}
 
-def _ps(cmd, timeout=15):
+_PS_DIAGNOSTICS = threading.local()
+
+
+def _ps(cmd, timeout=15, label="PowerShell query"):
+    """Run a read-only PowerShell query and retain safe, bounded diagnostics."""
     try:
         p = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive",
              "-ExecutionPolicy", "Bypass", "-Command", cmd],
             capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace")
-    except Exception:
+    except Exception as exc:
+        records = getattr(_PS_DIAGNOSTICS, "records", None)
+        if records is not None:
+            records.append({"operation": label, "state": "ERROR",
+                            "detail": str(exc)[:240]})
         return []
-    if p.returncode != 0 or not p.stdout.strip():
+    if p.returncode != 0:
+        records = getattr(_PS_DIAGNOSTICS, "records", None)
+        if records is not None:
+            detail = (p.stderr or "").strip() or f"PowerShell exited with code {p.returncode}."
+            records.append({"operation": label, "state": "ERROR",
+                            "detail": detail[-240:]})
+        return []
+    if not p.stdout.strip():
+        records = getattr(_PS_DIAGNOSTICS, "records", None)
+        if records is not None:
+            records.append({"operation": label, "state": "EMPTY",
+                            "detail": "The command completed but returned no rows."})
         return []
     try:
         data = json.loads(p.stdout)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        records = getattr(_PS_DIAGNOSTICS, "records", None)
+        if records is not None:
+            records.append({"operation": label, "state": "ERROR",
+                            "detail": f"PowerShell returned invalid JSON: {exc}"[:240]})
         return []
-    return data if isinstance(data, list) else [data]
+    rows = data if isinstance(data, list) else ([] if data is None else [data])
+    records = getattr(_PS_DIAGNOSTICS, "records", None)
+    if records is not None:
+        records.append({"operation": label, "state": "OK",
+                        "detail": f"{len(rows)} row(s) returned."})
+    return rows
 
 def _gateway_mac_via_neighbor(gw_ip, interface_index=None):
     """Resolve the selected interface's default gateway MAC, refreshing ARP once.
@@ -1026,9 +1055,10 @@ def _wifi_details(interface_name=None):
 def detect_network():
     """Return network context as a legacy dict (8.1.0 compatible shape).
 
-    Uses 4 independent Windows APIs. Handles VPN, multiple adapters,
-    missing gateway, missing MAC. Never invents a gateway.
+    Uses independent Windows APIs. Handles VPN, multiple adapters,
+    missing gateway and missing MAC. Never invents a gateway.
     """
+    _PS_DIAGNOSTICS.records = []
     if NETWORK_OVERRIDE:
         try:
             net = ipaddress.ip_network(NETWORK_OVERRIDE, strict=False)
@@ -1041,6 +1071,18 @@ def detect_network():
                     "dns_servers": "", "adapter_mac": "",
                     "gateway_mac": "", "fingerprint": "", "fingerprint_raw": "",
                     "confidence": 0, "confidence_notes": "manual override",
+                    "fingerprint_status": "MANUAL_OVERRIDE",
+                    "fingerprint_diagnostics": {
+                        "status": "MANUAL_OVERRIDE",
+                        "reason": ("NETWORKRADAR_NETWORK is a manual scan-scope override, "
+                                   "not proof of the currently connected network. "
+                                   "Automatic network fingerprinting and authorisation "
+                                   "are intentionally unavailable in this mode."),
+                        "observed_components": [],
+                        "missing_components": list(FP_WEIGHTS),
+                        "strong_anchors": [],
+                        "collection": [],
+                    },
                     "interfaces": [], "_classification": {"gateway": Conf.MISSING,
                                         "gateway_mac": Conf.MISSING,
                                         "dns": Conf.MISSING,
@@ -1051,20 +1093,25 @@ def detect_network():
 
     adapters_raw = _ps(
         "Get-NetAdapter | Select-Object Name,InterfaceIndex,InterfaceDescription,InterfaceGuid,"
-        "MacAddress,Status,MediaType | ConvertTo-Json -Depth 3")
+        "MacAddress,Status,MediaType | ConvertTo-Json -Depth 3",
+        label="Get-NetAdapter")
     ip_raw = _ps(
         "Get-NetIPAddress -AddressFamily IPv4 | "
-        "Select-Object InterfaceIndex,IPAddress,PrefixLength,AddressState,SkipAsSource | ConvertTo-Json -Depth 3")
+        "Select-Object InterfaceIndex,IPAddress,PrefixLength,AddressState,SkipAsSource | ConvertTo-Json -Depth 3",
+        label="Get-NetIPAddress")
     route_raw = _ps(
         "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | "
         "Select-Object InterfaceIndex,NextHop,RouteMetric,InterfaceMetric | "
-        "ConvertTo-Json -Depth 3")
+        "ConvertTo-Json -Depth 3",
+        label="Get-NetRoute")
     dns_raw = _ps(
         "Get-DnsClientServerAddress -AddressFamily IPv4 | "
-        "Select-Object InterfaceIndex,ServerAddresses | ConvertTo-Json -Depth 3")
+        "Select-Object InterfaceIndex,ServerAddresses | ConvertTo-Json -Depth 3",
+        label="Get-DnsClientServerAddress")
     dhcp_raw = _ps(
         "Get-NetIPInterface -AddressFamily IPv4 | "
-        "Select-Object InterfaceIndex,Dhcp | ConvertTo-Json -Depth 3")
+        "Select-Object InterfaceIndex,Dhcp | ConvertTo-Json -Depth 3",
+        label="Get-NetIPInterface")
 
     ips_by_idx = _select_ipv4_interface_rows(ip_raw)
     dns_by_idx, dhcp_by_idx = {}, {}
@@ -1115,6 +1162,15 @@ def detect_network():
                 "dns_servers": "", "adapter_mac": "", "gateway_mac": "",
                 "fingerprint": "", "fingerprint_raw": "",
                 "confidence": 0, "confidence_notes": "no active adapter with IPv4",
+                "fingerprint_status": "NO_ACTIVE_ADAPTER",
+                "fingerprint_diagnostics": {
+                    "status": "NO_ACTIVE_ADAPTER",
+                    "reason": "Windows did not return an active adapter with a usable IPv4 address.",
+                    "observed_components": [],
+                    "missing_components": list(FP_WEIGHTS),
+                    "strong_anchors": [],
+                    "collection": list(getattr(_PS_DIAGNOSTICS, "records", [])),
+                },
                 "interfaces": [], "_classification": {"gateway": Conf.MISSING,
                                     "gateway_mac": Conf.MISSING,
                                     "dns": Conf.MISSING,
@@ -1164,6 +1220,21 @@ def detect_network():
             prefix_value = int(adapter["prefix"])
         except (ValueError, TypeError):
             prefix_value = None
+        observed_components = [key for key, value in components.items() if value is not None]
+        missing_components = [key for key, value in components.items() if value is None]
+        strong_anchors = [key for key in ("gateway_mac", "bssid")
+                          if components.get(key)]
+        collection = list(getattr(_PS_DIAGNOSTICS, "records", []))
+        fingerprint_diagnostics = {
+            "status": "READY" if fingerprint else "INCOMPLETE",
+            "observed_components": observed_components,
+            "missing_components": missing_components,
+            "strong_anchors": strong_anchors,
+            "collection": collection,
+            "reason": ("" if fingerprint else
+                       "A fingerprint could not be built. Check the missing components "
+                       "and PowerShell collection results."),
+        }
         return {
             "network": subnet_str, "ip": adapter.get("ip") or "",
             "gateway": gateway_val, "interface": adapter["name"],
@@ -1175,6 +1246,8 @@ def detect_network():
             "interface_index": idx, "status": adapter.get("status", ""),
             "prefix": prefix_value, "ssid": ssid, "bssid": bssid,
             "mode": "AUTO", "dns_servers": ",".join(dns_servers),
+            "fingerprint_status": fingerprint_diagnostics["status"],
+            "fingerprint_diagnostics": fingerprint_diagnostics,
             "dhcp": dhcp_flag, "adapter_mac": adapter.get("mac", ""),
             "gateway_mac": gw_mac, "fingerprint": fingerprint,
             "fingerprint_raw": json.dumps(components, sort_keys=True),
@@ -1236,9 +1309,22 @@ def _authz_decision(detected, profiles):
     fp_class = detected.get("_classification", {}).get("fingerprint", Conf.MISSING)
 
     if not fp or fp_class == Conf.MISSING:
+        diagnostics = detected.get("fingerprint_diagnostics") or {}
+        if diagnostics.get("status") == "MANUAL_OVERRIDE":
+            reason = diagnostics.get("reason") or (
+                "Manual network override does not provide a verifiable network identity.")
+        else:
+            missing = ", ".join(diagnostics.get("missing_components") or []) or "unknown"
+            failed = [
+                f"{item.get('operation')}: {item.get('detail')}"
+                for item in diagnostics.get("collection", [])
+                if item.get("state") == "ERROR"
+            ]
+            reason = "Network fingerprint unavailable. Missing components: " + missing + "."
+            if failed:
+                reason += " Collection errors: " + "; ".join(failed[:3])
         return False, "INDETERMINATE", [
-            "Network fingerprint could not be computed from confirmed evidence.",
-            f"Classification: {fp_class}."], None
+            reason, f"Classification: {fp_class}."], None
     if not has_strong_network_anchor(detected):
         return False, "INDETERMINATE", [
             "No strong network anchor (gateway MAC or interface-specific BSSID) was observed.",
@@ -1374,7 +1460,27 @@ def authorize_current(actor="local-user"):
         network_id = NET_CTX.get("network_id", "")
         conf = int(NET_CTX.get("confidence", 0) or 0)
     if not fp:
-        raise RuntimeError("No fingerprint — cannot authorise")
+        diagnostics = current_context.get("fingerprint_diagnostics") or {}
+        if diagnostics.get("status") == "MANUAL_OVERRIDE":
+            raise RuntimeError(
+                "Automatic authorisation is unavailable while NETWORKRADAR_NETWORK "
+                "is set. It is only a manual scan-scope override, not proof of the "
+                "connected network. In PowerShell run "
+                "'Remove-Item Env:NETWORKRADAR_NETWORK -ErrorAction SilentlyContinue', "
+                "restart NetworkRadar, and refresh network detection.")
+        missing = ", ".join(diagnostics.get("missing_components") or []) or "unknown"
+        failures = [
+            f"{item.get('operation')}: {item.get('detail')}"
+            for item in diagnostics.get("collection", [])
+            if item.get("state") == "ERROR"
+        ]
+        detail = f"Missing fingerprint components: {missing}."
+        if failures:
+            detail += " Windows collection errors: " + "; ".join(failures[:3])
+        raise RuntimeError(
+            "NetworkRadar cannot authorise because automatic network identity "
+            "was not established. " + detail +
+            " Refresh detection and inspect /api/network for the full diagnostic.")
     if not has_strong_network_anchor(current_context):
         raise RuntimeError(
             "Refusing to authorise: no strong network anchor (gateway MAC or "
