@@ -172,8 +172,19 @@ def _dpapi_transform(data: bytes, protect: bool) -> bytes:
     target = blob_type()
     crypt32 = ctypes.WinDLL("Crypt32.dll", use_last_error=True)
     kernel32 = ctypes.WinDLL("Kernel32.dll", use_last_error=True)
+    blob_pointer = ctypes.POINTER(blob_type)
+    crypt32.CryptProtectData.argtypes = [
+        blob_pointer, ctypes.c_wchar_p, blob_pointer, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_ulong, blob_pointer,
+    ]
     crypt32.CryptProtectData.restype = ctypes.c_int
+    crypt32.CryptUnprotectData.argtypes = [
+        blob_pointer, ctypes.POINTER(ctypes.c_wchar_p), blob_pointer,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, blob_pointer,
+    ]
     crypt32.CryptUnprotectData.restype = ctypes.c_int
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
     description = ctypes.c_wchar_p("NetworkRadar Agent configuration")
     if protect:
         ok = crypt32.CryptProtectData(
