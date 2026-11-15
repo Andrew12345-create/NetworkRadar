@@ -1,4 +1,4 @@
-# NetworkRadar architecture — repository snapshot 12.0.3
+# NetworkRadar architecture — repository snapshot 12.2.0
 
 ## Runtime overview
 
@@ -92,3 +92,16 @@ identity rules. Product signatures may use explicit Nmap product, SNMP,
 UPnP or DNS-SD product evidence; OS signatures use OS/passive TCP evidence;
 DHCP signatures use DHCP observations. This prevents a NIC vendor such as an
 adapter or chipset supplier from being mistaken for the device itself.
+
+
+## Multi-network workspace foundation (12.2.0)
+
+The workspace layer introduces a stable opaque network_id distinct from a CIDR/subnet and from a single observed fingerprint. network_fingerprint_history maps exact fingerprints to workspace IDs; network_interface_observations stores interface-specific snapshots; network_device_sightings stores device presence keyed by workspace plus IP and device identity. These tables are additive and do not rebuild or delete legacy tables.
+
+Network detection now gathers each active IPv4 adapter independently. Route metrics, gateway-neighbour lookups scoped by interface index, DNS, DHCP and WLAN SSID/BSSID are collected per adapter. The default-route metric still selects the primary adapter for the existing active-discovery loop. Other interfaces are recorded as observations only; this release does not run concurrent active scans on them.
+
+A fingerprint is a snapshot key, not a guaranteed permanent identity. Exact fingerprints reuse a workspace. A changed fingerprint currently creates a separate workspace pending future correlation or explicit merge. This avoids silently joining two networks merely because they share a subnet or SSID.
+
+The legacy network_profiles table remains subnet-keyed for compatibility. Its upsert now resets approved and last_authorized whenever the fingerprint changes. This is fail-closed and prevents approval transfer between different networks that reuse the same CIDR. The dashboard workspace selector is a historical read-only browser; it does not change the active scan target or authorisation context.
+
+Legacy devices remains IP-keyed, and many historical event/telemetry queries are not yet workspace-scoped. New sightings are recorded separately to provide a safe foundation for the later full data-scope migration. Do not interpret this milestone as complete multi-network concurrent scanning.
