@@ -11,7 +11,12 @@
 - Added read-only API routes for workspace directory, interface observations and workspace device sightings.
 - Fixed a security-critical issue: when a subnet-keyed legacy profile receives a different fingerprint, its approval and approval timestamp are reset. A different network sharing the subnet cannot inherit approval.
 - Tightened active-discovery authorisation to require an observed gateway MAC or interface-specific BSSID. A high score based only on subnet, gateway IP, DNS, DHCP or SSID is not enough to authorise a network.
+- Moved approval authority to a network-workspace-and-fingerprint keyed table. Newly migrated workspaces start unapproved and require one-time reapproval; legacy subnet-keyed approval flags are no longer trusted for active discovery.
 - Preserved existing database tables and records; workspace tables and indexes are additive.
+
+## Upgrade note
+
+After upgrading to 12.2.0, re-authorise each network you intend to scan. The new workspace-specific approval records intentionally start unapproved because older subnet-keyed approvals cannot be safely attributed when multiple networks share an address range.
 
 ## Important boundaries
 
