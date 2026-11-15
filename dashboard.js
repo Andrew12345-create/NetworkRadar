@@ -270,7 +270,7 @@ let refreshInFlight=false;
 
 /* NIGHTWATCH live presentation: all values come from existing local APIs. */
 function nwSet(id,value){const el=$(id);if(el)el.textContent=value==null?"—":String(value);}
-function nwPortCount(rows){const ports=new Set();(rows||[]).forEach(d=>String(d.open_ports||"").split(/[;,\\s]+/).forEach(t=>{const m=t.trim().match(/^(\\d{1,5})(?:\\/(?:tcp|udp))?$/i);if(m)ports.add(m[1]);}));return ports.size;}
+function nwPortCount(rows){const ports=new Set();(rows||[]).forEach(d=>String(d.open_ports||"").split(/[;,\s]+/).forEach(t=>{const m=t.trim().match(/^(\d{1,5})(?:\/(?:tcp|udp))?$/i);if(m)ports.add(m[1]);}));return ports.size;}
 function nwTopology(data){
  const svg=$("nwTopology");if(!svg)return;
  const nodes=Array.isArray(data.nodes)?data.nodes.slice(0,40):[],edges=Array.isArray(data.edges)?data.edges.slice(0,100):[];
