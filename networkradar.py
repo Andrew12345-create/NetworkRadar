@@ -6706,7 +6706,13 @@ class Handler(BaseHTTPRequestHandler):
                                (SELECT f.ssid FROM network_fingerprint_history f
                                 WHERE f.fingerprint=w.current_fingerprint LIMIT 1) AS ssid,
                                (SELECT COUNT(*) FROM network_interface_observations i
-                                WHERE i.network_id=w.network_id) AS interface_observations
+                                WHERE i.network_id=w.network_id) AS interface_observations,
+                               COALESCE((SELECT a.approved FROM network_workspace_authorizations a
+                                WHERE a.network_id=w.network_id
+                                  AND a.fingerprint=w.current_fingerprint LIMIT 1),0) AS approved,
+                               (SELECT a.last_authorized FROM network_workspace_authorizations a
+                                WHERE a.network_id=w.network_id
+                                  AND a.fingerprint=w.current_fingerprint LIMIT 1) AS last_authorized
                         FROM network_workspaces w
                         ORDER BY CASE WHEN w.network_id=? THEN 0 ELSE 1 END,
                                  w.last_seen DESC
@@ -6719,6 +6725,7 @@ class Handler(BaseHTTPRequestHandler):
                         "device_count":r[9],"subnet":r[10] or "",
                         "gateway":r[11] or "","ssid":r[12] or "",
                         "interface_observations":r[13] or 0,
+                        "approved":bool(r[14]),"last_authorized":r[15] or "",
                         "is_current":r[0]==current_network_id
                     } for r in rows])
 
