@@ -2108,3 +2108,40 @@ tbody tr:hover { background:rgba(71,169,232,.09); }
  .workspace-metrics .value{font-size:14px}
  .workspace-tables{grid-template-columns:1fr}
 }
+
+/* 12.5.0 NIGHTWATCH SOC visual system */
+:root{--bg:#070b12;--panel:#0d1420;--panel2:#111d2b;--line:#243548;--text:#e8f1f8;--muted:#8295a8;--blue:#00bfe8;--cyan:#00e5ff;--green:#00ff9c;--amber:#ffb020;--red:#ff365e}
+body{background:radial-gradient(ellipse at 70% -10%,#0b2935,transparent 34%),#070b12;color:var(--text)}
+header{background:#080e18ed;border-bottom:1px solid #183446}.logo,.nav-brand-mark{background:linear-gradient(145deg,#00e5ff,#00ff9c);color:#031018}
+nav{background:linear-gradient(180deg,#080e18fa,#070c14fa);border-right-color:#1b3445}nav a.active{background:#0e2632;border-color:#145064;box-shadow:inset 3px 0 var(--cyan)}.nav-group{color:#4e758a}
+button{background:linear-gradient(135deg,#00c9e8,#00e6ad);color:#031018;border-color:#00e5ff66}button.secondary,#navToggle{background:#101e2b;color:#dcecf5;border-color:#294255;box-shadow:none}
+.card,.modalbox{background:linear-gradient(145deg,#0e1824,#0a121c);border:1px solid #1d3446;border-radius:14px}
+th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hover td{background:#10202d}
+.nightwatch-hero{display:grid;grid-template-columns:1.4fr .6fr;gap:25px;align-items:center;min-height:300px;margin-bottom:15px;padding:clamp(22px,3vw,38px);border:1px solid #174054;border-radius:16px;background:linear-gradient(110deg,#0b1824,#09121c 60%,#0b1d27);box-shadow:0 18px 54px #0007;position:relative;overflow:hidden}
+.nightwatch-hero:after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 32px,#5bdfff08 33px)}
+.nw-eyebrow{color:#65b4c6;font:800 10px Consolas,monospace;letter-spacing:2px}.nw-eyebrow i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green);animation:nwPulse 1.7s infinite;margin-right:8px}
+.nightwatch-hero h2{position:relative;z-index:1;margin:15px 0 10px;font-size:clamp(26px,3.2vw,42px);line-height:1.12;color:#effaff}.nightwatch-hero h2 span{color:var(--cyan);text-shadow:0 0 24px #00e5ff35}.nightwatch-hero p{color:#9db4c3;max-width:640px}
+.nw-hero-meta,.nw-status-row{display:flex;gap:14px 22px;flex-wrap:wrap;margin-top:20px}.nw-hero-meta span{color:#66879a;font:10px Consolas,monospace}.nw-hero-meta b{display:block;color:#d8edf4;margin-top:4px;font-size:12px}
+.nw-status-row span{padding:6px 9px;border:1px solid #254658;border-radius:4px;background:#0a202b;color:#8fd8e4;font:9px Consolas,monospace;letter-spacing:1px}.nw-status-row .authorised{color:var(--green);border-color:#087b58;background:#06271e}
+.nw-radar-stage{display:grid;justify-items:center;gap:12px;position:relative;z-index:1}.nw-radar{width:min(245px,65vw);aspect-ratio:1;border:1px solid #176174;border-radius:50%;position:relative;overflow:hidden;background:repeating-radial-gradient(circle,#0c2631 0 1px,transparent 2px 25%);box-shadow:0 0 38px #00dfff15,inset 0 0 40px #00dfff12}
+.nw-radar:before,.nw-radar:after{content:"";position:absolute;background:#17617466}.nw-radar:before{height:1px;left:0;right:0;top:50%}.nw-radar:after{width:1px;top:0;bottom:0;left:50%}
+.nw-sweep{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,transparent 0 76%,#00e5ff05 82%,#00e5ff55);animation:nwSweep 5s linear infinite}.nw-core{position:absolute;left:calc(50% - 4px);top:calc(50% - 4px);width:8px;height:8px;border-radius:50%;background:#eaffff;box-shadow:0 0 16px var(--cyan)}
+.nw-blip{position:absolute;width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green);animation:nwPulse 2.4s infinite}.nw-blip.a{left:25%;top:28%}.nw-blip.b{left:71%;top:36%;animation-delay:.7s}.nw-blip.c{left:62%;top:76%;animation-delay:1.2s}
+.nw-radar-caption{width:min(245px,65vw);display:flex;justify-content:space-between;color:#5c8a9d;font:9px Consolas,monospace}.nw-radar-caption b{color:var(--cyan)}
+.nightwatch-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:16px}.nightwatch-metrics article{padding:15px;border:1px solid #1d3849;border-radius:11px;background:linear-gradient(145deg,#0e1a26,#0a121c)}
+.nightwatch-metrics article span{display:block;color:#6e92a5;font:800 9px Consolas,monospace;letter-spacing:1px}.nightwatch-metrics strong{display:block;margin:9px 0 3px;color:#eafaff;font:700 clamp(23px,2.1vw,31px) Consolas,monospace}.nightwatch-metrics article:nth-child(2) strong{color:var(--green)}.nightwatch-metrics article:nth-child(3) strong{color:var(--amber)}.nightwatch-metrics small{color:#607b8d;font-size:10px}
+.nightwatch-panel{margin-bottom:16px;padding:clamp(16px,2.4vw,26px);border:1px solid #1d3849;border-radius:14px;background:linear-gradient(145deg,#0e1824,#09121b);box-shadow:0 12px 36px #0005}
+.nw-panel-head{display:flex;justify-content:space-between;gap:15px;margin-bottom:16px}.nw-panel-head h2{margin:7px 0 5px;color:#d9f7ff;letter-spacing:1.5px}.nw-panel-head p{margin:0;color:#7893a5;font-size:12px}.nw-panel-head>b{color:#65b6c8;font:9px Consolas,monospace;letter-spacing:1px}
+.nw-topology-wrap{border:1px solid #1b3444;border-radius:10px;overflow:hidden;background-image:linear-gradient(#142b3830 1px,transparent 1px),linear-gradient(90deg,#142b3830 1px,transparent 1px),radial-gradient(ellipse at center,#0c202c,#08111a 68%);background-size:28px 28px,28px 28px,auto}
+#nwTopology{display:block;width:100%;height:auto;min-height:280px}.nw-svg-empty{fill:#75a5b5;font:700 17px Consolas,monospace;letter-spacing:2px}.nw-svg-sub{fill:#52788a;font:11px Consolas,monospace}
+.nw-map-core{fill:#0b1d28;stroke:#176076;stroke-width:1.5;stroke-dasharray:4 6}.nw-core-label{fill:#b9edf5;font:800 15px Consolas,monospace;letter-spacing:2px}.nw-core-sub{fill:#5d9bad;font:10px Consolas,monospace}
+.nw-edge{stroke-width:1.2;opacity:.48;stroke-dasharray:5 6;animation:nwDash 14s linear infinite}.nw-edge.dns{stroke:#00e5ff}.nw-edge.discovery{stroke:#00ff9c}.nw-edge.dhcp{stroke:#ffb020}
+.nw-node{cursor:pointer;outline:none}.nw-node-halo{fill:#00e5ff10;stroke:#00e5ff55;stroke-width:1}.nw-node-dot{fill:#00e5ff}.nw-node.observed .nw-node-dot{fill:#ffb020}.nw-node.resolver .nw-node-dot{fill:#00ff9c}.nw-node-label{fill:#dcecf4;font:11px Consolas,monospace}.nw-node:focus .nw-node-halo,.nw-node:hover .nw-node-halo{stroke:#fff;stroke-width:2}
+.nw-legend{padding-top:12px;color:#718c9e;font:10px Consolas,monospace}
+.nw-activity-feed{display:grid}.nw-feed-item{display:grid;grid-template-columns:minmax(120px,160px) minmax(0,1fr) minmax(100px,130px) 80px;gap:12px;align-items:center;padding:12px 4px;border-bottom:1px solid #1b2e3d}
+.nw-feed-item time,.nw-feed-item>span{color:#648397;font:10px Consolas,monospace;overflow-wrap:anywhere}.nw-feed-item b{display:block;color:#d8e9f1;font-size:12px}.nw-feed-item small{display:block;color:#7892a3;font-size:11px}.nw-feed-item em{justify-self:end;font:9px Consolas,monospace;color:#8299a8}.nw-feed-item em.high{color:var(--red)}.nw-feed-item em.medium{color:var(--amber)}.nw-feed-empty{padding:26px;text-align:center;color:#6c899b;font:11px Consolas,monospace}
+@keyframes nwSweep{to{transform:rotate(360deg)}}@keyframes nwDash{to{stroke-dashoffset:-120}}@keyframes nwPulse{0%,100%{opacity:.45;transform:scale(.82)}50%{opacity:1;transform:scale(1.2)}}
+@media(max-width:1250px){.nightwatch-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:900px){.nightwatch-hero{grid-template-columns:1fr}.nw-radar{width:190px}.nightwatch-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:600px){.nightwatch-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.nw-panel-head{flex-direction:column}.nw-feed-item{grid-template-columns:1fr 70px;gap:8px}.nw-feed-item time{grid-column:1}.nw-feed-item>div{grid-column:1}.nw-feed-item>span{display:none}.nw-feed-item em{grid-column:2;grid-row:1}.nightwatch-hero{padding:20px 16px}.nightwatch-hero h2{font-size:26px}}
+@media(prefers-reduced-motion:reduce){.nw-sweep,.nw-eyebrow i,.nw-blip,.nw-edge{animation:none}}

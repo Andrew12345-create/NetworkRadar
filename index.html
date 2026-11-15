@@ -1,10 +1,12 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Local-first network discovery, device intelligence and authorised network monitoring."><meta name="theme-color" content="#07111f"><title>NetworkRadar {APP_VERSION}</title><link rel="stylesheet" href="/assets/networkradar.css?v={APP_VERSION}-inspector-fix-1"></head><body>
-<header><div class="brand"><button id="navToggle" class="secondary" type="button" aria-label="Toggle navigation" aria-expanded="true" title="Collapse or open navigation" onclick="toggleNavigation()">☰</button><div class="logo">NR</div><div><h1>NETWORKRADAR {APP_VERSION}</h1><div class="sub">PHANTOM INTELLIGENCE &amp; NETWORK DEFENCE</div></div></div>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Local-first network discovery, device intelligence and authorised network monitoring."><meta name="theme-color" content="#07111f"><title>NetworkRadar {APP_VERSION}</title><link rel="stylesheet" href="/assets/networkradar.css?v={APP_VERSION}-nightwatch-1"></head><body>
+<header><div class="brand"><button id="navToggle" class="secondary" type="button" aria-label="Toggle navigation" aria-expanded="true" title="Collapse or open navigation" onclick="toggleNavigation()">☰</button><div class="logo">NR</div><div><h1>NETWORKRADAR {APP_VERSION}</h1><div class="sub">NIGHTWATCH · SEE EVERYTHING. UNDERSTAND YOUR NETWORK.</div></div></div>
 <div class="actions"><span id="connection" class="pill warn">CONNECTING</span><button id="scanButton" onclick="scanNow()">SCAN NOW</button><button class="secondary" onclick="refreshAll()">REFRESH</button></div></header>
 <nav id="sideNavigation" aria-label="Main navigation">
  <div class="nav-brand"><div class="nav-brand-mark">NR</div><div class="nav-brand-copy">NETWORKRADAR<small>CONTROL CENTRE</small></div></div>
  <div class="nav-search-wrap"><span class="nav-search-icon">⌕</span><input id="navSearch" type="search" placeholder="Find a section…" aria-label="Search navigation sections"></div>
+ <div class="nav-group">Live operations</div>
+ <a href="#top" data-short="NW" title="Nightwatch overview"><span class="nav-label">Nightwatch overview</span></a><a href="#topology" data-short="TP" title="Live topology"><span class="nav-label">Live topology</span></a><a href="#activity" data-short="AF" title="Activity feed"><span class="nav-label">Activity feed</span></a>
  <div class="nav-group">Overview</div>
  <a href="#cmd" data-short="CC" title="Command centre"><span class="nav-label">Command centre</span></a><a href="#devices" data-short="DV" title="Devices"><span class="nav-label">Devices</span></a><a href="#engines" data-short="EH" title="Engine health"><span class="nav-label">Engine health</span></a>
  <div class="nav-group">Device intelligence</div>
@@ -20,6 +22,20 @@
  <div class="nav-empty" id="navEmpty">No matching sections.</div>
 </nav><div id="navBackdrop" aria-hidden="true" onclick="closeNavigation()"></div>
 <main>
+
+<section id="top" class="nightwatch-hero">
+ <div><div class="nw-eyebrow"><i></i> NIGHTWATCH / LOCAL SECURITY OPERATIONS</div><h2>SEE EVERYTHING.<br><span>UNDERSTAND YOUR NETWORK.</span></h2><p>Live network visibility, evidence-backed device identity and security intelligence — running locally on this machine.</p>
+ <div class="nw-hero-meta"><span>NETWORK <b id="nwNetwork">DISCOVERING…</b></span><span>GATEWAY <b id="nwGateway">—</b></span><span>LAST SYNC <b id="nwLastSync">—</b></span></div>
+ <div class="nw-status-row"><span id="nwScanState">ENGINE STARTING</span><span id="nwAuthState">AUTHORISATION UNKNOWN</span><span id="nwEngineState">API CONNECTING</span></div></div>
+ <div class="nw-radar-stage"><div class="nw-radar"><i class="nw-sweep"></i><i class="nw-core"></i><i class="nw-blip a"></i><i class="nw-blip b"></i><i class="nw-blip c"></i></div><div class="nw-radar-caption">LOCAL SENSOR ARRAY <b id="nwRadarCount">0 SIGNALS</b></div></div>
+</section>
+<section class="nightwatch-metrics">
+ <article><span>DISCOVERED ASSETS</span><strong id="nwDevices">—</strong><small>Known device records</small></article><article><span>ONLINE NOW</span><strong id="nwOnline">—</strong><small>Current inventory state</small></article><article><span>UNCLASSIFIED</span><strong id="nwUnknown">—</strong><small>Identity needs more evidence</small></article><article><span>OPEN PORTS</span><strong id="nwPorts">—</strong><small>Unique ports in inventory</small></article><article><span>DNS SAMPLES</span><strong id="nwDns">—</strong><small>Latest returned observations</small></article><article><span>ALERT RECORDS</span><strong id="nwAlerts">—</strong><small>Latest returned alerts</small></article>
+</section>
+<section id="topology" class="nightwatch-panel"><div class="nw-panel-head"><div><div class="nw-eyebrow">NETWORK INTELLIGENCE / 01</div><h2>LIVE NETWORK TOPOLOGY</h2><p>Lines represent observed DNS, mDNS, LLMNR or DHCP relationships — not physical links.</p></div><b>OBSERVATION MAP</b></div>
+<div class="nw-topology-wrap"><svg id="nwTopology" viewBox="0 0 1000 500" role="img" aria-label="Observed network device relationships"><text x="500" y="250" text-anchor="middle" class="nw-svg-empty">WAITING FOR NETWORK OBSERVATIONS</text></svg></div><div id="nwTopologyNote" class="nw-legend">No topology data loaded.</div></section>
+<section id="activity" class="nightwatch-panel"><div class="nw-panel-head"><div><div class="nw-eyebrow">NETWORK TELEMETRY / 02</div><h2>LIVE ACTIVITY FEED</h2><p>Recent events and alerts recorded by NetworkRadar. No simulated events are shown.</p></div><b>LOCAL EVENT LOG</b></div><div id="nwActivityFeed" class="nw-activity-feed">Waiting for real network events…</div></section>
+
 <section id="networkWorkspaces" class="section card mb-14">
  <div class="row-between workspace-heading">
   <div><div class="label">MULTI-NETWORK INTELLIGENCE</div><h2 class="m-0">NETWORK WORKSPACES</h2><div class="hint">Separate histories for each network fingerprint, including overlapping subnets and multiple active adapters.</div></div>
@@ -191,5 +207,5 @@ This terminal runs with the permissions of the SSH account you authenticate as.<
 </main>
 <div id="toast" class="toast"></div>
 <div id="deviceModal" class="modal" onclick="if(event.target===this)closeDevice()"><div class="modalbox"><div class="modalhead"><div><div class="sub">DEVICE</div><h2 id="modalTitle">Device</h2></div><button class="secondary" onclick="closeDevice()">CLOSE</button></div><div id="modalContent" class="modalcontent">Loading...</div></div></div>
-<script src="/assets/dashboard.js?v={APP_VERSION}" defer></script>
+<script src="/assets/dashboard.js?v={APP_VERSION}-nightwatch-1" defer></script>
 </body></html>
