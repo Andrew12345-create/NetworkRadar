@@ -5383,7 +5383,9 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                 agent_id=_verify_agent_request(self,raw)
                 inventory=payload.get("inventory",{})
                 if not isinstance(inventory,dict): return self._reply({"error":"inventory must be an object"},400)
-                safe=json.dumps(inventory,ensure_ascii=False,default=str)[:50000]
+                safe=json.dumps(inventory,ensure_ascii=False,default=str)
+                if len(safe.encode("utf-8")) > 50000:
+                    return self._reply({"error":"Inventory report exceeds the 50 KiB storage limit."},413)
                 def _report(conn):
                     cur=conn.execute("UPDATE remote_agents SET status='ONLINE',last_seen=?,last_ip=?,inventory_json=? WHERE agent_id=? AND status!='REVOKED'",(now_text(),self.client_address[0],safe,agent_id))
                     return cur.rowcount
