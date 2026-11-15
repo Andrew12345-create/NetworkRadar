@@ -92,3 +92,22 @@ def record_interface_observation(conn, network_id, interface, timestamp, is_prim
          str(interface.get("bssid") or ""), int(interface.get("route_metric") or 0),
          str(interface.get("adapter_mac") or ""), 1 if is_primary else 0),
     )
+
+def upsert_legacy_network_profile(conn, detected, timestamp):
+    """Keep the legacy subnet-keyed row, but never carry approval to a new fingerprint."""
+    conn.execute(
+        "INSERT INTO network_profiles(network,first_seen,last_seen,interface,gateway,ssid,approved,fingerprint,gateway_mac,adapter_mac,dns_servers,bssid,confidence) "
+        "VALUES(?,?,?,?,?,?,0,?,?,?,?,?,?) "
+        "ON CONFLICT(network) DO UPDATE SET "
+        "approved=CASE WHEN network_profiles.fingerprint=excluded.fingerprint THEN network_profiles.approved ELSE 0 END, "
+        "last_authorized=CASE WHEN network_profiles.fingerprint=excluded.fingerprint THEN network_profiles.last_authorized ELSE '' END, "
+        "last_seen=excluded.last_seen,interface=excluded.interface,gateway=excluded.gateway,ssid=excluded.ssid, "
+        "fingerprint=excluded.fingerprint,gateway_mac=excluded.gateway_mac,adapter_mac=excluded.adapter_mac, "
+        "dns_servers=excluded.dns_servers,bssid=excluded.bssid,confidence=excluded.confidence",
+        (str(detected.get("network") or ""), timestamp, timestamp,
+         str(detected.get("interface") or ""), str(detected.get("gateway") or ""),
+         str(detected.get("ssid") or ""), str(detected.get("fingerprint") or ""),
+         str(detected.get("gateway_mac") or ""), str(detected.get("adapter_mac") or ""),
+         str(detected.get("dns_servers") or ""), str(detected.get("bssid") or ""),
+         int(detected.get("confidence") or 0)),
+    )
