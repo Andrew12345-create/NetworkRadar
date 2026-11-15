@@ -6618,7 +6618,15 @@ class Handler(BaseHTTPRequestHandler):
                                (SELECT COUNT(*) FROM network_fingerprint_history f
                                 WHERE f.network_id=w.network_id) AS fingerprint_count,
                                (SELECT COUNT(DISTINCT d.ip) FROM network_device_sightings d
-                                WHERE d.network_id=w.network_id) AS device_count
+                                WHERE d.network_id=w.network_id) AS device_count,
+                               (SELECT f.network FROM network_fingerprint_history f
+                                WHERE f.fingerprint=w.current_fingerprint LIMIT 1) AS subnet,
+                               (SELECT f.gateway FROM network_fingerprint_history f
+                                WHERE f.fingerprint=w.current_fingerprint LIMIT 1) AS gateway,
+                               (SELECT f.ssid FROM network_fingerprint_history f
+                                WHERE f.fingerprint=w.current_fingerprint LIMIT 1) AS ssid,
+                               (SELECT COUNT(*) FROM network_interface_observations i
+                                WHERE i.network_id=w.network_id) AS interface_observations
                         FROM network_workspaces w
                         ORDER BY CASE WHEN w.network_id=? THEN 0 ELSE 1 END,
                                  w.last_seen DESC
@@ -6628,7 +6636,10 @@ class Handler(BaseHTTPRequestHandler):
                         "network_id":r[0],"display_name":r[1],"network_type":r[2],
                         "created_at":r[3],"last_seen":r[4],"current_fingerprint":r[5],
                         "status":r[6],"notes":r[7],"fingerprint_count":r[8],
-                        "device_count":r[9],"is_current":r[0]==current_network_id
+                        "device_count":r[9],"subnet":r[10] or "",
+                        "gateway":r[11] or "","ssid":r[12] or "",
+                        "interface_observations":r[13] or 0,
+                        "is_current":r[0]==current_network_id
                     } for r in rows])
 
                 if p.path == "/api/networks/interfaces":
