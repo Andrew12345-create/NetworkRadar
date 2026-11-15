@@ -1,3 +1,20 @@
+# NetworkRadar 12.5.0 — NIGHTWATCH Command Centre
+
+## Delivered
+
+- Adds a high-contrast NIGHTWATCH command-centre visual system with responsive SOC styling, animated radar motif, live operational status and telemetry cards.
+- Adds a metrics strip driven by existing local inventory, DNS, alert and network APIs. Values are inventory counts or returned samples; no synthetic traffic or threat events are generated.
+- Adds an interactive network observation map using `/api/topology`. Device nodes open the existing evidence-backed device dossier. Relationships are based on observed DNS, mDNS, LLMNR or DHCP traffic, not physical links.
+- Adds a live activity feed built only from persisted network events and alert records. Empty states do not imply that the network is threat-free.
+- Preserves the existing discovery engines, identity evidence/fusion, authorisation controls, endpoint inventory, investigations, reports and management APIs. This is an additive interface upgrade, not a backend replacement.
+- Updates the package version to 12.5.0 and cache-busts dashboard assets.
+
+## Validation boundary
+
+Automated syntax and unit tests must pass. A Windows browser smoke test remains necessary to verify layout, topology interactions and live data on the user's network. The topology shows observed communication/discovery relationships only; it does not infer physical links or exact device locations.
+
+---
+
 # NetworkRadar 12.4.1 — Network Fingerprint Diagnostics and Safety Cleanup
 
 ## Delivered
