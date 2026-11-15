@@ -171,6 +171,83 @@ async function downloadReport(){
  const t=$("reportType").value;const f=$("reportFormat").value;
  window.location.href=`/api/report?type=${encodeURIComponent(t)}&format=${encodeURIComponent(f)}`;
 }
+let networkWorkspaceCache=[];
+let selectedWorkspaceId="";
+let lastActiveWorkspaceId="";
+let workspaceLoadToken=0;
+
+async function selectNetworkWorkspace(networkId){
+ selectedWorkspaceId=networkId||"";
+ await renderNetworkWorkspace(selectedWorkspaceId);
+}
+async function loadNetworkWorkspaces(){
+ try{
+  const rows=await getJSON("/api/networks/workspaces");
+  networkWorkspaceCache=Array.isArray(rows)?rows:[];
+  const current=networkWorkspaceCache.find(x=>x.is_current);
+  const currentId=current?.network_id||"";
+  if(currentId&&currentId!==lastActiveWorkspaceId){
+   selectedWorkspaceId=currentId;
+   lastActiveWorkspaceId=currentId;
+  }
+  if(!selectedWorkspaceId||!networkWorkspaceCache.some(x=>x.network_id===selectedWorkspaceId)){
+   selectedWorkspaceId=currentId||networkWorkspaceCache[0]?.network_id||"";
+  }
+  const picker=$("workspaceSelect");
+  if(picker){
+   picker.innerHTML=networkWorkspaceCache.map(w=>'<option value="'+esc(w.network_id)+'">'+esc(w.display_name)+' · '+esc(w.network_type)+' · '+esc(w.subnet||"No subnet")+(w.is_current?" · ACTIVE":"")+'</option>').join("")||'<option value="">No workspaces observed yet</option>';
+   picker.value=selectedWorkspaceId;
+  }
+  await renderNetworkWorkspace(selectedWorkspaceId);
+ }catch(e){
+  const notice=$("workspaceNotice");
+  if(notice)notice.textContent="Network workspace directory unavailable: "+e.message;
+ }
+}
+async function renderNetworkWorkspace(networkId){
+ const token=++workspaceLoadToken;
+ const w=networkWorkspaceCache.find(x=>x.network_id===networkId);
+ const set=(id,value)=>{const el=$(id);if(el)el.textContent=value||"—";};
+ if(!w){
+  set("workspaceName","No network workspace");
+  set("workspaceType","—");set("workspaceSubnet","—");set("workspaceLastSeen","—");
+  if($("workspaceInterfaceRows"))$("workspaceInterfaceRows").innerHTML='<tr><td colspan="6">No interface history yet.</td></tr>';
+  if($("workspaceDeviceRows"))$("workspaceDeviceRows").innerHTML='<tr><td colspan="5">No device sightings yet.</td></tr>';
+  return;
+ }
+ set("workspaceName",w.display_name);
+ set("workspaceType",w.network_type);
+ set("workspaceSubnet",w.subnet||"Unknown subnet");
+ set("workspaceLastSeen",w.last_seen);
+ const notice=$("workspaceNotice");
+ if(notice)notice.textContent=(w.is_current?"ACTIVE WORKSPACE · ":"HISTORICAL WORKSPACE · ")+
+  "This view is read-only. Active discovery and approval remain bound to the current primary network. "+
+  (w.fingerprint_count||0)+" fingerprint observation(s) · "+(w.device_count||0)+" device sighting(s).";
+ try{
+  const [interfaces,devices]=await Promise.all([
+   getJSON("/api/networks/interfaces?network_id="+encodeURIComponent(networkId)),
+   getJSON("/api/networks/devices?network_id="+encodeURIComponent(networkId))
+  ]);
+  if(token!==workspaceLoadToken)return;
+  $("workspaceInterfaceRows").innerHTML=(interfaces||[]).map(x=>'<tr>'+
+   '<td>'+esc(x.interface)+'<div class="muted small-note">'+esc(x.description||"")+'</div></td>'+
+   '<td>'+esc(x.interface_type)+'</td>'+
+   '<td class="mono">'+esc(x.ip||"—")+'<div class="muted small-note">'+esc(x.network||"")+'</div></td>'+
+   '<td class="mono">'+esc(x.gateway||"—")+'</td>'+
+   '<td>'+esc(x.ssid||"—")+'<div class="muted small-note mono">'+esc(x.bssid||"")+'</div></td>'+
+   '<td>'+(x.is_primary?'<span class="pill ok">PRIMARY</span>':'<span class="pill">INTERFACE</span>')+'</td>'+
+  '</tr>').join("")||'<tr><td colspan="6">No interface observations recorded for this workspace.</td></tr>';
+  $("workspaceDeviceRows").innerHTML=(devices||[]).map(x=>'<tr>'+
+   '<td class="mono">'+esc(x.ip)+'</td><td>'+esc(x.hostname||"—")+'</td>'+
+   '<td class="mono">'+esc(x.mac||"—")+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.last_seen)+'</td>'+
+  '</tr>').join("")||'<tr><td colspan="5">No device sightings recorded yet. A completed inventory enrichment pass will populate this table.</td></tr>';
+ }catch(e){
+  if(token!==workspaceLoadToken)return;
+  $("workspaceInterfaceRows").innerHTML='<tr><td colspan="6">Workspace data unavailable: '+esc(e.message)+'</td></tr>';
+  $("workspaceDeviceRows").innerHTML='<tr><td colspan="5">Workspace data unavailable.</td></tr>';
+ }
+}
+
 let refreshInFlight=false;
 async function refreshAll(){
  if(refreshInFlight)return;refreshInFlight=true;
@@ -206,7 +283,7 @@ async function refreshAll(){
   $("behaviourStatus").textContent=diag.behaviour?.message||"Behaviour diagnostics unavailable.";
   $("behaviourRows").innerHTML=((diag.behaviour?.baseline_devices||0)>0?'<tr><td colspan="5">See device detail for samples.</td></tr>':'<tr><td colspan="5">Collecting baselines.</td></tr>');
   $("investigationRows").innerHTML=inv.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.title)}</td><td>${esc(x.severity)}</td><td>${esc(x.status)}</td><td>${esc(x.evidence_count)}</td></tr>`).join("")||'<tr><td colspan="5">None.</td></tr>';
-  loadProfiles();loadChanges();loadConfig();loadAlertStream();loadIdentityIntel();loadContinuity();loadCandidates();loadPhantomPanels();
+  loadNetworkWorkspaces();loadProfiles();loadChanges();loadConfig();loadAlertStream();loadIdentityIntel();loadContinuity();loadCandidates();loadPhantomPanels();
  }catch(err){pill($("connection"),"DASHBOARD ERROR","bad");$("updated").textContent=err.message||String(err);}
  finally{refreshInFlight=false;}
 }
