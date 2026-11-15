@@ -135,7 +135,7 @@ The suite includes isolated tests for startup, SQLite database management, ident
 - Open ports and service banners are observations, not proof of vulnerabilities or compromise.
 - SSH host keys must be reviewed and explicitly trusted before authentication.
 - Remote actions can affect availability. Review targets and confirm disruptive actions carefully.
-- The optional endpoint-agent hub is disabled by default and requires TLS configuration, certificate pinning, a one-time enrolment token and a firewall rule restricted to authorised endpoint devices. The supplied client is inventory-only and does not implement remote command execution.
+- The optional endpoint-agent hub is disabled by default and requires TLS configuration, certificate pinning, verified certificate-pin rotation, a one-time enrolment token and a firewall rule restricted to authorised endpoint devices. The supplied client is inventory-only and does not implement remote command execution.
 
 ## Project structure
 
