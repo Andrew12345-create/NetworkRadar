@@ -35,11 +35,11 @@ _MAX_RESPONSE = 65536
 
 
 def normalise_certificate_pin(value: str) -> str:
-    """Accept a SHA-256 hex fingerprint, with optional colon separators."""
-    pin = re.sub(r"[^0-9a-fA-F]", "", str(value or "")).lower()
-    if not re.fullmatch(r"[0-9a-f]{64}", pin):
+    """Accept a SHA-256 hex fingerprint, optionally colon-separated by octet."""
+    raw = str(value or "").strip()
+    if not re.fullmatch(r"(?:[0-9a-fA-F]{2}:?){32}", raw):
         raise ValueError("Certificate pin must contain exactly 64 SHA-256 hex digits.")
-    return pin
+    return raw.replace(":", "").lower()
 
 
 def validate_server_url(value: str) -> tuple[str, int]:
