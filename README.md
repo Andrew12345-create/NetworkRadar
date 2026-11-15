@@ -1,4 +1,4 @@
-# NetworkRadar 12.3.0
+# NetworkRadar 12.4.0
 
 NetworkRadar is a Windows-focused, local-first network discovery and device-intelligence application. It combines authorised network discovery, device inventory, DNS/DHCP/ARP observations, identity evidence, historical tracking, exposure observations, investigations and a localhost dashboard. Optional management features include SSH terminal access and Windows/endpoint-management integrations.
 
@@ -52,6 +52,15 @@ The core application uses the Python standard library. Paramiko is optional and 
 
 The dashboard opens at **http://127.0.0.1:8766** by default.
 
+
+## Strong network anchor detection fix (12.4.0)
+
+NetworkRadar 12.4.0 fixes two Windows evidence-collection defects that could prevent a correctly connected laptop from being recognised as being on a specific network:
+
+- Gateway MAC collection no longer passes the unsupported `-IPAddress` parameter to `Get-NetNeighbor`. It queries the selected default-route interface and matches the exact gateway IP and interface index in the returned neighbour rows.
+- The WLAN parser recognises Windows' actual `AP BSSID` label as well as `BSSID`, and still requires that the interface is connected and the address is a valid unicast MAC.
+
+The active-discovery authorisation gate remains strict: a strong anchor, adequate fingerprint confidence and explicit fresh network approval are all still required.
 
 ## Multi-network workspaces (12.2.0)
 
