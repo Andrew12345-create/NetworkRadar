@@ -16,6 +16,6 @@ __all__ = [
     "_select_primary_adapter", "_select_tshark_interface",
     "parse_arp_output", "read_arp_cache", "infer_type",
     "best_os_match", "parse_nmap_xml", "run_nmap_discovery", "is_same_private_http_host",
-    "netbios_name", "reverse_dns", "ssdp_scan",
+    "netbios_name", "reverse_dns", "ssdp_scan", "parse_upnp_description",
     "build_ptr_query", "discover_mdns", "parse_mdns_packet",
 ]
