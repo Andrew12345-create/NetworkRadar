@@ -111,3 +111,16 @@ def upsert_legacy_network_profile(conn, detected, timestamp):
          str(detected.get("dns_servers") or ""), str(detected.get("bssid") or ""),
          int(detected.get("confidence") or 0)),
     )
+
+def has_strong_network_anchor(detected):
+    """Require a gateway MAC or BSSID before a fingerprint can authorise active discovery."""
+    import json
+    raw = detected.get("fingerprint_raw") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(raw, dict):
+        return False
+    return bool(raw.get("gateway_mac") or raw.get("bssid"))
