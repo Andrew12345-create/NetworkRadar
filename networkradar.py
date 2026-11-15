@@ -6635,6 +6635,33 @@ class Handler(BaseHTTPRequestHandler):
                         if rr:
                             risk_expl = rr[0] or ""
                             tr, ir, hr = rr[1] or 0, rr[2] or 0, rr[3] or 0
+                    endpoint_agent = None
+                    agent_rows = _rows_or_empty("""SELECT agent_id,hostname,platform,os_version,
+                        agent_version,status,last_seen,last_ip,inventory_json,capabilities_json
+                        FROM remote_agents WHERE status!='REVOKED'
+                        AND (last_ip=? OR lower(hostname)=lower(?))
+                        ORDER BY CASE WHEN last_ip=? THEN 0 ELSE 1 END,last_seen DESC LIMIT 1""",
+                        (ip, d[3] or "", ip))
+                    if agent_rows:
+                        ar = agent_rows[0]
+                        try:
+                            agent_inventory = json.loads(ar[8] or "{}")
+                            if not isinstance(agent_inventory, dict):
+                                agent_inventory = {}
+                        except (TypeError, ValueError):
+                            agent_inventory = {}
+                        try:
+                            agent_capabilities = json.loads(ar[9] or "[]")
+                            if not isinstance(agent_capabilities, list):
+                                agent_capabilities = []
+                        except (TypeError, ValueError):
+                            agent_capabilities = []
+                        endpoint_agent = {
+                            "agent_id": ar[0], "hostname": ar[1], "platform": ar[2],
+                            "os_version": ar[3], "agent_version": ar[4], "status": ar[5],
+                            "last_seen": ar[6], "last_ip": ar[7],
+                            "capabilities": agent_capabilities, "inventory": agent_inventory,
+                        }
                     return self.send_json({
                         "device": {"ip": d[0], "mac": d[1], "manufacturer": d[2],
                             "hostname": d[3], "first_seen": d[4], "last_seen": d[5],
@@ -6663,6 +6690,7 @@ class Handler(BaseHTTPRequestHandler):
                         "identity_evidence": [{"timestamp": r[0], "source": r[1],
                             "attribute": r[2], "value": r[3], "confidence": r[4],
                             "class": r[5]} for r in identity_rows],
+                        "endpoint_agent": endpoint_agent,
                         "identity_assessments": [{"attribute":r[0],"value":r[1],"confidence":r[2],
                             "status":r[3],"sources":json.loads(r[4] or "[]"),
                             "conflicts":json.loads(r[5] or "[]"),"evidence_count":r[6],
