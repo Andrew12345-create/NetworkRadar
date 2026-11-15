@@ -1,25 +1,28 @@
-# NetworkRadar 12.1.0 — device intelligence workbench
+# NetworkRadar 12.2.0 — Multi-Network Intelligence foundation
 
-This milestone strengthens the existing multi-source identity engine and presents evidence quality more clearly in the dashboard. It is an incremental release, not a claim that every item in the broader NetworkRadar roadmap is complete.
+## Delivered
 
-## Device identity and dashboard improvements
+- Added stable opaque network workspace IDs separate from subnet strings.
+- Added fingerprint-to-workspace history so distinct networks sharing a subnet remain separately represented.
+- Added append-only interface observations and network-scoped device sightings without replacing legacy IP-keyed inventory.
+- Enumerates each active IPv4 adapter independently and records interface name, GUID, description, media type, IP/subnet, route metric, gateway, gateway MAC, DNS, DHCP, Wi-Fi SSID/BSSID and interface classification.
+- Parses multiple Windows WLAN interface blocks separately.
+- Added a dashboard Network Workspaces explorer with a workspace selector, interface history and device-sighting view.
+- Added read-only API routes for workspace directory, interface observations and workspace device sightings.
+- Fixed a security-critical issue: when a subnet-keyed legacy profile receives a different fingerprint, its approval and approval timestamp are reset. A different network sharing the subnet cannot inherit approval.
+- Preserved existing database tables and records; workspace tables and indexes are additive.
 
-- Added a reusable identity-quality assessment covering hardware, operating-system, network-identity, services, classification and evidence domains.
-- Reports evidence coverage, observed signal counts and contributing source families separately from identification confidence. Coverage is explicitly not a probability of correct identification.
-- Preserves conservative manufacturer/model semantics: IEEE address-block registrants are not presented as definitive device manufacturers, and exact model claims still require explicit device- or service-reported evidence.
-- Added an evidence-coverage panel to the device intelligence workspace.
-- Refined dashboard surfaces, cards, navigation, tables, modal tabs, focus states and responsive presentation with a consistent blue/cyan visual system.
-- Expanded device inventory search across OS, model, ports and service summary; added Unknown/low-evidence and High-confidence filters; added a visible model column.
-- Added regression tests for empty evidence, domain coverage, OUI-only observations and the distinction between coverage and identity probability.
-- Enabled the Windows Python 3.10–3.13 test workflow to run on pushes to `main`.
+## Important boundaries
+
+- Active scanning and authorisation remain bound to the current primary network. Selecting a historical workspace is browse-only.
+- Exact fingerprint matches reuse a workspace. Fingerprint drift currently creates a separate workspace; no automatic merge is attempted.
+- Legacy device inventory remains IP-keyed. Network-scoped sightings are recorded separately, but full migration of every event, DNS, DHCP, alert, investigation and device query to workspace scope is a subsequent milestone.
+- This is not concurrent active scanning across all adapters.
+- No live Windows adapter, Nmap/TShark or browser smoke test has yet been performed for this commit.
 
 ## Validation status
 
-The new identity-quality module's four focused unit tests passed in an isolated local check. The full repository test matrix and live Windows network-discovery smoke test have not yet been verified for this commit.
-
-## Remaining roadmap
-
-Deeper manufacturer/model enrichment, expanded Unknown Device Hunter triage, richer relationship visualisation and end-to-end Windows validation remain subsequent work.
+Automated tests have been added for overlapping subnets, workspace reuse, missing fingerprints, WLAN parsing, interface classification, network-scoped interface observations and approval isolation. CI status and the full repository test run remain to be confirmed.
 
 ---
 
