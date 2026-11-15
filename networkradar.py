@@ -1,5 +1,12 @@
 ﻿"""
-NetworkRadar 12.2.0 — local-first network discovery and device intelligence.
+NetworkRadar 12.4.0 — local-first network discovery and device intelligence.
+NetworkRadar 12.4.0 changes:
+  - Fixes gateway MAC discovery by removing the unsupported Get-NetNeighbor
+    -IPAddress parameter and filtering the selected interface's neighbour rows
+    against the exact gateway IP.
+  - Parses Windows netsh output label AP BSSID as the connected interface BSSID.
+  - Adds regression tests for real Windows WLAN output and gateway queries.
+
 Modular runtime + established intelligence core. Authorised networks only.
 
 12.2.0 changes:
@@ -954,9 +961,11 @@ def _gateway_mac_via_neighbor(gw_ip, interface_index=None):
 
     def _read_gateway_neighbor():
         interface_filter = f" -InterfaceIndex {idx}" if idx is not None else ""
+        # Get-NetNeighbor has no -IPAddress parameter. Query the selected
+        # interface neighbour table, then match the exact gateway IP below.
         rows = _ps(
             f"Get-NetNeighbor -AddressFamily IPv4{interface_filter} "
-            f"-IPAddress '{gateway}' -ErrorAction SilentlyContinue | "
+            "-ErrorAction SilentlyContinue | "
             "Select-Object IPAddress,InterfaceIndex,LinkLayerAddress,State "
             "| ConvertTo-Json -Depth 3"
         )
