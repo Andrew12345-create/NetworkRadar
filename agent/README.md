@@ -132,7 +132,7 @@ Endpoint inventory is shown separately from network-derived evidence. It is a de
 - The endpoint pins the certificate fingerprint; it does not accept a changed or unknown certificate.
 - Every report is authenticated with a per-agent HMAC key, timestamp and random nonce. The server rejects stale timestamps, invalid signatures and replayed nonces.
 - Enrolment uses a hashed, single-use, 15-minute token.
-- The client advertises only the `inventory` capability.
+- The client advertises only the `inventory-report` capability.
 - The client never polls `/agent/v1/commands` and does not implement remote command execution.
 - The server enforces advertised capability boundaries before queuing or delivering commands.
 - Revoking the agent in NetworkRadar prevents further authenticated reports.
