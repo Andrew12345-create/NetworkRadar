@@ -1306,11 +1306,17 @@ def is_authorized():
 
 def authorize_current(actor="local-user"):
     with NET_LOCK:
+        current_context = dict(NET_CTX)
         fp = NET_CTX.get("fingerprint", "")
         network = NET_CTX.get("network", "")
         conf = int(NET_CTX.get("confidence", 0) or 0)
     if not fp:
         raise RuntimeError("No fingerprint — cannot authorise")
+    if not has_strong_network_anchor(current_context):
+        raise RuntimeError(
+            "Refusing to authorise: no strong network anchor (gateway MAC or "
+            "interface-specific BSSID) was observed. Improve network identity "
+            "evidence before approving active discovery.")
     if conf < int(MIN_FP_CONFIDENCE * 100):
         raise RuntimeError(
             f"Refusing to authorise: fingerprint confidence {conf}% is below "
