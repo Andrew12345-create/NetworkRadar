@@ -19,6 +19,21 @@ class NetworkWorkspaceTests(unittest.TestCase):
         a = {"fingerprint": "fp-home", "network": "192.168.1.0/24", "ssid": "Home"}
         b = {"fingerprint": "fp-office", "network": "192.168.1.0/24", "ssid": "Office"}
         self.assertNotEqual(ensure_workspace(self.db, a, "t1"), ensure_workspace(self.db, b, "t2"))
+    def test_legacy_profile_does_not_transfer_approval_between_fingerprints(self):
+        from networkradar_modules.network.workspaces import upsert_legacy_network_profile
+        self.db.execute("""CREATE TABLE network_profiles(
+            network TEXT PRIMARY KEY, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+            interface TEXT DEFAULT '', gateway TEXT DEFAULT '', ssid TEXT DEFAULT '',
+            approved INTEGER DEFAULT 0, profile_name TEXT DEFAULT '', notes TEXT DEFAULT '',
+            fingerprint TEXT DEFAULT '', gateway_mac TEXT DEFAULT '', adapter_mac TEXT DEFAULT '',
+            dns_servers TEXT DEFAULT '', bssid TEXT DEFAULT '', last_authorized TEXT DEFAULT '',
+            confidence INTEGER DEFAULT 0)""")
+        upsert_legacy_network_profile(self.db, {"network":"192.168.1.0/24","fingerprint":"home-fp"}, "t1")
+        self.db.execute("UPDATE network_profiles SET approved=1,last_authorized='approved-at'")
+        upsert_legacy_network_profile(self.db, {"network":"192.168.1.0/24","fingerprint":"office-fp"}, "t2")
+        row = self.db.execute("SELECT approved,last_authorized,fingerprint FROM network_profiles").fetchone()
+        self.assertEqual(row, (0, "", "office-fp"))
+
     def test_same_fingerprint_reuses_workspace(self):
         a = {"fingerprint": "fp-a", "network": "10.0.0.0/24"}
         self.assertEqual(ensure_workspace(self.db, a, "t1"), ensure_workspace(self.db, a, "t2"))
