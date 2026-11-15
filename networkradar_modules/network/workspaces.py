@@ -58,6 +58,12 @@ def ensure_workspace(conn, detected, timestamp):
             "UPDATE network_fingerprint_history SET last_seen=? WHERE fingerprint=?",
             (timestamp, fingerprint),
         )
+        conn.execute(
+            "INSERT OR IGNORE INTO network_workspace_authorizations("
+            "network_id,fingerprint,approved,last_authorized,approved_by,updated_at) "
+            "VALUES(?,?,0,'','','')",
+            (network_id, fingerprint),
+        )
         return network_id
     network_id = uuid.uuid4().hex
     label = detected.get("ssid") or detected.get("network") or detected.get("interface") or "Discovered network"
@@ -74,6 +80,12 @@ def ensure_workspace(conn, detected, timestamp):
          str(detected.get("bssid") or ""), str(detected.get("interface") or ""),
          str(detected.get("interface_guid") or ""), int(detected.get("confidence") or 0),
          str(detected.get("fingerprint_raw") or "")),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO network_workspace_authorizations("
+        "network_id,fingerprint,approved,last_authorized,approved_by,updated_at) "
+        "VALUES(?,?,0,'','','')",
+        (network_id, fingerprint),
     )
     return network_id
 
