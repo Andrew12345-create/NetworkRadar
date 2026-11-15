@@ -381,6 +381,18 @@ class NetworkFingerprintDiagnosticsTests(unittest.TestCase):
 
 class PowerShellDiagnosticTests(unittest.TestCase):
     @patch.object(app.subprocess, "run")
+    def test_wlan_command_failure_is_included_in_fingerprint_diagnostics(self, run):
+        run.return_value.returncode = 1
+        run.return_value.stdout = ""
+        run.return_value.stderr = "WLAN AutoConfig service is not running."
+        app._PS_DIAGNOSTICS.records = []
+        self.assertEqual(app._wifi_details("Wi-Fi"), ("", ""))
+        record = app._PS_DIAGNOSTICS.records[0]
+        self.assertEqual(record["operation"], "netsh wlan show interfaces")
+        self.assertEqual(record["state"], "ERROR")
+        self.assertIn("AutoConfig", record["detail"])
+
+    @patch.object(app.subprocess, "run")
     def test_empty_query_result_is_reported(self, run):
         run.return_value.returncode = 0
         run.return_value.stdout = ""
