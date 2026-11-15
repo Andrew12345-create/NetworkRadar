@@ -413,7 +413,7 @@ def report_inventory(config: dict, inventory: dict, *, timeout: float = 10) -> d
 def run_agent(config: dict, *, once: bool = False,
               include_serial: bool = False, interval: int | None = None) -> None:
     """Report inventory periodically; no command polling or remote execution."""
-    delay = max(60, min(int(interval or config.get("interval_seconds", 300)), 3600))
+    delay = max(60, min(int(interval or config.get("interval_seconds", 300)), 600))
     while True:
         try:
             inventory = collect_inventory(include_serial=include_serial)
@@ -444,7 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--once", action="store_true",
                         help="Collect and report once, then exit.")
     parser.add_argument("--interval", type=int, default=None,
-                        help="Report interval in seconds (60–3600; default 300).")
+                        help="Report interval in seconds (60–600; default 300).")
     parser.add_argument("--include-serial", action="store_true",
                         help="Explicitly include BIOS and disk serial numbers in reports.")
     return parser
