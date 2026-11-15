@@ -7,6 +7,7 @@ on:
     branches:
       - "feature/**"
       - "audit/**"
+      - "main"
   workflow_dispatch:
 
 permissions:
