@@ -17,6 +17,10 @@ class FirewallDefaultPolicyTests(unittest.TestCase):
     def test_empty_device_is_still_allowed(self):
         self.assertEqual(default_device_decision({})["decision"], "ALLOW")
 
+    def test_default_allow_reason_is_explicit(self):
+        result = default_device_decision({"ip": "192.168.100.77"})
+        self.assertIn("Default policy", result["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()
