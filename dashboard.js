@@ -12,11 +12,11 @@ function filterDevices(){
  const q=($("deviceSearch")?.value||"").toLowerCase().trim();
  const st=$("deviceFilter")?.value||"ALL";
  const rows=deviceCache.filter(x=>{
-  const b=[x.ip,x.device_name,x.manual_name,x.device_type,x.manufacturer,x.mac,x.hostname,x.model].join(" ").toLowerCase();
-  const ok=st==="ALL"||(st==="ONLINE"&&x.status==="ONLINE")||(st==="OFFLINE"&&x.status==="OFFLINE")||(st==="TRUSTED"&&x.trust_state==="TRUSTED");
+  const b=[x.ip,x.device_name,x.manual_name,x.device_type,x.manufacturer,x.mac,x.hostname,x.model,x.os_guess,x.open_ports,x.service_summary].join(" ").toLowerCase();
+  const confidence=Number(x.identification_confidence||0);\n  const unknown=confidence<35||/unclass|unidentified|unknown/i.test(String(x.device_type||""));\n  const ok=st==="ALL"||(st==="ONLINE"&&x.status==="ONLINE")||(st==="OFFLINE"&&x.status==="OFFLINE")||(st==="TRUSTED"&&x.trust_state==="TRUSTED")||(st==="UNKNOWN"&&unknown)||(st==="HIGH_CONFIDENCE"&&confidence>=80);
   return ok&&(!q||b.includes(q));
  });
- $("deviceRows").innerHTML=rows.map(x=>`<tr class="clickrow" data-open-device="${esc(x.ip)}" tabindex="0" role="button"><td class="mono">${esc(x.ip)}</td><td>${esc(x.manual_name||x.device_name)}</td><td>${esc(x.device_type)}</td><td>${esc(x.manufacturer)}</td><td>${esc(x.identification_confidence)}%</td><td class="risk-${esc(x.risk_band||"UNKNOWN")}">${esc(x.risk_band||"UNKNOWN")}</td><td class="${x.status==="ONLINE"?"green":"muted"}">${esc(x.status)}</td></tr>`).join("")||'<tr><td colspan="7">No matches.</td></tr>';
+ $("deviceRows").innerHTML=rows.map(x=>`<tr class="clickrow" data-open-device="${esc(x.ip)}" tabindex="0" role="button"><td class="mono">${esc(x.ip)}</td><td>${esc(x.manual_name||x.device_name)}</td><td>${esc(x.device_type)}</td><td>${esc(x.model||"—")}</td><td>${esc(x.manufacturer)}</td><td>${esc(x.identification_confidence)}%</td><td class="risk-${esc(x.risk_band||"UNKNOWN")}">${esc(x.risk_band||"UNKNOWN")}</td><td class="${x.status==="ONLINE"?"green":"muted"}">${esc(x.status)}</td></tr>`).join("")||'<tr><td colspan="8">No matches.</td></tr>';
  $("deviceRows").querySelectorAll("[data-open-device]").forEach(row=>{
   row.addEventListener("click",()=>openDevice(row.dataset.openDevice));
   row.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openDevice(row.dataset.openDevice);}});
