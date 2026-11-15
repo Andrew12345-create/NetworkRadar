@@ -12,10 +12,10 @@ def classify_interface_type(name="", description="", media_type=""):
         return "VPN"
     if any(t in text for t in ("wi-fi", "wifi", "wireless", "802.11")):
         return "WIFI"
-    if "ethernet" in text or "802.3" in text:
-        return "ETHERNET"
     if any(t in text for t in ("virtual", "hyper-v", "vmware", "virtualbox", "loopback", "vethernet")):
         return "VIRTUAL"
+    if "ethernet" in text or "802.3" in text:
+        return "ETHERNET"
     return "OTHER"
 
 def parse_netsh_wlan_interfaces(output):
