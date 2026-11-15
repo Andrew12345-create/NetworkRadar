@@ -63,7 +63,7 @@ def validate_server_url(value: str) -> tuple[str, int]:
 def signature_payload(method: str, path: str, timestamp: str,
                       nonce: str, body: bytes) -> bytes:
     """Match the server's replay-resistant request-signature format exactly."""
-    return "\\n".join([
+    return "\n".join([
         str(method).upper(), str(path), str(timestamp), str(nonce),
         hashlib.sha256(body).hexdigest(),
     ]).encode("utf-8")
