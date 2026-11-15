@@ -6,6 +6,7 @@ from networkradar_modules.discovery.probes import (
     _SameHostRedirectHandler,
     is_same_private_http_host,
     netbios_name,
+    parse_upnp_description,
 )
 
 
@@ -82,6 +83,45 @@ class NetbiosProbeTests(unittest.TestCase):
             raise OSError("not installed")
 
         self.assertEqual(netbios_name("192.168.1.20", runner=fail), "")
+
+
+class UpnpDescriptionTests(unittest.TestCase):
+    def test_extracts_root_model_and_embedded_device_fields(self):
+        xml = b\'''<?xml version="1.0"?>
+        <root xmlns="urn:schemas-upnp-org:device-1-0">
+          <device>
+            <friendlyName>Office Router</friendlyName>
+            <manufacturer>Example Networks</manufacturer>
+            <modelName>XR-500</modelName>
+            <modelNumber>500</modelNumber>
+            <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+            <UDN>uuid:root-123</UDN>
+            <deviceList><device><friendlyName>Wi-Fi Radio</friendlyName>
+              <manufacturer>Example Networks</manufacturer>
+              <modelName>Radio-X</modelName><UDN>uuid:radio-456</UDN>
+            </device></deviceList>
+          </device>
+        </root>\'''
+        result = parse_upnp_description(xml)
+        self.assertEqual(result["friendlyname"], "Office Router")
+        self.assertEqual(result["manufacturer"], "Example Networks")
+        self.assertEqual(result["modelname"], "XR-500")
+        self.assertEqual(result["modelnumber"], "500")
+        self.assertEqual(result["udn"], "uuid:root-123")
+        self.assertEqual(result["embedded_devices"][0]["modelname"], "Radio-X")
+
+    def test_rejects_dtd_and_entity_declarations(self):
+        xml = b\'''<!DOCTYPE root [<!ENTITY x "expanded">]>
+        <root><device><friendlyName>&x;</friendlyName></device></root>\'''
+        with self.assertRaises(ValueError):
+            parse_upnp_description(xml)
+
+    def test_rejects_oversized_description(self):
+        with self.assertRaises(ValueError):
+            parse_upnp_description(b"x" * (256 * 1024 + 1))
+
+    def test_returns_empty_when_device_element_is_missing(self):
+        self.assertEqual(parse_upnp_description(b"<root><other/></root>"), {})
 
 
 if __name__ == "__main__":
