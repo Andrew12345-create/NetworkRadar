@@ -1,3 +1,27 @@
+# NetworkRadar 12.4.1 — Network Fingerprint Diagnostics and Safety Cleanup
+
+## Delivered
+
+- Diagnoses why an automatic network fingerprint is unavailable instead of returning only a generic authorisation error.
+- Exposes observed and missing fingerprint components and bounded per-command Windows PowerShell collection results through the existing `/api/network` response.
+- Explicitly identifies `NETWORKRADAR_NETWORK` as a manual scan-scope override, not proof of the currently connected network; the mode remains non-authorising.
+- Provides a specific PowerShell recovery instruction when an operator tries to authorise while manual override mode is active.
+- Removes an accidental hard-coded database update that reset approval for the single subnet `192.168.100.0/24` on every startup. Existing approvals for all networks are no longer modified by this unrelated migration code.
+- Adds regression tests for manual override behaviour and the reported Windows adapter/gateway/BSSID evidence.
+- Updates the launcher and application version to 12.4.1.
+
+## Security
+
+- No authorisation threshold or strong-anchor requirement has been weakened.
+- Manual network overrides remain unable to authorise active discovery.
+- PowerShell diagnostics record operation names, result state and bounded error text only; raw command output is not persisted.
+
+## Validation boundary
+
+Automated CI validates the regression tests. A live Windows restart is still required to confirm the user's current adapter state and determine whether a persistent `NETWORKRADAR_NETWORK` environment variable or a Windows collection failure caused the original message.
+
+---
+
 # NetworkRadar 12.4.0 — Strong Network Anchor Detection Fix
 
 ## Delivered
