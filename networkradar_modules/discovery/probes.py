@@ -24,20 +24,65 @@ def _clean_text(value, limit=180):
 
 
 def is_same_private_http_host(source_ip: str, url: str) -> bool:
+    """Accept only literal-IP HTTP URLs served by the SSDP responder itself."""
     try:
         parsed = urllib.parse.urlparse(url)
         target = parsed.hostname
-        if not target:
+        if (not target or parsed.username or parsed.password
+                or parsed.fragment or parsed.scheme.lower() != "http"):
+            return False
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
             return False
         target_ip = ipaddress.ip_address(target)
         source = ipaddress.ip_address(source_ip)
-        return (
-            target_ip == source
-            and target_ip.is_private
-            and parsed.scheme.lower() == "http"
-        )
+        return target_ip == source and target_ip.is_private
     except (ValueError, TypeError):
         return False
+
+
+def parse_upnp_description(xml_bytes: bytes) -> dict:
+    """Parse a bounded UPnP description; advertised fields remain unverified."""
+    if not isinstance(xml_bytes, (bytes, bytearray)):
+        raise TypeError("UPnP description must be bytes")
+    if len(xml_bytes) > 256 * 1024:
+        raise ValueError("UPnP description exceeds 256 KiB")
+    upper = bytes(xml_bytes).upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ValueError("DTD and entity declarations are not allowed")
+    root = ET.fromstring(xml_bytes)
+
+    def local_name(tag):
+        return str(tag).split("}")[-1].casefold()
+
+    def text_of(element, name):
+        for child in element.iter():
+            if local_name(child.tag) == name:
+                value = _clean_text(child.text or "", 240)
+                if value:
+                    return value
+        return ""
+
+    devices = [node for node in root.iter() if local_name(node.tag) == "device"]
+    if not devices:
+        return {}
+    fields = (
+        "friendlyname", "manufacturer", "manufacturerurl", "modelname",
+        "modelnumber", "modelurl", "devicetype", "serialnumber", "udn",
+        "upc", "presentationurl",
+    )
+    result = {key: text_of(devices[0], key) for key in fields}
+    result["embedded_devices"] = [
+        {
+            key: text_of(node, key)
+            for key in ("friendlyname", "manufacturer", "modelname",
+                        "modelnumber", "devicetype", "udn")
+        }
+        for node in devices[1:]
+    ]
+    result["embedded_devices"] = [
+        item for item in result["embedded_devices"] if any(item.values())
+    ][:32]
+    return result
 
 
 class _SameHostRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -137,16 +182,8 @@ def ssdp_scan(timeout: float = 2.0, *, app_version: str = "12.0.3") -> dict:
                     _SameHostRedirectHandler(ip)
                 )
                 with opener.open(request, timeout=2) as response:
-                    xml = response.read(256 * 1024)
-                root = ET.fromstring(xml)
-                for element in root.iter():
-                    tag = element.tag.split("}")[-1].lower()
-                    value = _clean_text(element.text or "")
-                    if tag in (
-                        "friendlyname", "manufacturer", "modelname",
-                        "modelnumber", "devicetype", "serialnumber",
-                    ):
-                        metadata[tag] = value
+                    xml = response.read(256 * 1024 + 1)
+                metadata.update(parse_upnp_description(xml))
             except Exception:
                 pass
             found[ip] = metadata
