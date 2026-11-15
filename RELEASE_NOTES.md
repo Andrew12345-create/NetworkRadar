@@ -15,6 +15,7 @@
 - No authorisation threshold or strong-anchor requirement has been weakened.
 - Manual network overrides remain unable to authorise active discovery.
 - Local PowerShell inventory queries no longer request `ExecutionPolicy Bypass`; they respect the host's configured policy.
+- Includes `netsh wlan show interfaces` failures and adapter-name mismatches in the same fingerprint diagnostics, so missing Wi-Fi evidence is not silently hidden.
 - PowerShell diagnostics record operation names, result state and bounded error text only; raw command output is not persisted.
 
 ## Validation boundary
