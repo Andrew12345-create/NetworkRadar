@@ -1,6 +1,16 @@
 ﻿"""
 NetworkRadar 12.2.0 — local-first network discovery and device intelligence.
-Modular runtime + established intelligence core. Authorised networks only.\n\n
+Modular runtime + established intelligence core. Authorised networks only.
+
+12.2.0 changes:
+  - Adds persistent network workspaces and exact fingerprint history.
+  - Collects active adapter contexts independently, including interface-scoped
+    gateway MAC, DNS, DHCP, Wi-Fi SSID/BSSID and route metrics.
+  - Adds network-scoped interface observations and device sightings.
+  - Resets legacy subnet-profile approval when its fingerprint changes.
+  - Keeps historical workspace browsing separate from active scan authorisation.
+
+
 12.0.1 changes:
   - Adds Phantom Terminal with authenticated interactive SSH sessions over a
     same-origin, local-only WebSocket bridge.
