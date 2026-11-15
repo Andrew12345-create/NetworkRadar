@@ -6662,9 +6662,11 @@ class Handler(BaseHTTPRequestHandler):
                             tr, ir, hr = rr[1] or 0, rr[2] or 0, rr[3] or 0
                     endpoint_agent = None
                     agent_rows = _rows_or_empty("""SELECT agent_id,hostname,platform,os_version,
-                        agent_version,status,last_seen,last_ip,inventory_json,capabilities_json
+                        agent_version,CASE WHEN last_seen<? THEN 'OFFLINE' ELSE status END,
+                        last_seen,last_ip,inventory_json,capabilities_json
                         FROM remote_agents WHERE status!='REVOKED'
-                        ORDER BY last_seen DESC LIMIT 500""")
+                        ORDER BY last_seen DESC LIMIT 500""",
+                        ((datetime.now()-timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"),))
                     device_mac = _normalise_mac(d[1] or "")
                     agent_matches = []
                     for ar in agent_rows:
