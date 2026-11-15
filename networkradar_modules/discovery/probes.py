@@ -55,7 +55,9 @@ def parse_upnp_description(xml_bytes: bytes) -> dict:
         return str(tag).split("}")[-1].casefold()
 
     def text_of(element, name):
-        for child in element.iter():
+        # Only inspect direct children so a nested device cannot donate its
+        # model/manufacturer to a parent device that did not advertise it.
+        for child in element:
             if local_name(child.tag) == name:
                 value = _clean_text(child.text or "", 240)
                 if value:
