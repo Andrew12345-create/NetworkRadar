@@ -1548,7 +1548,7 @@ def persist_identity(conn, device, ts):
         if sighting:
             conn.execute(
                 "UPDATE network_device_sightings SET fingerprint=?,mac=?,hostname=?,"
-                "last_seen=?,status='ONLINE' WHERE id=?",
+                "last_seen=?,status='ONLINE',missed_scans=0 WHERE id=?",
                 (active_fp, device.get("mac", ""), device.get("hostname", ""),
                  ts, sighting[0]),
             )
@@ -2785,26 +2785,33 @@ def update_network_sighting_presence(devices):
         workspace_id = NET_CTX.get("network_id", "")
     if not workspace_id:
         return 0
-    current_ips = sorted({str(d.get("ip") or "") for d in devices if d.get("ip")})
-    if not current_ips:
+    current_pairs = {
+        (str(d.get("ip") or ""), str(d.get("device_id") or ""))
+        for d in devices if d.get("ip") and d.get("device_id")
+    }
+    if not current_pairs:
         return 0
-    placeholders = ",".join("?" for _ in current_ips)
-    ts = now_text()
     def _w(conn):
-        conn.execute(
-            f"UPDATE network_device_sightings SET missed_scans=0,status='ONLINE',last_seen=? "
-            f"WHERE network_id=? AND ip IN ({placeholders})",
-            (ts, workspace_id, *current_ips),
-        )
-        cur = conn.execute(
-            f"UPDATE network_device_sightings SET missed_scans=COALESCE(missed_scans,0)+1, "
-            f"status=CASE WHEN COALESCE(missed_scans,0)+1>=? THEN 'OFFLINE' "
-            f"ELSE 'SUSPECTED_OFFLINE' END "
-            f"WHERE network_id=? AND ip NOT IN ({placeholders}) "
-            f"AND status IN ('ONLINE','SUSPECTED_OFFLINE')",
-            (DEVICE_OFFLINE_CONFIRM_SCANS, workspace_id, *current_ips),
-        )
-        return max(0, cur.rowcount)
+        rows = conn.execute(
+            "SELECT id,ip,device_id,status,COALESCE(missed_scans,0) "
+            "FROM network_device_sightings WHERE network_id=?",
+            (workspace_id,),
+        ).fetchall()
+        changed = 0
+        for row in rows:
+            if (str(row[1] or ""), str(row[2] or "")) in current_pairs:
+                continue
+            if row[3] not in ("ONLINE", "SUSPECTED_OFFLINE"):
+                continue
+            misses = int(row[4] or 0) + 1
+            state = ("OFFLINE" if misses >= DEVICE_OFFLINE_CONFIRM_SCANS
+                     else "SUSPECTED_OFFLINE")
+            conn.execute(
+                "UPDATE network_device_sightings SET missed_scans=?,status=? WHERE id=?",
+                (misses, state, row[0]),
+            )
+            changed += 1
+        return changed
     return DB_MANAGER.write(_w)
 
 def update_inventory(devices):
