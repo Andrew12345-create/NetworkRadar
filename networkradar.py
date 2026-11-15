@@ -6639,28 +6639,53 @@ class Handler(BaseHTTPRequestHandler):
                     agent_rows = _rows_or_empty("""SELECT agent_id,hostname,platform,os_version,
                         agent_version,status,last_seen,last_ip,inventory_json,capabilities_json
                         FROM remote_agents WHERE status!='REVOKED'
-                        AND (last_ip=? OR lower(hostname)=lower(?))
-                        ORDER BY CASE WHEN last_ip=? THEN 0 ELSE 1 END,last_seen DESC LIMIT 1""",
-                        (ip, d[3] or "", ip))
-                    if agent_rows:
-                        ar = agent_rows[0]
+                        ORDER BY last_seen DESC LIMIT 500""")
+                    device_mac = _normalise_mac(d[1] or "")
+                    agent_matches = []
+                    for ar in agent_rows:
                         try:
                             agent_inventory = json.loads(ar[8] or "{}")
                             if not isinstance(agent_inventory, dict):
                                 agent_inventory = {}
                         except (TypeError, ValueError):
                             agent_inventory = {}
+                        adapters = agent_inventory.get("network_adapters", [])
+                        if not isinstance(adapters, list):
+                            adapters = []
+                        adapter_macs = {
+                            _normalise_mac(item.get("mac", ""))
+                            for item in adapters if isinstance(item, dict) and item.get("mac")
+                        }
+                        adapter_macs.discard("")
+                        ip_match = str(ar[7] or "") == ip
+                        mac_match = bool(device_mac and device_mac in adapter_macs)
+                        # Hostnames alone are not a safe join key: duplicate or
+                        # client-supplied names could attach one endpoint to another.
+                        if not ip_match and not mac_match:
+                            continue
+                        # If both sides expose MACs, a contradictory MAC blocks
+                        # an IP-only association rather than misattributing hardware.
+                        if ip_match and device_mac and adapter_macs and not mac_match:
+                            continue
+                        score = 2 if ip_match else 1
                         try:
                             agent_capabilities = json.loads(ar[9] or "[]")
                             if not isinstance(agent_capabilities, list):
                                 agent_capabilities = []
                         except (TypeError, ValueError):
                             agent_capabilities = []
+                        agent_matches.append((score, str(ar[6] or ""), ar,
+                                              agent_inventory, agent_capabilities,
+                                              "OBSERVED_SOURCE_IP" if ip_match else "MATCHED_ADAPTER_MAC"))
+                    if agent_matches:
+                        agent_matches.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                        _, _, ar, agent_inventory, agent_capabilities, association_basis = agent_matches[0]
                         endpoint_agent = {
                             "agent_id": ar[0], "hostname": ar[1], "platform": ar[2],
                             "os_version": ar[3], "agent_version": ar[4], "status": ar[5],
                             "last_seen": ar[6], "last_ip": ar[7],
                             "capabilities": agent_capabilities, "inventory": agent_inventory,
+                            "association_basis": association_basis,
                         }
                     return self.send_json({
                         "device": {"ip": d[0], "mac": d[1], "manufacturer": d[2],
