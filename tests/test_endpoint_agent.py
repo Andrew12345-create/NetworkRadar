@@ -129,7 +129,7 @@ class PinnedTransportTests(unittest.TestCase):
 
 class CapabilityBoundaryTests(unittest.TestCase):
     def test_agent_is_inventory_only(self):
-        self.assertEqual(agent.CAPABILITIES, ["inventory"])
+        self.assertEqual(agent.CAPABILITIES, ["inventory-report"])
 
 
 if __name__ == "__main__":
