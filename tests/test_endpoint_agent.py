@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import unittest
+import unittest.mock
 
 from agent import networkradar_agent as agent
 
@@ -56,6 +57,74 @@ class AgentSignatureTests(unittest.TestCase):
             agent.make_auth_headers("bad-id", "ab" * 32, "POST", "/x", b"")
         with self.assertRaises(ValueError):
             agent.make_auth_headers("nr-" + "a" * 20, "bad", "POST", "/x", b"")
+
+
+class PinnedTransportTests(unittest.TestCase):
+    class FakeResponse:
+        status = 200
+
+        def read(self, size=-1):
+            return b'{"ok":true}'
+
+    class FakeConnection:
+        def __init__(self, certificate):
+            self.sock = type("FakeSocket", (), {
+                "getpeercert": lambda _self, binary_form=False: certificate
+            })()
+            self.request_called = False
+            self.closed = False
+
+        def connect(self):
+            return None
+
+        def request(self, *args, **kwargs):
+            self.request_called = True
+
+        def getresponse(self):
+            return PinnedTransportTests.FakeResponse()
+
+        def close(self):
+            self.closed = True
+
+    def test_certificate_mismatch_fails_before_http_request(self):
+        certificate = b"presented-leaf-certificate"
+        connection = self.FakeConnection(certificate)
+        wrong_pin = hashlib.sha256(b"different-certificate").hexdigest()
+        with unittest.mock.patch.object(
+            agent.http.client, "HTTPSConnection", return_value=connection
+        ), unittest.mock.patch.object(agent.ssl, "SSLContext"):
+            client = agent.PinnedHTTPSClient(
+                "https://radar.local:8767", wrong_pin
+            )
+            with self.assertRaises(agent.ssl.SSLError):
+                client.request("POST", "/agent/v1/report", b"{}")
+        self.assertFalse(connection.request_called)
+        self.assertTrue(connection.closed)
+
+    def test_matching_certificate_pin_allows_signed_transport(self):
+        certificate = b"presented-leaf-certificate"
+        connection = self.FakeConnection(certificate)
+        pin = hashlib.sha256(certificate).hexdigest()
+        with unittest.mock.patch.object(
+            agent.http.client, "HTTPSConnection", return_value=connection
+        ), unittest.mock.patch.object(agent.ssl, "SSLContext"):
+            client = agent.PinnedHTTPSClient(
+                "https://radar.local:8767", pin
+            )
+            status, payload = client.request("POST", "/agent/v1/report", b"{}")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(connection.request_called)
+        self.assertTrue(connection.closed)
+
+    def test_oversized_body_is_rejected_before_connection(self):
+        client = agent.PinnedHTTPSClient(
+            "https://radar.local:8767", "ab" * 32
+        )
+        with unittest.mock.patch.object(agent.http.client, "HTTPSConnection") as connection:
+            with self.assertRaisesRegex(ValueError, "64 KiB"):
+                client.request("POST", "/agent/v1/report", b"x" * 65537)
+            connection.assert_not_called()
 
 
 class CapabilityBoundaryTests(unittest.TestCase):
