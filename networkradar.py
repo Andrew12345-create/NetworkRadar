@@ -1035,22 +1035,45 @@ def _gateway_mac_via_neighbor(gw_ip, interface_index=None):
 
 def _wifi_details(interface_name=None):
     """Return SSID/BSSID for the requested WLAN interface, never another adapter."""
+    records = getattr(_PS_DIAGNOSTICS, "records", None)
     try:
         p = subprocess.run(["netsh", "wlan", "show", "interfaces"],
                            capture_output=True, text=True, timeout=8,
                            encoding="utf-8", errors="replace")
-    except Exception:
+    except Exception as exc:
+        if records is not None:
+            records.append({"operation": "netsh wlan show interfaces",
+                            "state": "ERROR", "detail": str(exc)[:240]})
         return "", ""
     if p.returncode != 0:
+        if records is not None:
+            detail = (p.stderr or "").strip() or f"netsh exited with code {p.returncode}."
+            records.append({"operation": "netsh wlan show interfaces",
+                            "state": "ERROR", "detail": detail[-240:]})
         return "", ""
     rows = parse_netsh_wlan_interfaces(p.stdout)
     if interface_name:
         target = str(interface_name).strip().casefold()
         match = next((row for row in rows
                       if str(row.get("name", "")).strip().casefold() == target), None)
-        return (match.get("ssid", ""), match.get("bssid", "")) if match else ("", "")
+        if match:
+            if records is not None:
+                records.append({"operation": "netsh wlan show interfaces",
+                                "state": "OK", "detail": "Selected WLAN interface matched."})
+            return match.get("ssid", ""), match.get("bssid", "")
+        if records is not None:
+            records.append({"operation": "netsh wlan show interfaces",
+                            "state": "MISMATCH",
+                            "detail": "No WLAN interface matched the selected Windows adapter."})
+        return "", ""
     if rows:
+        if records is not None:
+            records.append({"operation": "netsh wlan show interfaces",
+                            "state": "OK", "detail": "WLAN interface data parsed."})
         return rows[0].get("ssid", ""), rows[0].get("bssid", "")
+    if records is not None:
+        records.append({"operation": "netsh wlan show interfaces",
+                        "state": "EMPTY", "detail": "No WLAN interfaces were returned."})
     return "", ""
 
 def detect_network():
