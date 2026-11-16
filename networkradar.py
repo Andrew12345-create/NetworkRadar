@@ -2802,8 +2802,9 @@ def service_banner_intelligence(ip, ports, timeout=1.5):
                             try:
                                 obj = json.loads(raw[:16000])
                                 if isinstance(obj, dict):
-                                    for key in ("name", "product", "model", "manufacturer", "deviceName"):
+                                    for key in ("model", "manufacturer", "product", "deviceName", "name"):
                                         if isinstance(obj.get(key), (str, int, float)):
+                                            item["api_identity_key"] = key
                                             item["api_identity"] = _clean(str(obj[key]), 160)
                                             break
                             except Exception:
