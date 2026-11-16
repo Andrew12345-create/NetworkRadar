@@ -78,6 +78,14 @@ class ScanQualityReportTests(unittest.TestCase):
         self.assertEqual(coverage["coverage_percent"], 20)
         self.assertEqual(coverage["average_confidence"], 68.0)
 
+    def test_unavailable_identity_query_is_not_reported_as_zero_coverage(self):
+        self.conn.execute("DROP TABLE devices")
+        result = self.run_report()
+        self.assertFalse(result["identity_coverage"]["available"])
+        self.assertIsNone(result["identity_coverage"]["coverage_percent"])
+        self.assertTrue(any("Identity coverage unavailable" in reason
+                            for reason in result["reasons"]))
+
     def test_no_scan_and_no_devices_return_zero_without_crashing(self):
         result = self.run_report()
         self.assertEqual(result["score"], 65)
