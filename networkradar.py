@@ -1323,9 +1323,10 @@ def detect_network():
             if next_hop and next_hop not in ("0.0.0.0", ""):
                 gateway_val = str(next_hop)
                 gw_class = Conf.CONFIRMED
-                gw_mac = _gateway_mac_via_neighbor(
-                    gateway_val, None if adapter.get("_native_fallback") else idx
-                ) or ""
+                # ipconfig fallback has no trustworthy interface index.
+                # Do not read an unscoped neighbour entry as a strong identity anchor.
+                if not adapter.get("_native_fallback"):
+                    gw_mac = _gateway_mac_via_neighbor(gateway_val, idx) or ""
         dns_servers = sorted(set(dns_by_idx.get(idx, [])))
         dhcp_flag = dhcp_by_idx.get(idx, "")
         ssid, bssid = _wifi_details(adapter["name"])
