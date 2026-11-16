@@ -68,12 +68,19 @@ _RULES = {
         "endpoint_agent": (r"\b(macos|macbook|imac|mac mini|darwin)\b", 0.96, "Authenticated endpoint inventory reports Apple platform"),
     },
     "Windows computer": {
-        "reported_name": (r"\b(windows|win10|win11|thinkpad|elitebook|latitude|optiplex|probook|surface pro|surface laptop)\b", 0.70, "Windows/computer name token"),
+        "reported_name": (r"\b(windows|win10|win11|windows computer)\b", 0.70, "Windows OS/computer name token"),
         "nmap_os": (r"\b(windows|microsoft)\b", 0.91, "Nmap OS fingerprint reports Windows"),
         "nmap_script": (r"\bwindows (?:10|11|server)|microsoft windows|smb-os-discovery", 0.86, "SMB/Nmap host script reports Windows"),
         "snmp": (r"\b(windows|microsoft)\b", 0.75, "SNMP system description reports Windows"),
         "dhcp": (r"\bmsft\s*\d", 0.72, "Microsoft DHCP vendor-class identifier"),
         "endpoint_agent": (r"\b(windows|thinkpad|elitebook|latitude|optiplex|probook|surface)\b", 0.98, "Authenticated endpoint OS/hardware inventory"),
+    },
+    "Laptop / computer": {
+        # Product-family tokens can be concatenated in Windows hostnames
+        # (for example ANDREWSTHINKPAD). This supports a hardware-class
+        # hypothesis without inferring Windows or an exact model.
+        "reported_name": (r"(thinkpad|elitebook|latitude|optiplex|probook|macbook|mac mini|mac studio|mac pro|imac|surface pro|surface laptop)", 0.96, "Recognised laptop/computer product-family token in reported name"),
+        "endpoint_agent": (r"\\b(laptop|notebook|workstation|desktop)\\b", 0.96, "Authenticated endpoint inventory reports computer hardware class"),
     },
     "Linux / Unix computer": {
         "reported_name": (r"\b(ubuntu|debian|fedora|arch linux|freebsd|openbsd|linux workstation)\b", 0.66, "Linux/Unix name token"),
@@ -245,7 +252,7 @@ def _build_facts(device: Mapping[str, Any]) -> list[dict]:
     name_fields = (
         ("hostname", "DHCP/reverse-resolved hostname", 0.52),
         ("friendly_name", "Device-advertised friendly name", 0.60),
-        ("device_name", "Observed inventory device name", 0.58),
+        ("device_name", "Observed inventory device name", 0.68),
         ("netbios_name", "NetBIOS computer name", 0.68),
         ("computer_name", "Computer name observation", 0.64),
         ("dhcp_hostname", "DHCP option 12 hostname", 0.55),
