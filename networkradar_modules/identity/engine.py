@@ -476,9 +476,9 @@ def _os_assessment(device: Mapping[str, Any], facts: list[dict]) -> dict:
         if not isinstance(dhcp_row, Mapping):
             continue
         vendor_class = _text(dhcp_row.get("vendor_class"), 180)
-        if re.search(r"\\bandroid[-_ ]dhcp\\b", vendor_class, re.I):
+        if re.search(r"\bandroid[-_ ]dhcp\b", vendor_class, re.I):
             candidates.append(("DHCP client fingerprint (inferred)", "Android client stack (vendor class)", 0.72))
-        elif re.search(r"\\bmsft\\s*\\d", vendor_class, re.I):
+        elif re.search(r"\bmsft\s*\d", vendor_class, re.I):
             candidates.append(("DHCP client fingerprint (inferred)", "Microsoft Windows client stack (vendor class)", 0.64))
     endpoint = device.get("endpoint_inventory") or {}
     if isinstance(endpoint, Mapping):
