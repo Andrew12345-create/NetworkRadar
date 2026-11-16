@@ -21,6 +21,9 @@ class NeighborParserTests(unittest.TestCase):
   self.assertEqual(parse_windows_neighbor_rows(SAMPLE,"not-a-network"),[])
   self.assertEqual(parse_windows_neighbor_rows("{bad","192.168.100.0/24"),[])
   self.assertEqual(parse_windows_neighbor_rows(SAMPLE,"2001:db8::/64"),[])
+ def test_interface_index_can_be_scoped(self):
+  rows=parse_windows_neighbor_rows(SAMPLE,"192.168.100.0/24",interface_index=9)
+  self.assertEqual(rows,[])
 
 class NeighborCollectionTests(unittest.TestCase):
  def test_read_only_powershell_collection(self):
