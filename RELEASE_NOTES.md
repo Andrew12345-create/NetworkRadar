@@ -8,7 +8,8 @@
 - Makes scan queue failures visible instead of treating every HTTP response as successful.
 
 ## Discovery transparency
-- Separates Nmap host discovery, Windows neighbour-cache collection, inventory persistence, service discovery and identity enrichment into visible progress stages.
+- Separates Nmap host discovery, Windows neighbour-cache collection, inventory persistence, mDNS/DNS-SD service discovery and identity enrichment into visible progress stages.
+- Refreshes the bounded local mDNS/DNS-SD browse on each authorised scan and runs the deeper selected-port/OS/service fingerprint pass every five scans instead of every ten, making new device details surface sooner while keeping heavier probing rate-limited.
 - Makes it explicit when devices respond but cannot yet be confidently identified.
 - Does not claim that every device can always be detected: sleeping/offline devices, client isolation, VLAN boundaries, firewalls, randomized MACs and devices that do not advertise services can limit visibility. Historical records and unknown classifications are retained rather than inventing names or models.
 - Active discovery remains restricted to the application's existing network-authorisation gate and local network scope.
