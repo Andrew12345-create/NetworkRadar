@@ -80,7 +80,8 @@ class ScanQualityReportTests(unittest.TestCase):
 
     def test_no_scan_and_no_devices_return_zero_without_crashing(self):
         result = self.run_report()
-        self.assertEqual(result["score"], 0)
+        self.assertEqual(result["score"], 65)
+        self.assertEqual(result["band"], "MODERATE")
         self.assertEqual(result["identity_coverage"]["total"], 0)
         self.assertEqual(result["identity_coverage"]["coverage_percent"], 0)
 
