@@ -24,7 +24,7 @@ def _probe_one(target: tuple[str, int], *, connector: Callable, timeout: float):
     try:
         sock = connector((ip, port), timeout=timeout)
         return ip, port, True
-    except (OSError, TimeoutError, socket.timeout):
+    except Exception:
         return ip, port, False
     finally:
         if sock is not None:
@@ -54,8 +54,13 @@ def sweep_tcp_hosts(
         scope = ipaddress.ip_network(str(network), strict=False)
     except (TypeError, ValueError) as exc:
         raise ValueError("A valid IPv4 network scope is required.") from exc
-    if scope.version != 4 or not scope.is_private:
-        raise ValueError("TCP discovery is restricted to private IPv4 networks.")
+    private_ranges = (
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16"),
+    )
+    if scope.version != 4 or not any(scope.subnet_of(item) for item in private_ranges):
+        raise ValueError("TCP discovery is restricted to RFC1918 private IPv4 networks.")
     targets = [str(ip) for ip in scope.hosts()]
     if len(targets) > int(max_hosts):
         raise ValueError(
@@ -85,7 +90,11 @@ def sweep_tcp_hosts(
             if is_open:
                 open_by_ip.setdefault(ip, []).append(port)
             if progress and (completed == len(work) or completed % 64 == 0):
-                progress(completed, len(work), len(open_by_ip))
+                try:
+                    progress(completed, len(work), len(open_by_ip))
+                except Exception:
+                    # UI telemetry must never abort or cancel network discovery.
+                    pass
     devices = []
     for ip, found_ports in sorted(open_by_ip.items(), key=lambda row: ipaddress.ip_address(row[0])):
         found_ports = sorted(set(found_ports))
