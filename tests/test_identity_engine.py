@@ -14,6 +14,7 @@ class AdvancedDeviceProfileTests(unittest.TestCase):
         self.assertEqual(result["selected_category"], "Android mobile device")
         self.assertGreaterEqual(result["confidence"], 58)
         self.assertIn("dhcp", result["source_families"])
+        self.assertEqual(result["operating_system"]["family"], "Android")
 
     def test_oui_and_randomized_mac_never_classify_phone_or_model(self):
         result = analyse_device_profile({
