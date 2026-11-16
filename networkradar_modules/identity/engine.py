@@ -106,7 +106,7 @@ _RULES = {
         "nmap_service": (r"\b(dial|plex|dlna|upnp)\b", 0.66, "Nmap identifies a media service"),
     },
     "Media receiver / streamer": {
-        "mdns": (r"_googlecast\._tcp|_airplay\._tcp|_raop\._tcp|_mediaremotetv\._tcp|_spotify-connect\._tcp", 0.84, "Media receiver/streaming service; physical form factor not established"),
+        "mdns": (r"_googlecast\._tcp|_airplay\._tcp|_raop\._tcp|_mediaremotetv\._tcp|_spotify-connect\._tcp", 0.94, "Media receiver/streaming service; physical form factor not established"),
         "upnp": (r"\b(google cast|chromecast|media renderer|dlna renderer)\b", 0.78, "UPnP media receiver description"),
     },
     "Smart speaker / audio": {
