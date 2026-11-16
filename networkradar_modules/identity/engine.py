@@ -404,6 +404,9 @@ def _score_categories(facts: list[dict], device: Mapping[str, Any]) -> tuple[lis
 
 
 def _extract_reported_model(device: Mapping[str, Any]) -> str:
+    endpoint = device.get("endpoint_inventory") or {}
+    if isinstance(endpoint, Mapping) and _present(endpoint.get("model")):
+        return _text(endpoint.get("model"), 160)
     ssdp = device.get("ssdp_intel") or {}
     if isinstance(ssdp, Mapping):
         model = _text(ssdp.get("modelname"), 120)
@@ -425,6 +428,9 @@ def _extract_reported_model(device: Mapping[str, Any]) -> str:
 
 
 def _extract_reported_manufacturer(device: Mapping[str, Any]) -> str:
+    endpoint = device.get("endpoint_inventory") or {}
+    if isinstance(endpoint, Mapping) and _present(endpoint.get("manufacturer")):
+        return _text(endpoint.get("manufacturer"), 160)
     ssdp = device.get("ssdp_intel") or {}
     if isinstance(ssdp, Mapping) and _present(ssdp.get("manufacturer")):
         return _text(ssdp.get("manufacturer"), 160)
@@ -455,6 +461,16 @@ def _os_assessment(device: Mapping[str, Any], facts: list[dict]) -> dict:
             match = re.search(r"^\s*OS:\s*(.+)$", output, re.I | re.M)
             if match:
                 candidates.append(("Nmap SMB OS discovery", _text(match.group(1), 200), 0.90))
+    endpoint = device.get("endpoint_inventory") or {}
+    if isinstance(endpoint, Mapping):
+        os_data = endpoint.get("operating_system") or {}
+        if isinstance(os_data, Mapping):
+            endpoint_os = " ".join(_text(os_data.get(key), 120)
+                                   for key in ("caption", "name", "version", "build"))
+            if _present(endpoint_os):
+                candidates.append(("Authenticated endpoint inventory", endpoint_os, 0.99))
+        elif _present(os_data):
+            candidates.append(("Authenticated endpoint inventory", _text(os_data, 200), 0.99))
     family = ""
     text = " ".join(value.lower() for _, value, _ in candidates)
     if re.search(r"\bandroid\b", text):
