@@ -78,6 +78,14 @@ class ScanQualityReportTests(unittest.TestCase):
         self.assertEqual(coverage["coverage_percent"], 20)
         self.assertEqual(coverage["average_confidence"], 68.0)
 
+    def test_empty_inventory_is_available_zero_percent_coverage(self):
+        result = self.run_report()
+        coverage = result["identity_coverage"]
+        self.assertTrue(coverage["available"])
+        self.assertEqual(coverage["total"], 0)
+        self.assertEqual(coverage["classified"], 0)
+        self.assertEqual(coverage["coverage_percent"], 0)
+
     def test_unavailable_identity_query_is_not_reported_as_zero_coverage(self):
         self.conn.execute("DROP TABLE devices")
         result = self.run_report()
