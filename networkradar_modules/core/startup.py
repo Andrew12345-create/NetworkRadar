@@ -34,7 +34,7 @@ def acquire_instance_lock(path: str | os.PathLike[str]) -> None:
         try:
             handle.seek(0, os.SEEK_END)
             if handle.tell() == 0:
-                handle.write(b"\\0")
+                handle.write(b"\0")
                 handle.flush()
             handle.seek(0)
             if os.name == "nt":
@@ -55,7 +55,7 @@ def acquire_instance_lock(path: str | os.PathLike[str]) -> None:
                     ) from exc
             handle.seek(0)
             handle.truncate()
-            handle.write(f"pid={os.getpid()}\\n".encode("ascii"))
+            handle.write(f"pid={os.getpid()}\n".encode("ascii"))
             handle.flush()
             _lock_handle = handle
         except Exception:
@@ -123,7 +123,7 @@ def _windows_excluded_tcp_ports(port: int) -> list[tuple[str, int, int, bool]]:
             if "start" in lowered and ("end" in lowered or "number" in lowered):
                 header = lowered
                 continue
-            row = re.match(r"^\\s*(\\d+)\\s+(\\d+)(?:\\s+(\\*))?\\s*$", line)
+            row = re.match(r"^\s*(\d+)\s+(\d+)(?:\s+(\*))?\s*$", line)
             if not row:
                 continue
             start, second = int(row.group(1)), int(row.group(2))
