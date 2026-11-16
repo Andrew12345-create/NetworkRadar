@@ -83,7 +83,9 @@ class ActiveDiscoveryAuthorisationTests(unittest.TestCase):
             "vendor": "Example", "hostname": "-"
         }], complete_scope=False)
         sql = "\n".join(statement for statement, _args in conn.statements)
-        self.assertNotIn("offline_misses=", sql)
+        # Resetting the miss counter for the device actually seen is valid;
+        # the partial scan must not update devices that were absent.
+        self.assertNotIn("UPDATE devices SET offline_misses", sql)
         self.assertNotIn("status='OFFLINE'", sql)
 
     @patch.object(app.DB_MANAGER, "write")
@@ -95,7 +97,7 @@ class ActiveDiscoveryAuthorisationTests(unittest.TestCase):
             "vendor": "Example", "hostname": "-"
         }], complete_scope=True)
         sql = "\n".join(statement for statement, _args in conn.statements)
-        self.assertIn("offline_misses=", sql)
+        self.assertIn("UPDATE devices SET offline_misses", sql)
 
     @patch.object(app, "_ssdp_scan")
     @patch.object(app, "is_authorized", return_value=False)
