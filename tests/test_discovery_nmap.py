@@ -125,6 +125,24 @@ class NmapExecutionTests(unittest.TestCase):
             self.assertEqual(calls[0][1]["timeout"], 150)
             self.assertIn("scan ok", log.read_text(encoding="utf-8"))
 
+    def test_empty_arp_scan_uses_standard_discovery_fallback(self):
+        calls = []
+        def fake_runner(command, **kwargs):
+            calls.append(command)
+            if len(calls) == 1:
+                return SimpleNamespace(returncode=0, stdout="<nmaprun/>", stderr="")
+            return SimpleNamespace(returncode=0, stdout=NMAP_XML, stderr="fallback ok")
+
+        with tempfile.TemporaryDirectory() as directory:
+            devices, duration = run_nmap_discovery(
+                "192.168.1.0/24", "nmap.exe", Path(directory) / "nmap.log",
+                runner=fake_runner,
+            )
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(calls[0][1:4], ["-sn", "-PR", "-n"])
+        self.assertEqual(calls[1][1:4], ["-sn", "-n", "--reason"])
+        self.assertGreaterEqual(duration, 0)
+
     def test_nonzero_exit_raises_with_stderr_context(self):
         def fake_runner(command, **kwargs):
             return SimpleNamespace(
