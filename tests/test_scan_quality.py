@@ -1,6 +1,7 @@
 """Regression tests for scan quality and identity coverage reporting."""
 import sqlite3
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import networkradar as app
@@ -38,12 +39,25 @@ class ScanQualityReportTests(unittest.TestCase):
     def test_score_has_exactly_one_hundred_available_points(self):
         self.conn.execute(
             "INSERT INTO scans(timestamp,network,hosts_up,duration) VALUES(?,?,?,?)",
-            ("2026-11-16 07:00:00", "192.168.100.0/24", 14, 2.5),
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "192.168.100.0/24", 14, 2.5),
         )
         result = self.run_report()
         self.assertEqual(result["score"], 100)
         self.assertEqual(sum(item["maximum"] for item in result["components"]), 100)
         self.assertEqual(sum(item["score"] for item in result["components"]), 100)
+
+    def test_stale_scan_reduces_operational_quality_score(self):
+        stale = (datetime.now() - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S")
+        self.conn.execute(
+            "INSERT INTO scans(timestamp,network,hosts_up,duration) VALUES(?,?,?,?)",
+            (stale, "192.168.100.0/24", 14, 2.5),
+        )
+        result = self.run_report()
+        self.assertEqual(result["score"], 90)
+        freshness = next(item for item in result["components"]
+                         if item["key"] == "scan_freshness")
+        self.assertEqual(freshness["score"], 0)
+        self.assertEqual(freshness["maximum"], 10)
 
     def test_default_and_ambiguous_device_labels_are_not_classified(self):
         self.conn.executemany(
