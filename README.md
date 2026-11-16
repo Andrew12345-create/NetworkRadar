@@ -1,4 +1,4 @@
-# NetworkRadar 12.7.0
+# NetworkRadar 12.8.0
 
 NetworkRadar is a Windows-focused, local-first network discovery and device-intelligence application. It combines authorised network discovery, device inventory, DNS/DHCP/ARP observations, identity evidence, historical tracking, exposure observations, investigations and a localhost dashboard. Optional management features include SSH terminal access and Windows/endpoint-management integrations.
 
@@ -20,6 +20,18 @@ The dashboard is organised into six switchable workspaces. The workspace shell g
 - **Intelligence & Reports:** Local intelligence assistant, recent events and report generation.
 
 The sidebar and workspace tabs provide the same six destinations. Tabs support keyboard navigation and adapt to smaller screens. Existing feature panels remain available inside their corresponding workspace.
+
+## DHCP identity enrichment (12.8.0)
+
+DHCP capture now records additional client-supplied identity metadata where present:
+
+- **Option 93 — Client System Architecture:** parsed as a PXE/pre-boot architecture observation. It is not interpreted as the installed operating system or hardware model.
+- **Option 77 — User Class:** retained as an observed client-supplied label.
+- **Option 81 — Client FQDN:** retained as an observed client-supplied name.
+
+These fields are stored additively in `dhcp_events`, included in the device dossier's DHCP history, and passed to the DHCP fingerprint interpreter. Existing DHCP rows remain valid and display blank values for fields that were not captured. The option 97 machine GUID is intentionally not collected by default because it is a stable endpoint identifier and is not necessary for this discovery increment.
+
+Option 93 semantics follow [RFC 4578](https://www.rfc-editor.org/rfc/rfc4578.html); the capture field names are checked against the [Wireshark DHCP display-filter reference](https://www.wireshark.org/docs/dfref/d/dhcp.html).
 
 ## RADAR IDENTITY foundation
 
