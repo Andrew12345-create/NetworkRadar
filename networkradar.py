@@ -1,5 +1,17 @@
 ﻿"""
-NetworkRadar 12.9.0 — local-first network discovery and device intelligence.
+NetworkRadar 13.0.0 — evidence-fused device intelligence and deep discovery.
+NetworkRadar 13.0.0 changes:
+  - Replaces additive MAC/hostname confidence with a source-independent identity engine.
+  - Ranks device-family hypotheses using DHCP, Nmap OS/service, UPnP, mDNS,
+    SNMP, LLDP/CDP, endpoint inventory and safe Nmap script evidence.
+  - Separates reported device manufacturer/model from the IEEE NIC registrant.
+  - Adds targeted safe TCP/UDP Nmap enrichment, including SMB OS, TLS, UPnP
+    and DNS-SD script observations on deep scans.
+  - Shows ranked hypotheses, source families, OS evidence, TCP/UDP ports,
+    script coverage and collection limitations in the device dossier.
+  - Preserves the last strong identity profile when a shallow scan has weaker
+    evidence; ambiguous competing hypotheses are not promoted to a device type.
+
 NetworkRadar 12.9.0 changes:
   - Uses explicit Nmap ARP host discovery with reverse-DNS lookups disabled.
   - Supplements Nmap with the Windows IPv4 neighbour table, promoting only
