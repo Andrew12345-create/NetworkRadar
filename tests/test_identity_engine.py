@@ -42,9 +42,10 @@ class AdvancedDeviceProfileTests(unittest.TestCase):
             "hostname": "",
             "device_name": "ANDREWSTHINKPAD",
         })
-        self.assertEqual(result["category"], "Windows computer")
-        self.assertEqual(result["selected_category"], "Unclassified network device")
-        self.assertGreater(result["confidence"], 0)
+        self.assertEqual(result["category"], "Laptop / computer")
+        self.assertEqual(result["selected_category"], "Laptop / computer")
+        self.assertGreaterEqual(result["confidence"], 58)
+        self.assertEqual(result["operating_system"]["family"], "")
         self.assertIn("reported_name", result["source_families"])
         self.assertEqual(result["evidence"][0]["value"], "ANDREWSTHINKPAD")
 
