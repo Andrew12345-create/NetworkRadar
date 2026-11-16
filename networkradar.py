@@ -1704,7 +1704,11 @@ def discover_devices():
     network = current_network()
     devices, duration = run_nmap_discovery(network, NMAP, NMAP_LOG)
     neighbour_started = time.monotonic()
-    snapshot = collect_windows_neighbor_cache(network)
+    with NET_LOCK:
+        interface_index = NET_CTX.get("interface_index")
+    snapshot = collect_windows_neighbor_cache(
+        network, interface_index=interface_index
+    )
     devices = merge_reachable_neighbors(devices, snapshot.get("records", []))
     duration = round(duration + (time.monotonic() - neighbour_started), 2)
     if snapshot.get("status") == "ERROR":
