@@ -1,3 +1,12 @@
+# NetworkRadar 13.1.1 — Windows Dashboard Port Binding
+
+## Startup reliability
+- Diagnoses Windows `WSAEACCES` / error 10013 bind failures and checks IPv4 and IPv6 TCP excluded-port ranges with `netsh` when available.
+- Explains that Windows can reserve a TCP port even when `Get-NetTCPConnection` shows no listening process.
+- Uses direct bind attempts rather than a check-then-bind probe, and closes partially-created HTTP server sockets after bind or activation failures.
+- Preserves the existing security/operational policy: port 8766 remains authoritative; alternate ports are considered only with explicit `--allow-alt-port` consent.
+- Adds regression tests for strict port selection, explicit alternate selection, cleanup, invalid ranges and Windows excluded-port diagnostics.
+
 # NetworkRadar 13.1.0 — Identity Coverage and Operational Health
 
 ## Identity evidence
