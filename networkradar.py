@@ -4360,8 +4360,32 @@ def scan_quality_report(conn=None):
             })
 
         if scan:
-            add_component("completed_scan", "Completed scan", 25, 25,
+            add_component("completed_scan", "Completed scan", 15, 15,
                           "A completed discovery scan is recorded.")
+            try:
+                observed_at = datetime.fromisoformat(str(scan[0]).replace("Z", "+00:00"))
+                clock_now = datetime.now(observed_at.tzinfo) if observed_at.tzinfo else datetime.now()
+                age_seconds = (clock_now - observed_at).total_seconds()
+                if age_seconds < -300:
+                    freshness_points = 0
+                    freshness_detail = "Latest scan timestamp is unexpectedly in the future."
+                    reasons.append(freshness_detail)
+                else:
+                    age_seconds = max(0, age_seconds)
+                    if age_seconds <= 3600:
+                        freshness_points, freshness_detail = 10, "Latest scan is less than one hour old."
+                    elif age_seconds <= 86400:
+                        freshness_points, freshness_detail = 7, "Latest scan is less than 24 hours old."
+                    elif age_seconds <= 604800:
+                        freshness_points, freshness_detail = 3, "Latest scan is less than seven days old."
+                    else:
+                        freshness_points, freshness_detail = 0, "Latest scan is more than seven days old."
+                        reasons.append(freshness_detail)
+            except (TypeError, ValueError, OverflowError):
+                freshness_points, freshness_detail = 0, "Latest scan timestamp is missing or invalid."
+                reasons.append(freshness_detail)
+            add_component("scan_freshness", "Scan freshness", freshness_points, 10,
+                          freshness_detail)
             if int(scan[2] or 0) > 0:
                 add_component("hosts_found", "Hosts discovered", 10, 10,
                               f"{int(scan[2])} hosts reported by the latest scan.")
@@ -4370,8 +4394,10 @@ def scan_quality_report(conn=None):
                               "The latest scan reported zero hosts.")
                 reasons.append("Latest scan reported zero hosts.")
         else:
-            add_component("completed_scan", "Completed scan", 0, 25,
+            add_component("completed_scan", "Completed scan", 0, 15,
                           "No completed scan is recorded.")
+            add_component("scan_freshness", "Scan freshness", 0, 10,
+                          "Scan freshness cannot be assessed without a completed scan.")
             add_component("hosts_found", "Hosts discovered", 0, 10,
                           "Host discovery cannot be assessed without a scan.")
             reasons.append("No completed scan is recorded.")
