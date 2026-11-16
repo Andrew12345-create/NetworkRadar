@@ -1,4 +1,27 @@
-# NetworkRadar 12.9.0
+# NetworkRadar 13.0.0
+
+## Evidence-fused device intelligence (13.0.0)
+
+The identity engine scores independent evidence families rather than adding points for every field. Repeated hostnames, banners or observations from one protocol family are capped so they cannot masquerade as independent confirmations.
+
+Supported evidence families include:
+- DHCP client vendor class, hostname, user class and FQDN observations.
+- Nmap TCP/IP OS fingerprints, service/version results and selected safe NSE discovery scripts.
+- Targeted UDP discovery for common management, UPnP and mDNS/DNS-SD services.
+- SSDP/UPnP device descriptions, mDNS/DNS-SD service advertisements, SNMPv3, LLDP/CDP and active service metadata.
+- Explicitly enrolled endpoint inventory, when available.
+
+The dossier now presents ranked device-family hypotheses, competing classifications, independent source families, OS-family evidence, observed TCP/UDP ports, Nmap script coverage and collection limitations. The dashboard separates the reported device manufacturer/model from the IEEE NIC address-block registrant.
+
+Important interpretation safeguards:
+- OUI/NIC registrant, locally administered MAC, IP address and open ports cannot by themselves establish a physical device model.
+- A Google Cast advertisement identifies a media-receiver capability, not necessarily a television or Android handset.
+- DHCP vendor classes and names are client-supplied and can be absent or changed.
+- Exact model/manufacturer claims require explicit endpoint or service-reported fields; authenticated endpoint inventory is the strongest available option.
+- Confidence is an explainable heuristic evidence score, not a statistical probability.
+- The last strong profile is retained when a shallow scan has insufficient new evidence. Close competing hypotheses are withheld rather than forced into one category.
+
+Deep scans use selected Nmap safe/discovery scripts only; NetworkRadar does not enable the broad default script set or vulnerability/exploit categories.
 
 ## Multi-source Android-friendly discovery (12.9.0)
 
