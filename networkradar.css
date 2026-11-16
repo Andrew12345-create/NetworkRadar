@@ -2166,3 +2166,23 @@ th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hov
 
 /* NIGHTWATCH reconciliation note */
 .nw-inventory-status{margin:-5px 0 16px;padding:9px 12px;border:1px solid #20394a;border-radius:7px;background:#0a141e;color:#8da8b8;font:10px Consolas,monospace;letter-spacing:.35px}
+
+
+/* 12.7.0 — six-workspace dashboard shell */
+.nr-workspace-switcher{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin:0 0 18px;padding:10px;border:1px solid #1d3b4e;border-radius:14px;background:linear-gradient(145deg,#0c1723,#08111a);box-shadow:0 10px 30px #0004}
+.nr-workspace-tab{display:flex;align-items:flex-start;gap:10px;min-width:0;min-height:72px;padding:12px 11px;text-align:left;border:1px solid #20394b;border-radius:10px;background:#0c1a27;color:#dcebf4;box-shadow:none;cursor:pointer}
+.nr-workspace-tab:hover{border-color:#28748a;background:#102636}
+.nr-workspace-tab[aria-selected="true"]{border-color:#00cfe8;background:linear-gradient(145deg,#103448,#0b2930);box-shadow:inset 0 -2px 0 #00e5ff,0 0 18px #00dfff13}
+.nr-tab-index{flex:0 0 auto;color:#00d9ee;font:800 10px Consolas,monospace;letter-spacing:1px}
+.nr-tab-copy{display:grid;gap:5px;min-width:0}
+.nr-tab-copy b{font-size:11px;line-height:1.35;color:#e9f8ff}
+.nr-tab-copy small{font-size:9px;line-height:1.4;color:#83a0b2;font-weight:500}
+.nr-workspace-panel[hidden]{display:none!important}
+.nr-workspace-panel{min-width:0;animation:nrWorkspaceIn .18s ease-out}
+@keyframes nrWorkspaceIn{from{opacity:.72;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+#sideNavigation a.active{color:#e8fbff}
+#sideNavigation a.active:before{background:var(--cyan)}
+@media(max-width:1250px){.nr-workspace-switcher{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.nr-workspace-switcher{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:8px}.nr-workspace-tab{min-height:64px;padding:10px 8px}.nr-tab-copy small{display:none}}
+@media(max-width:420px){.nr-workspace-switcher{grid-template-columns:1fr 1fr}.nr-workspace-tab{gap:7px}.nr-tab-copy b{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.nr-workspace-panel{animation:none}}
