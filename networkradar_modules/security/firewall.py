@@ -1,9 +1,8 @@
 """Read-only Windows Defender Firewall inventory and default-allow policy helpers.
 
-This module deliberately does not change Windows Firewall configuration.
-NetworkRadar's device policy is ALLOW unless an operator explicitly adds a
-deny decision in a future, audited enforcement layer. The OS firewall protects
-the host running NetworkRadar; it does not control every LAN device.
+This module never changes Windows Firewall configuration. The firewall
+snapshot is collected in one bounded PowerShell process to avoid serial
+process-start delays that can outlive the dashboard's request budget.
 """
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ def default_device_decision(device: dict[str, Any] | None = None,
     return {"decision": "ALLOW", "reason": "Default policy: all discovered devices are allowed."}
 
 
-def _run_powershell(command: str, timeout: int = 12) -> subprocess.CompletedProcess[str]:
+def _run_powershell(command: str, timeout: int = 20) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
          "-ExecutionPolicy", "Bypass", "-Command", command],
@@ -34,7 +33,7 @@ def _run_powershell(command: str, timeout: int = 12) -> subprocess.CompletedProc
 
 
 def get_firewall_snapshot() -> dict[str, Any]:
-    """Collect firewall profile state and rule counts without modifying anything."""
+    """Collect firewall profiles and rule counts in one read-only PowerShell call."""
     if platform.system().lower() != "windows":
         return {
             "supported": False, "status": "UNSUPPORTED",
@@ -43,21 +42,20 @@ def get_firewall_snapshot() -> dict[str, Any]:
             "profiles": [], "rule_counts": {},
         }
 
-    profile_script = (
-        "Get-NetFirewallProfile | Select-Object Name,Enabled,"
-        "DefaultInboundAction,DefaultOutboundAction,NotifyOnListen | "
-        "ConvertTo-Json -Compress"
-    )
-    rules_script = (
-        "$r=Get-NetFirewallRule -PolicyStore ActiveStore -ErrorAction Stop; "
+    script = (
+        "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; "
+        "$p=@(Get-NetFirewallProfile -ErrorAction Stop | Select-Object Name,Enabled,"
+        "DefaultInboundAction,DefaultOutboundAction,NotifyOnListen); "
+        "$r=@(Get-NetFirewallRule -PolicyStore ActiveStore -ErrorAction Stop); "
         "$enabled=@($r | Where-Object {$_.Enabled -eq 'True'}); "
         "$in=@($enabled | Where-Object {$_.Direction -eq 'Inbound'}); "
         "$out=@($enabled | Where-Object {$_.Direction -eq 'Outbound'}); "
         "$block=@($enabled | Where-Object {$_.Action -eq 'Block'}); "
         "$allow=@($enabled | Where-Object {$_.Action -eq 'Allow'}); "
-        "[pscustomobject]@{total=$r.Count;enabled=$enabled.Count;"
-        "inbound=$in.Count;outbound=$out.Count;block=$block.Count;allow=$allow.Count} | "
-        "ConvertTo-Json -Compress"
+        "[pscustomobject]@{profiles=$p;rule_counts=[pscustomobject]@{"
+        "total=$r.Count;enabled=$enabled.Count;inbound=$in.Count;"
+        "outbound=$out.Count;block=$block.Count;allow=$allow.Count}} | "
+        "ConvertTo-Json -Depth 6 -Compress"
     )
     result: dict[str, Any] = {
         "supported": True, "status": "DEGRADED",
@@ -66,10 +64,13 @@ def get_firewall_snapshot() -> dict[str, Any]:
         "message": "Firewall inspection has not completed.",
     }
     try:
-        profiles = _run_powershell(profile_script)
-        if profiles.returncode != 0:
-            raise RuntimeError((profiles.stderr or profiles.stdout or "Profile query failed")[-1200:])
-        raw_profiles = json.loads(profiles.stdout.strip() or "[]")
+        snapshot = _run_powershell(script, timeout=20)
+        if snapshot.returncode != 0:
+            raise RuntimeError(
+                (snapshot.stderr or snapshot.stdout or "Firewall query failed")[-1200:]
+            )
+        data = json.loads(snapshot.stdout.strip() or "{}")
+        raw_profiles = data.get("profiles", []) if isinstance(data, dict) else []
         if isinstance(raw_profiles, dict):
             raw_profiles = [raw_profiles]
         result["profiles"] = [
@@ -82,14 +83,13 @@ def get_firewall_snapshot() -> dict[str, Any]:
             }
             for row in raw_profiles if isinstance(row, dict)
         ]
-        rules = _run_powershell(rules_script)
-        if rules.returncode != 0:
-            raise RuntimeError((rules.stderr or rules.stdout or "Rule query failed")[-1200:])
-        counts = json.loads(rules.stdout.strip() or "{}")
+        counts = data.get("rule_counts", {}) if isinstance(data, dict) else {}
         result["rule_counts"] = counts if isinstance(counts, dict) else {}
         result["status"] = "ONLINE" if result["profiles"] else "DEGRADED"
         result["message"] = "Read-only Windows Defender Firewall inventory."
-        result["collected_by"] = "Get-NetFirewallProfile / Get-NetFirewallRule"
+        result["collected_by"] = (
+            "Get-NetFirewallProfile / Get-NetFirewallRule (single PowerShell process)"
+        )
     except subprocess.TimeoutExpired:
         result["message"] = "Firewall inspection timed out; no settings were changed."
     except (OSError, ValueError, RuntimeError) as exc:

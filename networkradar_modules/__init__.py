@@ -1,3 +1,3 @@
 """NetworkRadar application package and version metadata."""
 
-__version__ = "13.3.1"
+__version__ = "13.3.2"

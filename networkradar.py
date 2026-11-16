@@ -1,5 +1,11 @@
 ﻿"""
-NetworkRadar 13.3.1 — Windows network-context recovery.
+NetworkRadar 13.3.2 — Firewall snapshot timeout recovery.
+NetworkRadar 13.3.2 changes:
+  - Batches the Windows Firewall profile and rule-count inventory into one PowerShell process.
+  - Gives the firewall snapshot a bounded 20-second collection budget.
+  - Extends only the dashboard firewall request timeout to 30 seconds; other API requests retain their 10-second limit.
+  - Keeps firewall inspection read-only and reports timeout/degraded states without changing policy.
+
 NetworkRadar 13.3.1 changes:
   - Replaces five serial PowerShell launches with one bounded batched network-context query.
   - Adds a native ipconfig /all fallback when PowerShell network cmdlets time out or return incomplete data.
