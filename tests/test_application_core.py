@@ -450,3 +450,13 @@ class PowerShellDiagnosticTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WebStartupErrorHandlingTests(unittest.TestCase):
+    def test_start_web_propagates_binding_error_for_orderly_cleanup(self):
+        with patch.dict(app.os.environ, {"NETWORKRADAR_PORT": "8766"}), patch.object(
+            app, "bind_local_server",
+            side_effect=app.StartupError("127.0.0.1:8766 is reserved"),
+        ), patch.object(app.sys, "argv", []):
+            with self.assertRaisesRegex(app.StartupError, "web console startup failed"):
+                app.start_web()
