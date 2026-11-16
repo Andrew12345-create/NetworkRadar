@@ -1,4 +1,14 @@
 ﻿"""
+NetworkRadar 13.3.0 — Layered TCP reachability discovery.
+NetworkRadar 13.3.0 changes:
+  - Supplements Nmap ARP/host discovery with a bounded, authorised TCP connect
+    sweep over common service ports to find hosts that filter echo/ARP probes.
+  - Caps the supplemental sweep at 512 RFC1918 IPv4 hosts, 128 concurrent
+    connections and a 350 ms per-port timeout; reports tested/open ports as
+    reachability evidence without inventing device identity.
+  - Exposes TCP probe progress through the existing persistent scan monitor.
+  - Does not attempt credentials, exploit payloads, stealth or security bypass.
+
 NetworkRadar 13.2.0 — Persistent scan monitor and richer discovery telemetry.
 NetworkRadar 13.1.1 changes:
   - Diagnoses Windows WSAEACCES/10013 port binding failures, including excluded TCP ranges.
