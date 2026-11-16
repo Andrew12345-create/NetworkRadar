@@ -116,6 +116,29 @@ class AdvancedDeviceProfileTests(unittest.TestCase):
         })
         self.assertEqual(result["model"], "")
 
+    def test_competing_android_and_printer_signals_are_withheld_as_ambiguous(self):
+        result = analyse_device_profile({
+            "ip": "192.168.100.90",
+            "hostname": "Android Phone",
+            "dhcp_identity": [{"vendor_class": "android-dhcp-13"}],
+            "mdns_records": "_ipp._tcp.local",
+            "nmap_service_intel": [
+                {"port": 631, "name": "ipp"},
+                {"port": 80, "name": "http"},
+            ],
+        })
+        self.assertTrue(result["conflicting_classifications"])
+        self.assertTrue(result["category"].startswith("Ambiguous:"))
+        self.assertEqual(result["selected_category"], "Unclassified network device")
+
+    def test_http_api_model_is_used_only_when_field_is_explicitly_model(self):
+        result = analyse_device_profile({
+            "ip": "192.168.100.91",
+            "service_intel": [{"port": 80, "api_identity_key": "model",
+                               "api_identity": "Acme Model 9000"}],
+        })
+        self.assertEqual(result["model"], "Acme Model 9000")
+
     def test_gateway_role_is_explicit_and_high_confidence(self):
         result = analyse_device_profile({"ip": "192.168.100.1", "_is_gateway": True})
         self.assertEqual(result["selected_category"], "Router / firewall")
