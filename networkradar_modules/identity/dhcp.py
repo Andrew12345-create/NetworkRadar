@@ -74,7 +74,7 @@ def parse_client_architecture(value: Any) -> list[dict[str, Any]]:
     text = str(value).strip()
     if not text:
         return []
-    tokens = re.findall(r"(?i)0x[0-9a-f]{1,4}|(?<![A-Za-z])\d{1,5}(?![A-Za-z])", text)
+    tokens = re.findall(r"(?i)0x[0-9a-f]{1,4}|(?<![A-Za-z-])\d{1,5}(?![A-Za-z-])", text)
     found: list[dict[str, Any]] = []
     seen: set[int] = set()
     for token in tokens[:16]:
