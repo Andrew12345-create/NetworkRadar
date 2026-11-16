@@ -7535,10 +7535,11 @@ def deep_fingerprint(devices):
         r = subprocess.run(base + ips, capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=180)
         if r.returncode != 0 or not r.stdout.strip():
+            # The fallback deliberately avoids raw-packet OS detection and
+            # NSE so service discovery can still complete without elevation.
             fallback = [
                 str(NMAP), "-sT", "-sV", "--version-intensity", "5",
-                "--reason", "--top-ports", str(FINGERPRINT_TOP_PORTS),
-                "-O", "--osscan-limit", "--max-os-tries", "1", "-oX", "-"
+                "--reason", "--top-ports", str(FINGERPRINT_TOP_PORTS), "-oX", "-"
             ]
             r = subprocess.run(fallback + ips, capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=150)
