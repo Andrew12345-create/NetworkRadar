@@ -211,7 +211,10 @@ except ImportError:
 # The package metadata is the single source of the application version.
 from networkradar_modules import __version__ as APP_VERSION
 from networkradar_modules.identity.fusion import score_evidence as _modular_score_evidence
-from networkradar_modules.identity.dhcp import analyse_dhcp_identity as _analyse_dhcp_identity
+from networkradar_modules.identity.dhcp import (
+    analyse_dhcp_identity as _analyse_dhcp_identity,
+    parse_client_architecture as _parse_dhcp_architecture,
+)
 from networkradar_modules.identity.oui import parse_ieee_registry, lookup_ieee_assignment
 from networkradar_modules.identity.recognition import recognition_family_compatible
 from networkradar_modules.identity.quality import assess_identity_quality
@@ -2250,7 +2253,11 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
             if feature not in dhcp_profiles:
                 dhcp_profiles.append(feature)
         if architecture:
-            evidence.append(("DHCP PXE option 93", "Pre-boot architecture", architecture, 72, "OBSERVED"))
+            architecture_labels = ", ".join(
+                f'{item["name"]} ({item["id"]})'
+                for item in analysis["fingerprint"]["client_architecture"]
+            ) or architecture
+            evidence.append(("DHCP PXE option 93", "Pre-boot architecture", architecture_labels, 72, "OBSERVED"))
         if user_class:
             evidence.append(("DHCP option 77", "User class", user_class, 62, "DEVICE_REPORTED"))
         if client_fqdn:
@@ -6920,7 +6927,7 @@ class Handler(BaseHTTPRequestHandler):
                             "conflicts":json.loads(r[5] or "[]"),"evidence_count":r[6],
                             "independent_sources":r[7],"rationale":r[8],"last_seen":r[9]} for r in assessments],
                         "identity_history": [{"timestamp":r[0],"attribute":r[1],"old":r[2],"new":r[3],"reason":r[4]} for r in identity_history],
-                        "dhcp_history": [{"timestamp":r[0],"message":r[1],"hostname":r[2],"vendor_class":r[3],"mac":r[4],"client_ip":r[5],"server_ip":r[6],"details":r[7],"client_architecture":r[8] if len(r)>8 else "","user_class":r[9] if len(r)>9 else "","client_fqdn":r[10] if len(r)>10 else ""} for r in dhcp_rows],
+                        "dhcp_history": [{"timestamp":r[0],"message":r[1],"hostname":r[2],"vendor_class":r[3],"mac":r[4],"client_ip":r[5],"server_ip":r[6],"details":r[7],"client_architecture":(", ".join(f'{item["name"]} ({item["id"]})' for item in _parse_dhcp_architecture(r[8] or "")) or (r[8] or "")) if len(r)>8 else "","user_class":r[9] if len(r)>9 else "","client_fqdn":r[10] if len(r)>10 else ""} for r in dhcp_rows],
                         "dns_activity": [{"timestamp":r[0],"domain":r[1],"type":r[2],"rcode":r[3],"answers":r[4]} for r in dns_rows],
                         "observations": [{"timestamp":r[0],"method":r[1],"observation":r[2],"confidence":r[3]} for r in observation_rows],
                         "behaviour_alerts": [{"timestamp":r[0],"metric":r[1],"observed":r[2],"baseline":r[3],"severity":r[4],"details":r[5],"status":r[6]} for r in behaviour_rows],
