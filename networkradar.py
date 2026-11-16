@@ -2925,7 +2925,7 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
                 os_guess=CASE WHEN ? IN ('','Unknown','Not yet fingerprinted')
                     THEN os_guess ELSE ? END,
                 model=CASE WHEN ?='' THEN model ELSE ? END,
-                identification_confidence=MAX(identification_confidence,?),
+                identification_confidence=CASE WHEN ?>=58 THEN ? ELSE identification_confidence END,
                 identification_methods=CASE WHEN ?='' THEN identification_methods ELSE ? END,
                 open_ports=CASE WHEN ? IN ('','Not fingerprinted','No common TCP ports found')
                     THEN open_ports ELSE ? END,
@@ -2942,16 +2942,18 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
                  dev.get("os_guess", ""), dev.get("os_guess", ""),
                  dev.get("model", ""), dev.get("model", ""),
                  dev.get("identification_confidence", 0),
+                 dev.get("identification_confidence", 0),
                  dev.get("identification_methods", ""),
                  dev.get("identification_methods", ""),
                  dev.get("open_ports", ""), dev.get("open_ports", ""),
                  dev.get("service_summary", ""), dev.get("service_summary", ""),
                  ts, ip))
             conn.execute("""UPDATE devices SET oui_manufacturer=?,reported_manufacturer=?,
-                identity_conflicts=?,identity_category_confidence=?,identity_last_assessed=?,
+                identity_conflicts=?,identity_category_confidence=CASE WHEN ?>=58 THEN ? ELSE identity_category_confidence END,identity_last_assessed=?,
                 recognition_json=? WHERE ip=?""",
                 (dev.get("oui_manufacturer", ""), dev.get("reported_manufacturer", ""),
                  json.dumps(dev.get("identity_conflicts", [])),
+                 dev.get("identity_category_confidence", 0),
                  dev.get("identity_category_confidence", 0), ts,
                  json.dumps(dev.get("recognition", {}), ensure_ascii=False), ip))
             if prior:
