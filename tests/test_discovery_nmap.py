@@ -83,6 +83,16 @@ class NmapXMLParserTests(unittest.TestCase):
         host = ET.fromstring('<host><os><osmatch name="Unknown" accuracy="bad"/></os></host>')
         self.assertEqual(best_os_match(host)["accuracy"], 0)
 
+    def test_local_administered_mac_is_flagged_as_unstable_identity_evidence(self):
+        xml = """<nmaprun><host><status state="up" reason="arp-response"/>
+          <address addr="192.168.1.30" addrtype="ipv4"/>
+          <address addr="5E:11:22:33:44:55" addrtype="mac"/>
+        </host></nmaprun>"""
+        device = parse_nmap_xml(xml)[0]
+        self.assertEqual(device["mac_address_scope"], "locally administered")
+        self.assertIn("not a stable factory identity", device["mac_identity_note"])
+        self.assertEqual(device["discovery_reason"], "arp-response")
+
 
 class NmapExecutionTests(unittest.TestCase):
     def test_empty_network_does_not_execute_scanner(self):
@@ -110,7 +120,7 @@ class NmapExecutionTests(unittest.TestCase):
             self.assertGreaterEqual(duration, 0)
             self.assertEqual(
                 calls[0][0],
-                ["nmap.exe", "-sn", "-R", "-oX", "-", "192.168.1.0/24"],
+                ["nmap.exe", "-sn", "-PR", "-n", "--reason", "-oX", "-", "192.168.1.0/24"],
             )
             self.assertEqual(calls[0][1]["timeout"], 150)
             self.assertIn("scan ok", log.read_text(encoding="utf-8"))
