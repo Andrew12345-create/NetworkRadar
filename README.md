@@ -8,6 +8,23 @@ NetworkRadar is a Windows-focused, local-first network discovery and device-inte
 
 The application version is defined once in `networkradar_modules/__init__.py` and exposed to the dashboard and logs by `networkradar.py`.
 
+## Dashboard workspaces (12.7.0)
+
+The dashboard is organised into six switchable workspaces. The workspace shell groups existing panels; it does not remove their DOM IDs, API calls, database records, or feature handlers.
+
+- **Command Centre:** Nightwatch overview, scan progress, live topology, activity feed, engine health and network context.
+- **Devices & Identity:** Device inventory, identity evidence, continuity tracking, manual identity candidates, unknown-device review and IPv6 neighbour observations.
+- **Network Activity:** Network workspaces and profiles, DNS, DHCP, ARP, behaviour baselines and network changes.
+- **Security & Investigations:** Local firewall visibility, investigations, alert stream, configuration audit, threat hunts and exposure observations.
+- **Remote Management:** Phantom Access and explicitly enrolled managed endpoints.
+- **Intelligence & Reports:** Local intelligence assistant, recent events and report generation.
+
+The sidebar and workspace tabs provide the same six destinations. Tabs support keyboard navigation and adapt to smaller screens. Existing feature panels remain available inside their corresponding workspace.
+
+## RADAR IDENTITY foundation
+
+The identity package includes bounded parsers for captured SSDP headers and mDNS/DNS-SD service observations. These parsers produce evidence and capability hints; advertisements are not treated as proof of physical hardware identity. SSDP LOCATION values are retained as observations and are not fetched by the parser. The parsers do not themselves start multicast discovery or packet capture; collection and end-to-end integration remain separate work.
+
 ## Requirements
 
 - Windows 10 or Windows 11.
