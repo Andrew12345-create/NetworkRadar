@@ -269,6 +269,7 @@ from networkradar_modules.core.startup import (
 from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
 from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
+from networkradar_modules.discovery.tcp_sweep import sweep_tcp_hosts
 from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
 from networkradar_modules.discovery.neighbors import (
     collect_windows_neighbor_cache, merge_reachable_neighbors,
@@ -1733,12 +1734,49 @@ def mdns_active_snapshot(duration=2.0):
         return []
 
 def discover_devices():
-    """Run authorised Nmap ARP discovery plus fresh Windows neighbour evidence."""
+    """Run layered authorised discovery and preserve evidence provenance."""
     network = current_network()
     update_job(phase="ARP / Nmap sweep", percent=10,
                message=f"Checking {network} with Nmap ARP discovery and host-discovery probes.")
     devices, duration = run_nmap_discovery(network, NMAP, NMAP_LOG)
-    update_job(phase="Windows neighbour table", percent=17,
+
+    # Supplement ARP/ICMP host discovery with bounded TCP connect probes. This
+    # catches hosts that filter echo/ARP discovery but expose a common service.
+    # The network authorisation gate is rechecked immediately before probing.
+    tcp_summary = {"status": "SKIPPED", "responders": 0,
+                   "detail": "Active network authorisation is required."}
+    if is_authorized():
+        update_job(phase="TCP service reachability", percent=15,
+                   message="Testing a bounded set of common TCP service ports across the authorised IPv4 subnet.")
+        try:
+            tcp_summary = sweep_tcp_hosts(
+                network, timeout=0.35, max_workers=128, max_hosts=512,
+                progress=lambda done, total, responders: update_job(
+                    phase="TCP service reachability", percent=15 + int(4 * done / max(1, total)),
+                    message=f"TCP reachability probes: {done:,}/{total:,}; "
+                            f"{responders} host(s) accepted a connection."
+                ),
+            )
+            by_ip = {str(row.get("ip")): row for row in devices}
+            for observed in tcp_summary.get("devices", []):
+                existing = by_ip.get(observed["ip"])
+                if existing is None:
+                    devices.append(observed)
+                    by_ip[observed["ip"]] = observed
+                else:
+                    ports = set(existing.get("port_numbers", []) or [])
+                    ports.update(observed.get("port_numbers", []) or [])
+                    existing["port_numbers"] = sorted(ports)
+                    existing["open_ports"] = ", ".join(map(str, sorted(ports)))
+                    existing.setdefault("discovery_sources", []).append("TCP connect")
+                    existing.setdefault("tcp_probe_evidence", observed["tcp_probe_evidence"])
+            duration = round(duration + float(tcp_summary.get("duration_seconds", 0)), 2)
+        except Exception as exc:
+            tcp_summary = {"status": "ERROR", "responders": 0,
+                           "detail": _clean(exc, 240)}
+            print("TCP REACHABILITY DISCOVERY:", tcp_summary["detail"])
+
+    update_job(phase="Windows neighbour table", percent=21,
                message="Reading the selected adapter neighbour cache and merging fresh reachable IP/MAC observations.")
     neighbour_started = time.monotonic()
     with NET_LOCK:
@@ -1750,6 +1788,11 @@ def discover_devices():
     duration = round(duration + (time.monotonic() - neighbour_started), 2)
     if snapshot.get("status") == "ERROR":
         print("WINDOWS NEIGHBOUR DISCOVERY:", _clean(snapshot.get("detail", ""), 180))
+    update_job(
+        phase="Discovery summary", percent=24,
+        message=f"Discovery complete: {len(devices)} responsive host(s); "
+                f"{tcp_summary.get('responders', 0)} TCP-responsive host(s)."
+    )
     return devices, duration
 
 def derive_identity(device):

@@ -1,3 +1,25 @@
+# NetworkRadar 13.3.0 — Layered Reachability Discovery
+
+## Vigorous but bounded discovery
+- Supplements the existing Nmap ARP/host-discovery pass with a bounded TCP connect sweep over a curated set of common service ports.
+- TCP discovery can identify hosts that ignore ICMP/ARP discovery but accept a connection on an exposed service.
+- Uses a maximum of 128 concurrent connection attempts, a short per-probe timeout, and a maximum of 512 IPv4 host addresses per pass.
+- Rechecks active-network authorisation immediately before the TCP sweep; unauthorised scopes do not receive the additional active probes.
+- Merges observations by IP without inventing a MAC address, manufacturer, model, operating system or device category.
+- Preserves the exact tested ports and successful TCP ports as reachability evidence for subsequent service/identity enrichment.
+- Exposes probe progress through the existing scan monitor and keeps TCP-sweep failures non-fatal to the Nmap and neighbour-table results.
+- No password guessing, credential brute force, exploit payloads, stealth, or security-control bypass is performed.
+
+## Important coverage limits
+- This is not a guarantee that every physical device will be found. A host that is asleep, isolated, on another VLAN, or filters every selected probe may remain invisible.
+- TCP acceptance proves only that a service accepted a connection; it does not identify the device or prove that the service is safe.
+- The 512-host cap is intentional. Larger networks are rejected for this supplementary sweep rather than silently launching a very large scan.
+- Router/AP association-table integration and richer exact hardware inventory remain future work and require an explicitly configured read-only interface.
+
+## Validation
+- Adds deterministic tests for private-scope enforcement, host caps, selected-port behaviour, connection cleanup, progress reporting and evidence-only device records.
+- GitHub Actions validation is required before merge. A live Windows/Nmap/Npcap test is still needed to measure actual scan duration and visibility on the local Wi-Fi.
+
 # NetworkRadar 13.2.0 — Persistent Scan Monitor and Discovery Telemetry
 
 ## Scan visibility
