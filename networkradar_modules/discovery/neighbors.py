@@ -12,7 +12,7 @@ def _valid_mac(value):
     if (octets[0]&1) or all(x==0 for x in octets) or all(x==255 for x in octets): return ""
     return mac
 
-def parse_windows_neighbor_rows(payload, network, *, reachable_only=True):
+def parse_windows_neighbor_rows(payload, network, *, reachable_only=True, interface_index=None):
     """Parse Get-NetNeighbor JSON, scoped to IPv4 and fresh Reachable state."""
     try:
         scope=ipaddress.ip_network(str(network),strict=False)
@@ -34,6 +34,7 @@ def parse_windows_neighbor_rows(payload, network, *, reachable_only=True):
             if not mac: continue
             try: idx=int(item.get("InterfaceIndex",item.get("ifIndex",0)) or 0)
             except (TypeError,ValueError): idx=0
+            if interface_index is not None and idx != int(interface_index): continue
         except (TypeError,ValueError): continue
         key=(str(address),mac,idx)
         if key in seen: continue
@@ -44,7 +45,7 @@ def parse_windows_neighbor_rows(payload, network, *, reachable_only=True):
     return records
 
 def collect_windows_neighbor_cache(network, *, runner:Callable=subprocess.run,
-                                   platform=None, timeout=12):
+                                   platform=None, timeout=12, interface_index=None):
     """Read the Windows IPv4 neighbour table without sending network probes."""
     windows=os.name=="nt" if platform is None else str(platform).casefold() in {"nt","windows"}
     if not windows:
@@ -52,8 +53,15 @@ def collect_windows_neighbor_cache(network, *, runner:Callable=subprocess.run,
     try: ipaddress.ip_network(str(network),strict=False)
     except (TypeError,ValueError):
         return {"status":"ERROR","records":[],"detail":"Invalid IPv4 network scope."}
+    try:
+        selected_index = int(interface_index) if interface_index is not None else None
+    except (TypeError, ValueError):
+        selected_index = None
+    filter_clause = (f" | Where-Object {{ $_.InterfaceIndex -eq {selected_index} }}"
+                     if selected_index is not None else "")
     script=("$ErrorActionPreference='Stop'; Get-NetNeighbor -AddressFamily IPv4 "
-            "-ErrorAction Stop | Select-Object IPAddress,LinkLayerAddress,State,InterfaceIndex | ConvertTo-Json -Compress")
+            "-ErrorAction Stop" + filter_clause +
+            " | Select-Object IPAddress,LinkLayerAddress,State,InterfaceIndex | ConvertTo-Json -Compress")
     try:
         result=runner(["powershell.exe","-NoProfile","-Command",script],
                       capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=timeout)
@@ -61,7 +69,9 @@ def collect_windows_neighbor_cache(network, *, runner:Callable=subprocess.run,
         return {"status":"ERROR","records":[],"detail":str(exc)[:240]}
     if getattr(result,"returncode",1)!=0:
         return {"status":"ERROR","records":[],"detail":str(getattr(result,"stderr","") or "Get-NetNeighbor failed.")[-240:]}
-    records=parse_windows_neighbor_rows(getattr(result,"stdout","") or "",network)
+    records=parse_windows_neighbor_rows(
+        getattr(result,"stdout","") or "", network, interface_index=selected_index
+    )
     return {"status":"ONLINE" if records else "ONLINE_EMPTY","records":records,
             "detail":f"{len(records)} Reachable neighbour(s) in {network}."}
 
