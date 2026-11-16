@@ -1,5 +1,10 @@
 ﻿"""
-NetworkRadar 13.1.0 — identity evidence coverage and operational health.
+NetworkRadar 13.1.1 — Windows dashboard port binding diagnostics.
+NetworkRadar 13.1.1 changes:
+  - Diagnoses Windows WSAEACCES/10013 port binding failures, including excluded TCP ranges.
+  - Closes partially-created HTTP servers after failed bind/activation attempts.
+  - Preserves strict port selection; alternate ports require explicit --allow-alt-port.
+
 NetworkRadar 13.1.0 changes:
   - Uses observed inventory/device names when DHCP hostname fields are absent.
   - Separates discovery/telemetry health from identity coverage and exposes both.
