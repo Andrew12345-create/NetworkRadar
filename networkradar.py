@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 12.6.0 — local-first network discovery and device intelligence.
+NetworkRadar 12.7.0 — local-first network discovery and device intelligence.
 NetworkRadar 12.4.1 changes:
   - Explains missing fingerprint causes, including manual scope override mode.
   - Preserves per-query Windows adapter collection diagnostics for troubleshooting.
