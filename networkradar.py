@@ -2111,6 +2111,16 @@ def advanced_device_recognition(device):
     if profile.get("manufacturer"):
         device["reported_manufacturer"] = profile["manufacturer"]
     device["operating_system"] = profile.get("operating_system", {})
+    os_profile = device["operating_system"]
+    if os_profile.get("family"):
+        endpoint_os = any(
+            item.get("source") == "Authenticated endpoint inventory"
+            for item in os_profile.get("candidates", [])
+        )
+        if endpoint_os:
+            device["os_guess"] = f'{os_profile["family"]} (authenticated endpoint inventory)'
+        elif device.get("os_guess") in ("", "Unknown", "Not yet fingerprinted", None):
+            device["os_guess"] = os_profile["family"]
     profile["intelligence_quality"] = assess_identity_quality(
         device, facts=profile.get("evidence", []), recognition=profile
     )
