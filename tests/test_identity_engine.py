@@ -49,7 +49,7 @@ class AdvancedDeviceProfileTests(unittest.TestCase):
             "ip": "192.168.100.30",
             "mdns_records": "_googlecast._tcp.local",
         })
-        self.assertEqual(result["selected_category"], "Smart TV / media streamer")
+        self.assertEqual(result["selected_category"], "Media receiver / streamer")
         self.assertNotEqual(result["selected_category"], "Android mobile device")
 
     def test_printer_requires_service_or_device_report_evidence(self):
