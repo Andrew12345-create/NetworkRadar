@@ -371,6 +371,88 @@ function syncNavigationButton(){
  b.title=mobile?(expanded?'Close navigation':'Open navigation'):(expanded?'Collapse navigation':'Expand navigation');
  b.textContent=mobile?(expanded?'✕':'☰'):(expanded?'☰':'»');
 }
+/* WORKSPACE LAYOUT — group existing panels without removing IDs, data or handlers. */
+(function buildWorkspaceLayout(){
+ const main=document.querySelector('main');
+ if(!main||main.dataset.workspaceReady==='1')return;
+ const definitions=[
+  {id:'command',label:'Command Centre',desc:'Live network picture, scan status, topology and current network context.'},
+  {id:'devices',label:'Devices & Identity',desc:'Device inventory, identity evidence, unknown-device review and IPv6 neighbours.'},
+  {id:'network',label:'Network Activity',desc:'Network workspaces, profiles, DNS, DHCP, ARP, behaviour and change history.'},
+  {id:'security',label:'Security & Investigations',desc:'Firewall visibility, alerts, configuration audit, threat hunts and exposure.'},
+  {id:'management',label:'Remote Management',desc:'Explicitly authorised endpoint access, SSH and enrolled-agent operations.'},
+  {id:'intelligence',label:'Intelligence & Reports',desc:'Local intelligence assistant, recent events and report generation.'}
+ ];
+ const groups=Object.fromEntries(definitions.map(x=>[x.id,[]]));
+ const overviewIds=new Set(['top','topology','activity','cmd']);
+ const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','ipv6']);
+ const networkIds=new Set(['networkWorkspaces','profiles','dns','dhcp','arp','behaviour','changes']);
+ const securityIds=new Set(['firewall','investigations','alerts','config','hunt','exposure']);
+ const managementIds=new Set(['phantomAccess','commandCenter']);
+ const intelligenceIds=new Set(['assistant','reports']);
+ function classify(node){
+  const id=node.id||'';
+  if(overviewIds.has(id)||node.classList.contains('nightwatch-metrics')||node.classList.contains('nw-inventory-status')||node.querySelector('#jobPhase,#online,#engines'))return 'command';
+  if(deviceIds.has(id))return 'devices';
+  if(networkIds.has(id))return 'network';
+  if(securityIds.has(id))return 'security';
+  if(managementIds.has(id))return 'management';
+  if(intelligenceIds.has(id)||node.querySelector('#eventRows'))return 'intelligence';
+  return 'command';
+ }
+ const original=[...main.children];
+ original.forEach(node=>groups[classify(node)].push(node));
+ const switcher=document.createElement('div');
+ switcher.className='nr-workspace-switcher';
+ switcher.setAttribute('role','tablist');
+ switcher.setAttribute('aria-label','NetworkRadar workspaces');
+ switcher.innerHTML=definitions.map((x,i)=>'<button type="button" class="nr-workspace-tab" role="tab" id="tab-workspace-'+x.id+'" aria-controls="workspace-'+x.id+'" aria-selected="'+(i===0?'true':'false')+'" data-workspace-tab="'+x.id+'"><span class="nr-tab-index">0'+(i+1)+'</span><span class="nr-tab-copy"><b>'+x.label+'</b><small>'+x.desc+'</small></span></button>').join('');
+ main.appendChild(switcher);
+ definitions.forEach((x,i)=>{
+  const panel=document.createElement('div');
+  panel.id='workspace-'+x.id;
+  panel.className='nr-workspace-panel';
+  panel.setAttribute('role','tabpanel');
+  panel.setAttribute('aria-labelledby','tab-workspace-'+x.id);
+  panel.dataset.workspacePanel=x.id;
+  if(i!==0)panel.hidden=true;
+  groups[x.id].forEach(node=>panel.appendChild(node));
+  main.appendChild(panel);
+ });
+ main.dataset.workspaceReady='1';
+ function panelForHash(){
+  const hash=decodeURIComponent((location.hash||'').slice(1));
+  if(!hash)return 'command';
+  const target=document.getElementById(hash);
+  const panel=target?.closest('[data-workspace-panel]');
+  return panel?.dataset.workspacePanel||(/^(workspace-)?(command|devices|network|security|management|intelligence)$/.test(hash)?hash.replace('workspace-',''):'command');
+ }
+ window.activateNetworkRadarWorkspace=function(id,updateHash){
+  const key=definitions.some(x=>x.id===id)?id:'command';
+  document.querySelectorAll('[data-workspace-panel]').forEach(p=>p.hidden=p.dataset.workspacePanel!==key);
+  switcher.querySelectorAll('[data-workspace-tab]').forEach(b=>{
+   const active=b.dataset.workspaceTab===key;
+   b.setAttribute('aria-selected',active?'true':'false');
+   b.tabIndex=active?0:-1;
+  });
+  document.querySelectorAll('#sideNavigation a[href^="#workspace-"]').forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#workspace-'+key));
+  try{localStorage.setItem('nr-active-workspace',key);}catch(e){}
+  if(updateHash!==false&&location.hash!=='#workspace-'+key)history.replaceState(null,'','#workspace-'+key);
+ };
+ switcher.addEventListener('click',e=>{
+  const button=e.target.closest('[data-workspace-tab]');
+  if(button)window.activateNetworkRadarWorkspace(button.dataset.workspaceTab,true);
+ });
+ switcher.addEventListener('keydown',e=>{
+  if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;
+  const buttons=[...switcher.querySelectorAll('[data-workspace-tab]')];
+  const current=buttons.findIndex(b=>b.getAttribute('aria-selected')==='true');
+  const next=e.key==='Home'?0:e.key==='End'?buttons.length-1:(current+(e.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;
+  e.preventDefault();buttons[next].focus();window.activateNetworkRadarWorkspace(buttons[next].dataset.workspaceTab,true);
+ });
+ window.activateNetworkRadarWorkspace(panelForHash(),false);
+ window.addEventListener('hashchange',()=>window.activateNetworkRadarWorkspace(panelForHash(),false));
+})();
 function toggleNavigation(){
  if(nrNavMedia.matches){
   document.body.classList.toggle('nav-open');
