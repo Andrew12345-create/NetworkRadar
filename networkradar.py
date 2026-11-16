@@ -4440,14 +4440,16 @@ def scan_quality_report(conn=None):
                     "coverage_percent": 0, "average_confidence": 0}
         try:
             row = conn.execute("""SELECT COUNT(*),
-                SUM(CASE WHEN COALESCE(device_type,'') NOT IN
-                    ('','Unclassified network device','Unclassified','Unknown')
-                    AND COALESCE(device_type,'') NOT LIKE 'Ambiguous:%'
+                SUM(CASE WHEN LOWER(TRIM(COALESCE(device_type,''))) NOT LIKE 'unclassif%'
+                    AND LOWER(TRIM(COALESCE(device_type,''))) NOT LIKE 'unidentif%'
+                    AND LOWER(TRIM(COALESCE(device_type,''))) NOT LIKE 'unknown%'
+                    AND LOWER(TRIM(COALESCE(device_type,''))) NOT LIKE 'ambiguous:%'
                     AND COALESCE(identification_confidence,0)>0
                     THEN 1 ELSE 0 END),
-                AVG(CASE WHEN COALESCE(device_type,'') NOT IN
-                    ('','Unclassified network device','Unclassified','Unknown')
-                    AND COALESCE(device_type,'') NOT LIKE 'Ambiguous:%'
+                AVG(CASE WHEN LOWER(TRIM(COALESCE(device_type,''))) NOT LIKE 'unclassif%'
+                    AND LOWER(TRIM(COALESCE(device_type,''))) NOT LIKE 'unidentif%'
+                    AND LOWER(TRIM(COALESCE(device_type,''))) NOT LIKE 'unknown%'
+                    AND LOWER(TRIM(COALESCE(device_type,''))) NOT LIKE 'ambiguous:%'
                     AND COALESCE(identification_confidence,0)>0
                     THEN identification_confidence END)
                 FROM devices""").fetchone()
