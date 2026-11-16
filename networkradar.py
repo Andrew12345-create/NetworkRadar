@@ -4462,8 +4462,9 @@ def scan_quality_report(conn=None):
             reasons.append(f"ARP capture state: {arp_state}.")
         add_component("arp", "ARP telemetry", arp_points, 10, arp_detail)
 
-        identity = {"total": 0, "classified": 0, "unclassified": 0,
-                    "coverage_percent": 0, "average_confidence": 0}
+        identity = {"available": False, "total": 0, "classified": 0,
+                    "unclassified": 0, "coverage_percent": None,
+                    "average_confidence": 0}
         try:
             row = conn.execute("""SELECT COUNT(*),
                 SUM(CASE WHEN LOWER(TRIM(COALESCE(device_type,''))) NOT LIKE 'unclassif%'
@@ -4479,6 +4480,7 @@ def scan_quality_report(conn=None):
                     AND COALESCE(identification_confidence,0)>0
                     THEN identification_confidence END)
                 FROM devices""").fetchone()
+            identity["available"] = True
             identity["total"] = int(row[0] or 0)
             identity["classified"] = int(row[1] or 0)
             identity["unclassified"] = max(0, identity["total"] - identity["classified"])
