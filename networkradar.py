@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 13.1.1 — Windows dashboard port binding diagnostics.
+NetworkRadar 13.2.0 — Persistent scan monitor and richer discovery telemetry.
 NetworkRadar 13.1.1 changes:
   - Diagnoses Windows WSAEACCES/10013 port binding failures, including excluded TCP ranges.
   - Closes partially-created HTTP servers after failed bind/activation attempts.
@@ -335,7 +335,7 @@ PREFERRED_INTERFACE = os.environ.get("NETWORKRADAR_TSHARK_INTERFACE", "").strip(
 WEB_HOST, WEB_PORT = "127.0.0.1", 8766  # 8.7.0 default; override with NETWORKRADAR_PORT
 WEB_URL = f"http://{WEB_HOST}:{WEB_PORT}"
 SCAN_INTERVAL = 30
-FINGERPRINT_EVERY_N_SCANS = 10
+FINGERPRINT_EVERY_N_SCANS = 5
 FINGERPRINT_TOP_PORTS = 100
 ALERTS_DEDUP_WINDOW_SECONDS = 900
 DEVICE_OFFLINE_CONFIRM_SCANS = 3
@@ -359,7 +359,7 @@ SCAN_NOW_EVENT = threading.Event()
 JOB_LOCK = threading.Lock()
 JOB_STATE = {"state": "IDLE", "phase": "Waiting", "percent": 0,
              "started_at": "", "updated_at": "", "message": "Initialising.",
-             "scan_number": 0, "last_error": ""}
+             "scan_number": 0, "last_error": "", "history": []}
 
 NET_LOCK = threading.RLock()
 NET_CTX = {"network": "", "ip": "", "gateway": "", "interface": "",
@@ -463,6 +463,15 @@ def update_job(**kw):
             if v is not None:
                 JOB_STATE[k if k != "error" else "last_error"] = v
         JOB_STATE["updated_at"] = now_text()
+        history = JOB_STATE.setdefault("history", [])
+        history.append({
+            "timestamp": JOB_STATE["updated_at"],
+            "state": JOB_STATE.get("state", "IDLE"),
+            "phase": JOB_STATE.get("phase", "Waiting"),
+            "percent": JOB_STATE.get("percent", 0),
+            "message": JOB_STATE.get("message", ""),
+        })
+        del history[:-12]
 
 # ============================================================
 # STARTUP GUARD (D5)
@@ -1726,7 +1735,11 @@ def mdns_active_snapshot(duration=2.0):
 def discover_devices():
     """Run authorised Nmap ARP discovery plus fresh Windows neighbour evidence."""
     network = current_network()
+    update_job(phase="ARP / Nmap sweep", percent=10,
+               message=f"Checking {network} with Nmap ARP discovery and host-discovery probes.")
     devices, duration = run_nmap_discovery(network, NMAP, NMAP_LOG)
+    update_job(phase="Windows neighbour table", percent=17,
+               message="Reading the selected adapter neighbour cache and merging fresh reachable IP/MAC observations.")
     neighbour_started = time.monotonic()
     with NET_LOCK:
         interface_index = NET_CTX.get("interface_index")
@@ -8126,23 +8139,33 @@ def _main_inner():
                     devices, _dur = discover_devices()
                     update_job(phase="Inventory", percent=20,
                                message=f"{len(devices)} hosts responded.")
+                    update_job(phase="Inventory persistence", percent=27,
+                               message="Saving new sightings, refreshing known devices and reconciling online/offline state.")
                     new, ret, off = update_inventory(devices)
                     audit_arp_cache()
                     deep = (scan_n == 1 or scan_n % FINGERPRINT_EVERY_N_SCANS == 0)
-                    update_job(phase="Identification", percent=45,
-                               message="Multi-signal identification.")
+                    update_job(phase="Service discovery", percent=34,
+                               message="Collecting passive LAN announcements and rate-bounded SSDP / DNS-SD service advertisements.")
                     mdns_rows = []
-                    if scan_n == 1 or scan_n % 5 == 0:
-                        try:
-                            mdns_rows = mdns_passive_snapshot(duration=2)
-                        except Exception:
-                            mdns_rows = []
-                        # Active DNS-SD browsing is approval-gated and rate-bounded.
-                        try:
-                            mdns_rows.extend(mdns_active_snapshot(duration=2.0))
-                        except Exception:
-                            pass
+                    # Refresh local DNS-SD observations on every authorised scan;
+                    # the query set is bounded and the collector has a short deadline.
+                    update_job(phase="mDNS / DNS-SD", percent=39,
+                               message="Collecting local device and service advertisements (bounded multicast browse).")
+                    try:
+                        mdns_rows = mdns_passive_snapshot(duration=2)
+                    except Exception:
+                        mdns_rows = []
+                    # Active DNS-SD browsing is approval-gated and rate-bounded.
+                    try:
+                        mdns_rows.extend(mdns_active_snapshot(duration=2.0))
+                    except Exception:
+                        pass
+                    update_job(phase="Identity enrichment", percent=45,
+                               message=("Running deep Nmap OS/service fingerprinting and correlating names, reverse DNS, NetBIOS, DHCP, mDNS, SSDP/UPnP, NIC vendor and observed services."
+                                        if deep else "Correlating names, reverse DNS, NetBIOS, DHCP, mDNS, SSDP/UPnP, NIC vendor and observed services."))
                     devices = enrich_devices(devices, deep=deep, mdns_rows=mdns_rows)
+                    update_job(phase="Identity evidence", percent=58,
+                               message=f"Enrichment complete for {len(devices)} responding hosts; retaining unknowns where evidence is insufficient.")
                     # Update only this workspace; a non-empty completed scan is required.
                     try:
                         update_network_sighting_presence(devices)

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Local-first network discovery, device intelligence and authorised network monitoring."><meta name="theme-color" content="#07111f"><title>NetworkRadar {APP_VERSION}</title><link rel="stylesheet" href="/assets/networkradar.css?v={APP_VERSION}-nightwatch-1"></head><body>
 <header><div class="brand"><button id="navToggle" class="secondary" type="button" aria-label="Toggle navigation" aria-expanded="true" title="Collapse or open navigation" onclick="toggleNavigation()">☰</button><div class="logo">NR</div><div><h1>NETWORKRADAR {APP_VERSION}</h1><div class="sub">NIGHTWATCH · SEE EVERYTHING. UNDERSTAND YOUR NETWORK.</div></div></div>
-<div class="actions"><span id="connection" class="pill warn">CONNECTING</span><button id="scanButton" onclick="scanNow()">SCAN NOW</button><button class="secondary" onclick="refreshAll()">REFRESH</button></div></header>
+<div class="actions"><span id="connection" class="pill warn">CONNECTING</span><div id="scanMonitor" class="scan-monitor" role="status" aria-live="polite" title="Live scan progress"><div class="scan-monitor-top"><span>SCAN</span><strong id="navScanPhase">WAITING</strong><b id="navScanPercent">0%</b></div><div class="scan-monitor-track"><i id="navScanBar"></i></div><div id="navScanDetail" class="scan-monitor-detail">Waiting for the next discovery cycle.</div></div><button id="scanButton" onclick="scanNow()">SCAN NOW</button><button class="secondary" onclick="refreshAll()">REFRESH</button></div></header>
 <nav id="sideNavigation" aria-label="Main navigation">
  <div class="nav-brand"><div class="nav-brand-mark">NR</div><div class="nav-brand-copy">NETWORKRADAR<small>CONTROL CENTRE</small></div></div>
  <div class="nav-search-wrap"><span class="nav-search-icon">⌕</span><input id="navSearch" type="search" placeholder="Find a workspace…" aria-label="Search workspaces"></div>
@@ -55,7 +55,7 @@
  </div>
 </section>
 <div class="meta" id="cmd">LOCAL · <span id="network">...</span> · <span id="updated">—</span></div>
-<section class="card mb-14"><div class="row-between"><div><div class="label">ENGINE</div><strong id="jobPhase">Init</strong><div class="hint" id="jobMessage">—</div></div><div id="jobPercent" class="headline-number">0%</div></div><div class="progress-track"><div id="jobBar" class="progress-fill"></div></div></section>
+<section class="card mb-14"><div class="row-between"><div><div class="label">ENGINE</div><strong id="jobPhase">Init</strong><div class="hint" id="jobMessage">—</div></div><div id="jobPercent" class="headline-number">0%</div></div><div class="progress-track"><div id="jobBar" class="progress-fill"></div></div><ol id="jobHistory" class="scan-history" aria-label="Recent scan activity"><li>Waiting for scan activity.</li></ol></section>
 <div class="grid">
 <div class="card"><div class="label">Devices online</div><div class="value" id="online">—</div><div class="hint" id="deviceHint">—</div></div>
 <div class="card"><div class="label">Historical</div><div class="value" id="historical">—</div><div class="hint">SQLite</div></div>

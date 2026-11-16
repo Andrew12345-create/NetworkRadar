@@ -135,8 +135,8 @@ async function authorizeCurrentNetwork(){
 }
 async function scanNow(){
  const b=$("scanButton");b.disabled=true;b.textContent="QUEUED...";
- try{await fetch("/api/scan",{method:"POST"});$("updated").textContent="Queued...";}
- catch(e){$("updated").textContent=e.message;}
+ try{const r=await fetch("/api/scan",{method:"POST"});let payload={};try{payload=await r.json();}catch(_){}if(!r.ok)throw new Error(payload.error||("HTTP "+r.status));$("updated").textContent="Scan request accepted. Waiting for discovery worker...";toast("Scan queued. Live progress is shown in the navigation bar.");}
+ catch(e){$("updated").textContent="Scan request failed: "+e.message;toast("Could not queue scan: "+e.message);}
  finally{setTimeout(()=>{b.disabled=false;b.textContent="SCAN NOW";},2500);}
 }
 async function loadCandidates(){
@@ -328,6 +328,25 @@ function renderNightwatch(s,n,d,dns,a,e,t){
  const auth=$("nwAuthState");if(auth)auth.classList.toggle("authorised",!!n.authorized);nwTopology(t||{});nwActivity(e,a);
 }
 
+function renderScanMonitor(job){
+ const state=String(job?.state||"IDLE").toUpperCase();
+ const phase=String(job?.phase||"Waiting");
+ const message=String(job?.message||"Waiting for the next discovery cycle.");
+ const percent=Math.max(0,Math.min(100,Number(job?.percent)||0));
+ const monitor=$("scanMonitor");
+ if(monitor)monitor.dataset.state=state;
+ const phaseEl=$("navScanPhase"),percentEl=$("navScanPercent"),bar=$("navScanBar"),detail=$("navScanDetail");
+ if(phaseEl)phaseEl.textContent=state==="RUNNING"?phase.toUpperCase():state==="COMPLETED"?"COMPLETE":state==="ERROR"?"SCAN ERROR":state==="WAITING_AUTHORIZATION"?"AUTHORISE":state;
+ if(percentEl)percentEl.textContent=percent+"%";
+ if(bar)bar.style.width=percent+"%";
+ if(detail){detail.textContent=message;detail.title=message;}
+ const history=Array.isArray(job?.history)?job.history.slice(-5).reverse():[];
+ const list=$("jobHistory");
+ if(list&&history.length){
+  list.innerHTML=history.map(item=>{const stamp=String(item.timestamp||"").split(" ").pop()||"—";return '<li><time>'+esc(stamp)+'</time><span><strong>'+esc(item.phase||item.state||"UPDATE")+'</strong> · '+esc(item.message||"")+'</span></li>';}).join("");
+ }else if(list){list.innerHTML='<li>Waiting for scan activity.</li>';}
+}
+
 async function refreshAll(){
  if(refreshInFlight)return;refreshInFlight=true;
  const specs=[
@@ -353,7 +372,7 @@ async function refreshAll(){
   $("network").textContent=s.network||n.network||"—";$("activeSubnet").textContent=n.network||s.network||"—";
   $("defaultGateway").textContent=n.gateway||"—";$("fingerprint").textContent=n.fingerprint||"—";$("fpConf").textContent=(n.confidence||0)+"%";
   $("networkWarning").textContent=n.warning||(n.authorized?"Authorised.":"Passive only.");$("authorizeNetwork").style.display=n.authorized?"none":"inline-block";$("netAuthz").textContent=n.auth_decision||"—";
-  $("jobPhase").textContent=j.phase||"—";$("jobMessage").textContent=j.message||"Waiting for engine status.";$("jobPercent").textContent=(j.percent??0)+"%";$("jobBar").style.width=(j.percent??0)+"%";
+  $("jobPhase").textContent=j.phase||"—";$("jobMessage").textContent=j.message||"Waiting for engine status.";$("jobPercent").textContent=(j.percent??0)+"%";$("jobBar").style.width=(j.percent??0)+"%";renderScanMonitor(j);
   $("online").textContent=s.online??"—";$("historical").textContent=s.historical??"—";$("deviceHint").textContent=(s.offline??"—")+" offline";$("openInvestigations").textContent=s.open_investigations??inv.length;
   const nr=$("networkRisk");nr.textContent=s.network_risk_band||"UNKNOWN";nr.className="value risk-"+(s.network_risk_band||"UNKNOWN");
   pill($("dnsStatus"),s.dns_status||"UNKNOWN",s.dns_status==="ONLINE"?"ok":"warn");pill($("dhcpStatus"),s.dhcp_status||"UNKNOWN",s.dhcp_status==="ONLINE"?"ok":"warn");pill($("arpStatus"),s.arp_status||"UNKNOWN",s.arp_status==="ONLINE"?"ok":"warn");

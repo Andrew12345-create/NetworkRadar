@@ -460,3 +460,25 @@ class WebStartupErrorHandlingTests(unittest.TestCase):
         ), patch.object(app.sys, "argv", []):
             with self.assertRaisesRegex(app.StartupError, "web console startup failed"):
                 app.start_web()
+
+
+class JobProgressHistoryTests(unittest.TestCase):
+    def test_update_job_records_bounded_human_readable_history(self):
+        import threading
+        initial = {
+            "state": "IDLE", "phase": "Waiting", "percent": 0,
+            "started_at": "", "updated_at": "", "message": "Initialising.",
+            "scan_number": 0, "last_error": "", "history": [],
+        }
+        with patch.object(app, "JOB_STATE", initial), patch.object(app, "JOB_LOCK", threading.Lock()):
+            for number in range(15):
+                app.update_job(
+                    state="RUNNING",
+                    phase=f"Stage {number}",
+                    percent=number * 5,
+                    message=f"Working on stage {number}.",
+                )
+            self.assertEqual(len(app.JOB_STATE["history"]), 12)
+            self.assertEqual(app.JOB_STATE["history"][-1]["phase"], "Stage 14")
+            self.assertEqual(app.JOB_STATE["history"][-1]["percent"], 70)
+            self.assertIn("Working on stage 14", app.JOB_STATE["history"][-1]["message"])
