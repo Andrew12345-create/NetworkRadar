@@ -335,7 +335,7 @@ PREFERRED_INTERFACE = os.environ.get("NETWORKRADAR_TSHARK_INTERFACE", "").strip(
 WEB_HOST, WEB_PORT = "127.0.0.1", 8766  # 8.7.0 default; override with NETWORKRADAR_PORT
 WEB_URL = f"http://{WEB_HOST}:{WEB_PORT}"
 SCAN_INTERVAL = 30
-FINGERPRINT_EVERY_N_SCANS = 10
+FINGERPRINT_EVERY_N_SCANS = 5
 FINGERPRINT_TOP_PORTS = 100
 ALERTS_DEDUP_WINDOW_SECONDS = 900
 DEVICE_OFFLINE_CONFIRM_SCANS = 3
@@ -8147,18 +8147,22 @@ def _main_inner():
                     update_job(phase="Service discovery", percent=34,
                                message="Collecting passive LAN announcements and rate-bounded SSDP / DNS-SD service advertisements.")
                     mdns_rows = []
-                    if scan_n == 1 or scan_n % 5 == 0:
-                        try:
-                            mdns_rows = mdns_passive_snapshot(duration=2)
-                        except Exception:
-                            mdns_rows = []
-                        # Active DNS-SD browsing is approval-gated and rate-bounded.
-                        try:
-                            mdns_rows.extend(mdns_active_snapshot(duration=2.0))
-                        except Exception:
-                            pass
+                    # Refresh local DNS-SD observations on every authorised scan;
+                    # the query set is bounded and the collector has a short deadline.
+                    update_job(phase="mDNS / DNS-SD", percent=39,
+                               message="Collecting local device and service advertisements (bounded multicast browse).")
+                    try:
+                        mdns_rows = mdns_passive_snapshot(duration=2)
+                    except Exception:
+                        mdns_rows = []
+                    # Active DNS-SD browsing is approval-gated and rate-bounded.
+                    try:
+                        mdns_rows.extend(mdns_active_snapshot(duration=2.0))
+                    except Exception:
+                        pass
                     update_job(phase="Identity enrichment", percent=45,
-                               message="Correlating reported names, reverse DNS, NetBIOS, DHCP, mDNS, SSDP/UPnP, NIC vendor and observed services.")
+                               message=("Running deep Nmap OS/service fingerprinting and correlating names, reverse DNS, NetBIOS, DHCP, mDNS, SSDP/UPnP, NIC vendor and observed services."
+                                        if deep else "Correlating names, reverse DNS, NetBIOS, DHCP, mDNS, SSDP/UPnP, NIC vendor and observed services."))
                     devices = enrich_devices(devices, deep=deep, mdns_rows=mdns_rows)
                     update_job(phase="Identity evidence", percent=58,
                                message=f"Enrichment complete for {len(devices)} responding hosts; retaining unknowns where evidence is insufficient.")
