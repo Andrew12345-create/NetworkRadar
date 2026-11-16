@@ -1,3 +1,17 @@
+# NetworkRadar 13.3.3 — Enforce Network Authorisation for Active Discovery
+
+## Security and discovery-mode correctness
+- Nmap ARP/host discovery now requires explicit approval of the current network workspace.
+- When the network is not authorised, NetworkRadar uses only locally available Windows neighbour observations and passive packet observations.
+- SSDP M-SEARCH, reverse-DNS/NetBIOS lookups, TLS certificate handshakes, SNMPv3 queries and service-banner probes are individually approval-gated.
+- Existing TCP sweep, active mDNS browse and deep Nmap fingerprinting authorisation checks remain in place.
+- Passive/partial observations no longer count as a complete subnet scan and cannot mark unobserved devices offline or advance workspace offline counters.
+- The scan monitor now labels unauthorised discovery as passive/partial rather than implying an Nmap scan ran.
+
+## Validation
+- Adds regression tests for unauthorised and authorised discovery paths, active identity-probe gates and offline-state preservation on partial inventories.
+- CI must pass on Python 3.10–3.13 and dashboard JavaScript validation before merge.
+
 # NetworkRadar 13.3.2 — Firewall Snapshot Timeout Recovery
 
 ## Dashboard request reliability

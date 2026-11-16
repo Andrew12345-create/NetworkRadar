@@ -1,5 +1,12 @@
 ﻿"""
-NetworkRadar 13.3.2 — Firewall snapshot timeout recovery.
+NetworkRadar 13.3.3 — Enforce network authorisation for active discovery.
+NetworkRadar 13.3.3 changes:
+  - Enforces current workspace authorisation before Nmap ARP/host discovery.
+  - Keeps unauthorised scans passive: local Windows neighbour cache and passive packet observations only.
+  - Gates SSDP M-SEARCH, reverse-DNS/NetBIOS lookups, TLS handshakes, SNMPv3 queries and service-banner probes.
+  - Prevents passive/partial observations from marking unobserved devices offline or advancing workspace offline counters.
+  - Retains the existing explicit authorisation gates for TCP sweep, mDNS browse and deep Nmap fingerprinting.
+
 NetworkRadar 13.3.2 changes:
   - Batches the Windows Firewall profile and rule-count inventory into one PowerShell process.
   - Gives the firewall snapshot a bounded 20-second collection budget.
@@ -1777,6 +1784,9 @@ def _same_private_host(src_ip, url):
     return is_same_private_http_host(src_ip, url)
 
 def ssdp_scan(timeout=2.0):
+    """Run SSDP M-SEARCH only on a currently authorised network."""
+    if not is_authorized():
+        return {}
     return _ssdp_scan(timeout=timeout, app_version=APP_VERSION)
 
 def mdns_active_snapshot(duration=2.0):
@@ -1793,15 +1803,25 @@ def mdns_active_snapshot(duration=2.0):
         return []
 
 def discover_devices():
-    """Run layered authorised discovery and preserve evidence provenance."""
+    """Discover devices actively only after explicit approval of this network."""
     network = current_network()
-    update_job(phase="ARP / Nmap sweep", percent=10,
-               message=f"Checking {network} with Nmap ARP discovery and host-discovery probes.")
-    devices, duration = run_nmap_discovery(network, NMAP, NMAP_LOG)
+    devices, duration = [], 0.0
+    scope_complete = False
 
-    # Supplement ARP/ICMP host discovery with bounded TCP connect probes. This
-    # catches hosts that filter echo/ARP discovery but expose a common service.
-    # The network authorisation gate is rechecked immediately before probing.
+    # Nmap ARP/host discovery is active network probing. A detected subnet is
+    # not consent: require the current workspace authorisation before running it.
+    if is_authorized():
+        update_job(phase="ARP / Nmap sweep", percent=10,
+                   message=f"Running authorised Nmap host discovery on {network}.")
+        if is_authorized():  # Recheck immediately before the active subprocess.
+            devices, duration = run_nmap_discovery(network, NMAP, NMAP_LOG)
+            scope_complete = True
+    else:
+        update_job(phase="Passive inventory", percent=10,
+                   message="Active discovery is disabled: this network has not been authorised. Reading only local neighbour observations.")
+
+    # Supplement host discovery with bounded TCP connect probes. This is a
+    # separate active operation and receives its own immediate authorisation check.
     tcp_summary = {"status": "SKIPPED", "responders": 0,
                    "detail": "Active network authorisation is required."}
     if is_authorized():
@@ -1836,7 +1856,7 @@ def discover_devices():
             print("TCP REACHABILITY DISCOVERY:", tcp_summary["detail"])
 
     update_job(phase="Windows neighbour table", percent=21,
-               message="Reading the selected adapter neighbour cache and merging fresh reachable IP/MAC observations.")
+               message="Reading the selected adapter neighbour cache and merging locally observed IP/MAC entries.")
     neighbour_started = time.monotonic()
     with NET_LOCK:
         interface_index = NET_CTX.get("interface_index")
@@ -1849,10 +1869,11 @@ def discover_devices():
         print("WINDOWS NEIGHBOUR DISCOVERY:", _clean(snapshot.get("detail", ""), 180))
     update_job(
         phase="Discovery summary", percent=24,
-        message=f"Discovery complete: {len(devices)} responsive host(s); "
-                f"{tcp_summary.get('responders', 0)} TCP-responsive host(s)."
+        message=f"Discovery complete: {len(devices)} observed host(s); "
+                f"{tcp_summary.get('responders', 0)} TCP-responsive host(s); "
+                f"scope={'complete' if scope_complete else 'passive/partial'}."
     )
-    return devices, duration
+    return devices, duration, scope_complete
 
 def derive_identity(device):
     """Compatibility wrapper around the pure identity-key derivation module."""
@@ -2616,6 +2637,9 @@ def persist_identity_assessments(conn, device, assessments, timestamp=None):
              item["rationale"], ts, ts))
 
 def tls_certificate_intelligence(ip, ports, timeout=1.5):
+    """Collect a TLS certificate only when the current network is authorised."""
+    if not is_authorized():
+        return []
     results = []
     for port in sorted(set(ports) & {443, 8443, 9443, 10443}):
         try:
@@ -2639,7 +2663,9 @@ def tls_certificate_intelligence(ip, ports, timeout=1.5):
     return results
 
 def snmpv3_intelligence(ip, timeout=2):
-    """Read-only SNMPv3 query. Secrets are written to a short-lived private config, never argv."""
+    """Read-only SNMPv3 query, gated by network approval and explicit credentials."""
+    if not is_authorized():
+        return {}
     exe = shutil.which("snmpget")
     user = os.environ.get("NETWORKRADAR_SNMPV3_USER", "").strip()
     auth_proto = os.environ.get("NETWORKRADAR_SNMPV3_AUTH_PROTO", "SHA").strip().upper()
@@ -2839,17 +2865,21 @@ def identify_device(device, ssdp=None, deep=False):
                 methods.append("MAC flag")
         except (ValueError, IndexError):
             pass
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        rf = pool.submit(reverse_dns, ip)
-        nbf = pool.submit(netbios_name, ip)
-        try:
-            rev = rf.result(timeout=6)
-        except Exception:
-            rev = ""
-        try:
-            nb = nbf.result(timeout=6)
-        except Exception:
-            nb = ""
+    rev = nb = ""
+    # Reverse-DNS and NetBIOS lookups generate network traffic. Keep the
+    # unauthorised mode genuinely passive rather than probing discovered hosts.
+    if is_authorized():
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            rf = pool.submit(reverse_dns, ip)
+            nbf = pool.submit(netbios_name, ip)
+            try:
+                rev = rf.result(timeout=6)
+            except Exception:
+                rev = ""
+            try:
+                nb = nbf.result(timeout=6)
+            except Exception:
+                nb = ""
     if rev:
         device["hostname"] = rev
         methods.append("Reverse DNS")
@@ -2921,7 +2951,9 @@ def identify_device(device, ssdp=None, deep=False):
     return observations
 
 def service_banner_intelligence(ip, ports, timeout=1.5):
-    """Collect low-impact service metadata; never submits credentials or exploit payloads."""
+    """Collect low-impact service metadata only on an authorised network."""
+    if not is_authorized():
+        return []
     out = []
     http_ports = {80, 81, 443, 631, 3000, 5000, 5001, 7001, 8000, 8008,
                   8009, 8080, 8081, 8443, 8888, 9000, 9443}
@@ -3260,9 +3292,10 @@ def update_network_sighting_presence(devices):
         return changed
     return DB_MANAGER.write(_w)
 
-def update_inventory(devices):
-    # An empty discovery result is not sufficient evidence that every known
-    # endpoint went offline (capture/interface failure can produce this).
+def update_inventory(devices, *, complete_scope=True):
+    # An empty or passive/partial observation set is not sufficient evidence
+    # that unseen endpoints went offline. Only a completed authorised scan
+    # may advance the offline-miss counter for devices not observed this pass.
     if not devices:
         return 0, 0, 0
     ts = now_text()
@@ -3294,7 +3327,7 @@ def update_inventory(devices):
                              THEN devices.hostname ELSE excluded.hostname END,
                     last_seen=excluded.last_seen, status='ONLINE', offline_misses=0""",
                 (ip, dev["mac"], dev["vendor"], dev["hostname"], ts, ts))
-        for ip, status in prev.items():
+        for ip, status in (prev.items() if complete_scope else []):
             if ip not in curr_ips and status in ("ONLINE", "SUSPECTED_OFFLINE", "INTERMITTENT"):
                 row = conn.execute("SELECT COALESCE(offline_misses,0) FROM devices WHERE ip=?",
                                    (ip,)).fetchone()
@@ -8238,12 +8271,15 @@ def _main_inner():
                             prev[r[0]] = {"mac": r[1] or "",
                                           "hostname": r[2] or "",
                                           "open_ports": r[3] or ""}
-                    devices, _dur = discover_devices()
+                    devices, _dur, scope_complete = discover_devices()
                     update_job(phase="Inventory", percent=20,
-                               message=f"{len(devices)} hosts responded.")
+                               message=(f"{len(devices)} hosts observed; "
+                                        f"{'authorised scan' if scope_complete else 'passive/partial inventory'}."))
                     update_job(phase="Inventory persistence", percent=27,
                                message="Saving new sightings, refreshing known devices and reconciling online/offline state.")
-                    new, ret, off = update_inventory(devices)
+                    new, ret, off = update_inventory(
+                        devices, complete_scope=scope_complete
+                    )
                     audit_arp_cache()
                     deep = (scan_n == 1 or scan_n % FINGERPRINT_EVERY_N_SCANS == 0)
                     update_job(phase="Service discovery", percent=34,
@@ -8270,7 +8306,8 @@ def _main_inner():
                                message=f"Enrichment complete for {len(devices)} responding hosts; retaining unknowns where evidence is insufficient.")
                     # Update only this workspace; a non-empty completed scan is required.
                     try:
-                        update_network_sighting_presence(devices)
+                        if scope_complete:
+                            update_network_sighting_presence(devices)
                     except Exception as sighting_error:
                         print("NETWORK SIGHTINGS:", _clean(sighting_error, 180))
                     # Keep Phantom Track in step with the completed inventory run.
