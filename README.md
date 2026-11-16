@@ -1,4 +1,13 @@
-# NetworkRadar 13.1.0
+# NetworkRadar 13.1.1
+
+## Windows dashboard startup reliability (13.1.1)
+
+- Diagnoses Windows WSAEACCES/10013 bind failures and checks IPv4/IPv6 TCP excluded-port ranges with netsh when available.
+- Distinguishes a port already in use from a Windows-reserved/excluded port; a reserved port can fail even when no process is listening.
+- Closes partially created HTTP server sockets after bind or activation failures.
+- Keeps port 8766 authoritative by default. A different port is used only when explicitly configured or when `--allow-alt-port` is supplied.
+
+
 
 ## Identity coverage and operational health (13.1.0)
 
