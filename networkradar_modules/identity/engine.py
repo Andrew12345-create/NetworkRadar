@@ -53,6 +53,7 @@ _RULES = {
         "nmap_os": (r"\bandroid\b", 0.86, "Nmap OS fingerprint reports Android"),
         "snmp": (r"\bandroid\b", 0.72, "SNMP system description reports Android"),
         "upnp": (r"\bandroid\b", 0.65, "UPnP device-reported Android platform"),
+        "endpoint_agent": (r"\b(android|pixel|samsung galaxy|oneplus|xiaomi|redmi|oppo|vivo)\b", 0.98, "Authenticated endpoint inventory identifies mobile platform"),
     },
     "Apple mobile device": {
         "reported_name": (r"\b(iphone|ipad|ipod|ios device)\b", 0.78, "Apple mobile-device name"),
@@ -64,6 +65,10 @@ _RULES = {
         "reported_name": (r"\b(macbook|imac|mac mini|mac studio|mac pro|macos|mac os|darwin)\b", 0.78, "Apple computer name/platform"),
         "nmap_os": (r"\b(mac os|macos|darwin)\b", 0.86, "Nmap OS fingerprint reports macOS"),
         "mdns": (r"_device-info\._tcp.*mac|model=mac", 0.55, "Apple device information service"),
+        "endpoint_agent": (r"\b(macos|macbook|imac|mac mini|darwin)\b", 0.96, "Authenticated endpoint inventory reports Apple platform"),
+    },
+    "Computer / workstation": {
+        "endpoint_agent": (r"\b(laptop|desktop|workstation|notebook|personal computer|pc)\b", 0.94, "Authenticated endpoint inventory reports computer form factor"),
     },
     "Windows computer": {
         "reported_name": (r"\b(windows|win10|win11|thinkpad|elitebook|latitude|optiplex|probook|surface pro|surface laptop)\b", 0.70, "Windows/computer name token"),
@@ -71,6 +76,7 @@ _RULES = {
         "nmap_script": (r"\bwindows (?:10|11|server)|microsoft windows|smb-os-discovery", 0.86, "SMB/Nmap host script reports Windows"),
         "snmp": (r"\b(windows|microsoft)\b", 0.75, "SNMP system description reports Windows"),
         "dhcp": (r"\bmsft\s*\d", 0.72, "Microsoft DHCP vendor-class identifier"),
+        "endpoint_agent": (r"\b(windows|thinkpad|elitebook|latitude|optiplex|probook|surface|desktop|laptop|workstation|notebook)\b", 0.98, "Authenticated endpoint OS/hardware inventory"),
     },
     "Linux / Unix computer": {
         "reported_name": (r"\b(ubuntu|debian|fedora|arch linux|freebsd|openbsd|linux workstation)\b", 0.66, "Linux/Unix name token"),
@@ -78,6 +84,7 @@ _RULES = {
         "nmap_script": (r"\b(linux|ubuntu|debian|freebsd|openbsd)\b", 0.76, "Nmap service/host script reports Unix-like OS"),
         "snmp": (r"\b(linux|freebsd|openbsd|unix)\b", 0.76, "SNMP system description reports Unix-like OS"),
         "dhcp": (r"\b(dhcpcd|busybox|udhcp)\b", 0.52, "DHCP client implementation is Unix-like; device role remains unknown"),
+        "endpoint_agent": (r"\b(linux|ubuntu|debian|fedora|freebsd|openbsd|unix)\b", 0.96, "Authenticated endpoint inventory reports Unix-like OS"),
     },
     "Printer": {
         "reported_name": (r"\b(printer|laserjet|deskjet|officejet|epson|brother|canon|xerox|ricoh|kyocera)\b", 0.72, "Printer model/name token"),
@@ -328,6 +335,13 @@ def _build_facts(device: Mapping[str, Any]) -> list[dict]:
                     "product_name", "os_name", "os_version", "computer_name"):
             _add(facts, "endpoint_agent", endpoint.get(key), f"Enrolled endpoint inventory: {key}",
                  0.98, "DEVICE_REPORTED")
+        _add(facts, "endpoint_agent", endpoint.get("system_family"),
+             "Enrolled endpoint inventory: system family", 0.98, "DEVICE_REPORTED")
+        os_data = endpoint.get("operating_system") or {}
+        if isinstance(os_data, Mapping):
+            _add(facts, "endpoint_agent", " ".join(
+                _text(os_data.get(key), 120) for key in ("caption", "name", "version")
+            ), "Enrolled endpoint inventory: operating system", 0.99, "DEVICE_REPORTED")
 
     return facts
 
