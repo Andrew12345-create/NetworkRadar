@@ -3,6 +3,7 @@
 ## Identity evidence
 - Uses observed inventory/device names when DHCP hostname fields are absent.
 - Filters generic database defaults such as `Unidentified device` and `Unclassified device` from identity evidence and evidence-coverage metrics.
+- Replaces those generic display labels after a device is successfully classified, including case-insensitive legacy labels.
 - Recognises computer-name, NetBIOS-name, DHCP-hostname and mDNS-hostname fields as one bounded reported-name evidence family.
 - Filters generated unidentified-device labels and IP-address placeholders so the application does not manufacture identity evidence.
 - Preserves conservative thresholds: a ThinkPad-like inventory name can support a laptop/computer hardware-class hypothesis without inferring Windows or an exact model.
