@@ -67,16 +67,13 @@ _RULES = {
         "mdns": (r"_device-info\._tcp.*mac|model=mac", 0.55, "Apple device information service"),
         "endpoint_agent": (r"\b(macos|macbook|imac|mac mini|darwin)\b", 0.96, "Authenticated endpoint inventory reports Apple platform"),
     },
-    "Computer / workstation": {
-        "endpoint_agent": (r"\b(laptop|desktop|workstation|notebook|personal computer|pc)\b", 0.94, "Authenticated endpoint inventory reports computer form factor"),
-    },
     "Windows computer": {
         "reported_name": (r"\b(windows|win10|win11|thinkpad|elitebook|latitude|optiplex|probook|surface pro|surface laptop)\b", 0.70, "Windows/computer name token"),
         "nmap_os": (r"\b(windows|microsoft)\b", 0.91, "Nmap OS fingerprint reports Windows"),
         "nmap_script": (r"\bwindows (?:10|11|server)|microsoft windows|smb-os-discovery", 0.86, "SMB/Nmap host script reports Windows"),
         "snmp": (r"\b(windows|microsoft)\b", 0.75, "SNMP system description reports Windows"),
         "dhcp": (r"\bmsft\s*\d", 0.72, "Microsoft DHCP vendor-class identifier"),
-        "endpoint_agent": (r"\b(windows|thinkpad|elitebook|latitude|optiplex|probook|surface|desktop|laptop|workstation|notebook)\b", 0.98, "Authenticated endpoint OS/hardware inventory"),
+        "endpoint_agent": (r"\b(windows|thinkpad|elitebook|latitude|optiplex|probook|surface)\b", 0.98, "Authenticated endpoint OS/hardware inventory"),
     },
     "Linux / Unix computer": {
         "reported_name": (r"\b(ubuntu|debian|fedora|arch linux|freebsd|openbsd|linux workstation)\b", 0.66, "Linux/Unix name token"),
