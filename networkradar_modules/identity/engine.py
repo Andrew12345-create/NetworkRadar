@@ -238,14 +238,29 @@ def _build_facts(device: Mapping[str, Any]) -> list[dict]:
     if device.get("_is_gateway"):
         _add(facts, "network_role", "default gateway", "Default-route interface", 1.0)
 
-    # User/client-supplied names are useful clues but are not treated as unique IDs.
-    for key, label in (("hostname", "DHCP/reverse-resolved hostname"),
-                       ("friendly_name", "Device-advertised friendly name")):
-        value = device.get(key)
-        if key == "hostname" and _text(value).casefold() == _text(device.get("ip")).casefold():
+    # Names can arrive through different collectors and database fields.
+    # In particular, the inventory's display/device_name is often populated
+    # while hostname is empty. Preserve that observed label as evidence rather
+    # than silently scoring the device as if no name had been collected.
+    name_fields = (
+        ("hostname", "DHCP/reverse-resolved hostname", 0.52),
+        ("friendly_name", "Device-advertised friendly name", 0.60),
+        ("device_name", "Observed inventory device name", 0.58),
+        ("netbios_name", "NetBIOS computer name", 0.68),
+        ("computer_name", "Computer name observation", 0.64),
+        ("dhcp_hostname", "DHCP option 12 hostname", 0.55),
+        ("mdns_hostname", "mDNS hostname", 0.58),
+    )
+    seen_names = set()
+    for key, label, reliability in name_fields:
+        value = _text(device.get(key), 180)
+        folded = value.casefold()
+        if (not _present(value) or folded == _text(device.get("ip")).casefold()
+                or folded.startswith(("unidentified device at ", "unknown device at "))
+                or folded in seen_names):
             continue
-        _add(facts, "reported_name", value, label, 0.60 if key == "friendly_name" else 0.52,
-             "DEVICE_REPORTED")
+        seen_names.add(folded)
+        _add(facts, "reported_name", value, label, reliability, "DEVICE_REPORTED")
 
     if device.get("reported_manufacturer"):
         _add(facts, "upnp", device["reported_manufacturer"], "UPnP-reported manufacturer", 0.91, "DEVICE_REPORTED")
