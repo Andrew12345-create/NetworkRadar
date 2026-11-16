@@ -8282,13 +8282,19 @@ def _main_inner():
                     )
                     audit_arp_cache()
                     deep = (scan_n == 1 or scan_n % FINGERPRINT_EVERY_N_SCANS == 0)
+                    active_authorised = is_authorized()
+                    deep_active = bool(deep and active_authorised)
                     update_job(phase="Service discovery", percent=34,
-                               message="Collecting passive LAN announcements and rate-bounded SSDP / DNS-SD service advertisements.")
+                               message=("Collecting passive LAN announcements and authorised SSDP / DNS-SD advertisements."
+                                        if active_authorised else
+                                        "Collecting passive LAN announcements only; active service discovery is disabled."))
                     mdns_rows = []
-                    # Refresh local DNS-SD observations on every authorised scan;
-                    # the query set is bounded and the collector has a short deadline.
+                    # Passive capture is safe to retain in either mode. The
+                    # multicast browse below separately checks current approval.
                     update_job(phase="mDNS / DNS-SD", percent=39,
-                               message="Collecting local device and service advertisements (bounded multicast browse).")
+                               message=("Collecting passive mDNS observations and running a bounded authorised browse."
+                                        if active_authorised else
+                                        "Collecting only mDNS packets visible to the local capture interface."))
                     try:
                         mdns_rows = mdns_passive_snapshot(duration=2)
                     except Exception:
@@ -8299,8 +8305,11 @@ def _main_inner():
                     except Exception:
                         pass
                     update_job(phase="Identity enrichment", percent=45,
-                               message=("Running deep Nmap OS/service fingerprinting and correlating names, reverse DNS, NetBIOS, DHCP, mDNS, SSDP/UPnP, NIC vendor and observed services."
-                                        if deep else "Correlating names, reverse DNS, NetBIOS, DHCP, mDNS, SSDP/UPnP, NIC vendor and observed services."))
+                               message=("Running authorised deep Nmap/service fingerprinting and fusing DHCP, mDNS, SSDP, TLS and other identity evidence."
+                                        if deep_active else
+                                        "Fusing passive observations, cached DHCP/mDNS evidence and enrolled endpoint inventory; active identity probes remain disabled."
+                                        if not active_authorised else
+                                        "Correlating available identity evidence; scheduled deep fingerprinting is not due this scan."))
                     devices = enrich_devices(devices, deep=deep, mdns_rows=mdns_rows)
                     update_job(phase="Identity evidence", percent=58,
                                message=f"Enrichment complete for {len(devices)} responding hosts; retaining unknowns where evidence is insufficient.")
@@ -8346,7 +8355,7 @@ def _main_inner():
                             hosts_up, duration) VALUES (?, ?, ?, ?)""",
                             (now_text(), current_network(), len(devices), total))
                         record_event(conn, "-", "SCAN_COMPLETED",
-                                     f"{len(devices)} hosts in {total}s; deep={deep}",
+                                     f"{len(devices)} hosts in {total}s; deep_requested={deep}; deep_authorised={deep_active}",
                                      category="discovery")
                     DB_MANAGER.write(_w)
                     last_scan = time.monotonic()
