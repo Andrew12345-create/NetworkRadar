@@ -2845,7 +2845,74 @@ def service_banner_intelligence(ip, ports, timeout=1.5):
                 out.append(item)
     return out
 
+def attach_enrolled_endpoint_inventory(devices):
+    """Attach fresh authenticated agent inventory using conservative IP/MAC joins."""
+    if not devices:
+        return 0
+    cutoff = (datetime.now() - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with DB_MANAGER.read() as conn:
+            rows = conn.execute(
+                """SELECT agent_id,hostname,platform,os_version,agent_version,status,
+                    last_seen,last_ip,inventory_json,capabilities_json
+                    FROM remote_agents
+                    WHERE status!='REVOKED' AND last_seen>=?
+                    ORDER BY last_seen DESC LIMIT 500""",
+                (cutoff,),
+            ).fetchall()
+    except Exception as exc:
+        for dev in devices:
+            dev.setdefault("collection_notes", []).append(
+                "Endpoint inventory lookup unavailable: " + _clean(exc, 180)
+            )
+        return 0
+
+    decoded = []
+    for row in rows:
+        try:
+            inventory = json.loads(row[8] or "{}")
+            if not isinstance(inventory, dict):
+                inventory = {}
+        except (TypeError, ValueError):
+            inventory = {}
+        try:
+            capabilities = json.loads(row[9] or "[]")
+            if not isinstance(capabilities, list):
+                capabilities = []
+        except (TypeError, ValueError):
+            capabilities = []
+        decoded.append((row, inventory, capabilities))
+
+    attached = 0
+    for dev in devices:
+        matches = []
+        for row, inventory, capabilities in decoded:
+            basis = _endpoint_inventory_association_basis(
+                dev.get("ip", ""), dev.get("mac", ""), row[7], inventory
+            )
+            if not basis:
+                continue
+            rank = 2 if basis == "OBSERVED_SOURCE_IP" else 1
+            matches.append((rank, str(row[6] or ""), row, inventory,
+                            capabilities, basis))
+        if not matches:
+            continue
+        matches.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        _, _, row, inventory, capabilities, basis = matches[0]
+        dev["endpoint_inventory"] = inventory
+        dev["endpoint_inventory_association_basis"] = basis
+        dev["endpoint_agent"] = {
+            "agent_id": row[0], "hostname": row[1], "platform": row[2],
+            "os_version": row[3], "agent_version": row[4], "status": row[5],
+            "last_seen": row[6], "last_ip": row[7],
+            "capabilities": capabilities, "association_basis": basis,
+        }
+        attached += 1
+    return attached
+
+
 def enrich_devices(devices, deep=False, mdns_rows=None):
+    attach_enrolled_endpoint_inventory(devices)
     arp = read_arp_cache()
     local = local_identity()
     with NET_LOCK:
