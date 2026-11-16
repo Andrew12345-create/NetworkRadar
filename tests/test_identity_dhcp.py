@@ -1,7 +1,7 @@
 import unittest
 
 from networkradar_modules.identity.dhcp import (
-    analyse_dhcp_identity, parse_parameter_request_list,
+    analyse_dhcp_identity, parse_parameter_request_list, parse_client_architecture,
 )
 
 
@@ -41,6 +41,35 @@ class DhcpFingerprintTests(unittest.TestCase):
         self.assertEqual(result["hints"], [])
         self.assertIn("Option 93 appears in the parameter-request list", result["features"])
         self.assertNotIn("PXE client architecture", " ".join(result["features"]))
+
+    def test_option_93_maps_preboot_architecture_without_os_claim(self):
+        parsed = parse_client_architecture("9, 6, 0x0009, 65000")
+        self.assertEqual([item["id"] for item in parsed], [9, 6, 65000])
+        self.assertEqual(parsed[0]["name"], "EFI x86-64")
+        self.assertFalse(parsed[2]["known"])
+        result = analyse_dhcp_identity("", "", "", client_architecture="9")
+        self.assertIn("DHCP option 93 pre-boot architecture: EFI x86-64",
+                      result["features"])
+        self.assertEqual(result["hints"], [])
+        self.assertTrue(any("not the installed operating system" in x
+                            for x in result["limitations"]))
+
+    def test_dhcp_client_metadata_is_preserved_as_observation(self):
+        result = analyse_dhcp_identity(
+            "", "", "", client_architecture="6",
+            user_class="PXEClient:Arch:00006",
+            client_fqdn="workstation.example.test",
+        )
+        fingerprint = result["fingerprint"]
+        self.assertEqual(fingerprint["client_architecture"][0]["name"], "EFI IA32")
+        self.assertEqual(fingerprint["user_class"], "PXEClient:Arch:00006")
+        self.assertEqual(fingerprint["client_fqdn"], "workstation.example.test")
+        self.assertEqual(result["hints"], [])
+
+    def test_architecture_parser_rejects_unbounded_or_non_numeric_values(self):
+        self.assertEqual(parse_client_architecture("EFI x86-64"), [])
+        self.assertEqual(parse_client_architecture("999999"), [])
+        self.assertEqual(parse_client_architecture(""), [])
 
     def test_hostname_hints_are_low_confidence(self):
         result = analyse_dhcp_identity("", "Office-Printer-01")

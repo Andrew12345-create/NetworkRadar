@@ -1,3 +1,21 @@
+# NetworkRadar 12.8.0 — RADAR IDENTITY DHCP Architecture Intelligence
+
+## Delivered
+
+- Extends the live TShark DHCP collector with DHCP option 93 (Client System Architecture), option 77 (User Class) and option 81 (Client FQDN).
+- Adds additive SQLite columns for the new observations; existing DHCP event records and local databases are preserved.
+- Parses known RFC 4578 option 93 architecture IDs into readable PXE/pre-boot labels and retains unknown numeric IDs as unknown observations.
+- Explicitly prevents option 93 from being interpreted as the installed operating system, device model or manufacturer.
+- Adds DHCP evidence to the identity dossier and exposes the new fields in the device detail DHCP history.
+- Deliberately does not collect option 97's stable machine GUID by default.
+- Adds unit tests for architecture parsing, unknown values, metadata preservation and conservative interpretation.
+
+## Validation boundary
+
+Automated unit tests and GitHub Actions must pass before merge. A live Windows/TShark smoke test is still required to confirm that the installed Wireshark build exposes the selected fields and that DHCP packets on the user's active adapter contain these options. Many ordinary clients will not send PXE option 93 or user class data; empty fields are expected and do not indicate a capture failure.
+
+---
+
 # NetworkRadar 12.5.0 — NIGHTWATCH Command Centre
 
 ## Delivered

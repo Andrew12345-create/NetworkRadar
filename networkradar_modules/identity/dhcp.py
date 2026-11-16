@@ -53,16 +53,64 @@ def _normalise_text(value: Any, limit: int = 160) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())[:limit]
 
 
+
+# RFC 4578 option 93 values describe the PXE/pre-boot execution environment.
+# They are deliberately not mapped to an installed operating system.
+_CLIENT_ARCHITECTURES = {
+    0: "Intel x86PC", 1: "NEC/PC98", 2: "EFI Itanium", 3: "DEC Alpha",
+    4: "Arc x86", 5: "Intel Lean Client", 6: "EFI IA32",
+    7: "EFI Byte Code (EFI BC)", 8: "EFI Xscale", 9: "EFI x86-64",
+}
+
+
+def parse_client_architecture(value: Any) -> list[dict[str, Any]]:
+    """Parse TShark's DHCP option 93 output into known PXE architecture IDs.
+
+    The value identifies a pre-boot environment, not the installed OS or
+    device model. Unknown IDs are retained as numeric observations.
+    """
+    if value is None:
+        return []
+    text = str(value).strip()
+    if not text:
+        return []
+    tokens = re.split(r"[,;\s()]+", text)
+    found: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for token in tokens[:32]:
+        token = token.strip().rstrip(":")
+        if re.fullmatch(r"0x[0-9a-fA-F]{1,4}", token):
+            number = int(token[2:], 16)
+        elif re.fullmatch(r"[0-9]{1,5}", token):
+            number = int(token, 10)
+        else:
+            continue
+        if not 0 <= number <= 65535 or number in seen:
+            continue
+        seen.add(number)
+        found.append({
+            "id": number,
+            "name": _CLIENT_ARCHITECTURES.get(number, f"Unassigned/unknown architecture ({number})"),
+            "known": number in _CLIENT_ARCHITECTURES,
+        })
+    return found
+
 def analyse_dhcp_identity(
     vendor_class: Any = "",
     hostname: Any = "",
     parameter_request_list: Any = "",
     client_identifier: Any = "",
+    client_architecture: Any = "",
+    user_class: Any = "",
+    client_fqdn: Any = "",
 ) -> dict[str, Any]:
     """Return cautious family/role hints and a readable DHCP fingerprint."""
     vendor = _normalise_text(vendor_class).casefold()
     host = _normalise_text(hostname).casefold()
     client_id = _normalise_text(client_identifier)
+    architecture = parse_client_architecture(client_architecture)
+    user_class_text = _normalise_text(user_class, 240)
+    fqdn_text = _normalise_text(client_fqdn, 255).rstrip(".")
     options = parse_parameter_request_list(parameter_request_list)
     option_set = set(options)
     hints: list[dict[str, Any]] = []
@@ -118,6 +166,13 @@ def analyse_dhcp_identity(
         features.append("Classless static route option requested")
     if 252 in option_set:
         features.append("Proxy auto-discovery option requested")
+    if architecture:
+        labels = ", ".join(item["name"] for item in architecture)
+        features.append("DHCP option 93 pre-boot architecture: " + labels)
+    if user_class_text:
+        features.append("DHCP user class observed")
+    if fqdn_text:
+        features.append("DHCP client FQDN observed")
 
     # A PRL profile is retained as an observable signature only. It is not
     # converted into a Windows/Linux assertion because common clients overlap.
@@ -128,6 +183,9 @@ def analyse_dhcp_identity(
         "parameter_request_list": options,
         "parameter_request_list_names": option_names,
         "client_identifier_present": bool(client_id),
+        "client_architecture": architecture,
+        "user_class": user_class_text,
+        "client_fqdn": fqdn_text,
         "prl_profile": prl_profile,
     }
     return {
@@ -139,5 +197,7 @@ def analyse_dhcp_identity(
             "DHCP values are client-supplied and can be changed or spoofed.",
             "Parameter-request-list patterns overlap across operating systems.",
             "DHCP alone cannot establish an exact manufacturer, model or serial number.",
+            "Option 93 describes a PXE/pre-boot architecture, not the installed operating system.",
+            "User class and client FQDN are client-supplied values and may be absent or spoofed.",
         ],
     }
