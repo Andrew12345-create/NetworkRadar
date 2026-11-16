@@ -232,6 +232,7 @@ from networkradar_modules.identity.dhcp import (
 from networkradar_modules.identity.oui import parse_ieee_registry, lookup_ieee_assignment
 from networkradar_modules.identity.recognition import recognition_family_compatible
 from networkradar_modules.identity.quality import assess_identity_quality
+from networkradar_modules.identity.engine import analyse_device_profile
 from networkradar_modules.identity.fingerprints import (
     derive_identity as _derive_identity_core,
     dhcp_fingerprint as _dhcp_fingerprint_core,
@@ -2087,134 +2088,75 @@ _RECOGNITION_RULES = [
 ]
 
 def advanced_device_recognition(device):
-    """Produce explainable category, vendor and model assessments from independent signals."""
-    facts = []
-    def add(family, value, source, reliability=0.7):
-        value = _clean(value, 500)
-        if value and not _placeholder(value):
-            facts.append({"family": family, "value": value, "source": source,
-                          "reliability": float(reliability)})
+    """Apply the modular, source-independent device identity profiler.
 
-    # Device-reported identity and naming signals.
-    for key, label in (("hostname", "Hostname"), ("friendly_name", "Friendly name"),
-                       ("device_name", "Discovered name"), ("model", "Reported model"),
-                       ("reported_manufacturer", "Reported manufacturer")):
-        add("reported", device.get(key, ""), label, 0.78 if key in ("hostname", "device_name") else 0.92)
-    oui_detail = device.get("oui_assignment") or {}
-    add("oui", oui_detail.get("organization") or device.get("oui_manufacturer") or device.get("vendor", ""),
-        "IEEE MAC address-block registrant", 0.55)
-    add("os", device.get("os_guess", ""), "Nmap OS fingerprint", 0.82)
-    passive = device.get("passive_tcp") or {}
-    add("tcpip", passive.get("signature", ""), "Passive TCP SYN fingerprint", 0.55)
-    add("tcpip", passive.get("os_family_hint", ""), "Passive TCP OS-family hint", 0.35)
-    add("mdns", device.get("mdns_records", ""), "mDNS/DNS-SD", 0.82)
-    ssdp = device.get("ssdp_intel") or {}
-    for key in ("friendlyname", "manufacturer", "modelname", "modelnumber", "devicetype", "ssdp_server"):
-        add("upnp", ssdp.get(key, ""), "SSDP/UPnP " + key, 0.91)
-    for key in ("sysDescr", "sysObjectID", "sysName"):
-        add("snmp", (device.get("snmp_intel") or {}).get(key, ""), "SNMPv3 " + key, 0.96)
-    for row in device.get("nmap_service_intel", []) or []:
-        desc = " ".join(str(row.get(k, "")) for k in ("name", "product", "version", "extrainfo"))
-        add("service", desc, f"Nmap service {row.get('port')}", 0.86)
-        if row.get("product"):
-            add("product", row.get("product"), f"Nmap product on {row.get('port')}", 0.9)
-    for row in device.get("service_intel", []) or []:
-        add("service", " ".join(str(row.get(k, "")) for k in ("banner", "server", "http_title", "api_identity", "powered_by", "www_authenticate")),
-            f"Active service probe {row.get('port', '')}", 0.84)
-    for row in device.get("dhcp_identity", []) or []:
-        add("dhcp", " ".join(str(row.get(k, "")) for k in ("vendor_class", "hostname", "parameter_request_list")),
-            "DHCP client fingerprint", 0.72)
-    for item in device.get("dhcp_intelligence", []) or []:
-        add("dhcp", item.get("category", "") + " " + item.get("reason", ""),
-            "Interpreted DHCP fingerprint", min(0.78, float(item.get("confidence", 0) or 0) / 100.0))
+    Legacy identity fields remain API-compatible, but the displayed confidence
+    now comes from evidence families rather than additive MAC/hostname bonuses.
+    """
+    profile = analyse_device_profile(device)
+    profile["intelligence_quality"] = assess_identity_quality(
+        device, facts=profile.get("evidence", []), recognition=profile
+    )
+    device["recognition"] = profile
+    device["identity_profile"] = profile
+    device["device_type"] = profile.get(
+        "selected_category", "Unclassified network device"
+    )
+    device["identity_category_confidence"] = int(profile.get("confidence", 0) or 0)
+    device["identification_confidence"] = int(profile.get("confidence", 0) or 0)
+    device["operating_system"] = profile.get("operating_system", {})
+    if profile.get("model"):
+        device["model"] = profile["model"]
+    if profile.get("manufacturer"):
+        device["reported_manufacturer"] = profile["manufacturer"]
 
-    searchable = " | ".join(x["value"] for x in facts).lower()
-    ports = {int(x) for x in device.get("port_numbers", []) if str(x).isdigit()}
-    # Service combinations are useful but deliberately lower-weight than product/banner evidence.
-    service_tokens = []
-    for row in device.get("nmap_service_intel", []) or []:
-        service_tokens.append(str(row.get("name", "")).lower())
-    service_tokens += [str(x).lower() for x in device.get("services_found", []) or []]
-    service_text = " ".join(service_tokens)
-    candidates = defaultdict(dict)
-    matches = []
-    for category, weight, _rule_family, patterns in _RECOGNITION_RULES:
-        for fact in facts:
-            if not recognition_family_compatible(_rule_family, fact["family"]):
-                continue
-            hit = next((pat for pat in patterns if re.search(pat, fact["value"], re.I)), None)
-            if hit:
-                family = fact["family"]
-                contribution = weight * fact["reliability"]
-                candidates[category][family] = max(candidates[category].get(family, 0), contribution)
-                matches.append({"category": category, "matched": hit, "source_family": family,
-                                "source": fact["source"], "weight": round(contribution, 2)})
-    # High-value combinations which are not reliable from a single open port.
-    combos = [
-        ({"ipp", "http"}, "Printer", "IPP and HTTP services", 0.76),
-        ({"rtsp", "http"}, "IP camera / surveillance", "RTSP and HTTP services", 0.74),
-        ({"smb", "http"}, "NAS / network storage candidate", "SMB and HTTP services", 0.68),
-        ({"ssh", "http"}, "Linux / Unix computer", "SSH and HTTP services", 0.62),
-    ]
-    for required, category, why, score in combos:
-        if required.issubset(set(service_tokens)):
-            candidates[category]["service_combination"] = max(candidates[category].get("service_combination", 0), score)
-            matches.append({"category": category, "matched": why, "source_family": "service_combination", "weight": score})
-    # Ports alone are weak supporting clues, never enough to assert an exact device type.
-    port_rules = [
-        ({631, 9100}, "Printer candidate", 0.40), ({554, 80}, "IP camera candidate", 0.34),
-        ({445, 5000}, "NAS candidate", 0.36), ({5060}, "VoIP endpoint candidate", 0.30),
-    ]
-    for required, category, score in port_rules:
-        if required.issubset(ports):
-            candidates[category]["port_combination"] = score
-            matches.append({"category": category, "matched": f"ports {sorted(required)}", "source_family": "port_combination", "weight": score})
+    # Keep a useful display label without feeding a generated label back into
+    # the profiler as if it were a device-reported hostname.
+    current_name = _clean(device.get("device_name", ""), 180)
+    if (not current_name or current_name.startswith("Unidentified device at ")
+            or current_name.endswith(" device at " + str(device.get("ip", "")))):
+        if profile["selected_category"] != "Unclassified network device":
+            device["device_name"] = (
+                f'{profile["selected_category"]} at {device.get("ip", "")}'
+            )
 
-    ranked = []
-    for category, families in candidates.items():
-        # Combine independent families with diminishing returns; do not count many banners
-        # from the same service family as independent confirmations.
-        vals = sorted(families.values(), reverse=True)
-        score = 1.0
-        for index, val in enumerate(vals):
-            contribution = val * (0.90 if index == 0 else 0.72)
-            score *= (1.0 - min(0.95, contribution))
-        confidence = int(min(97, round((1.0 - score) * 100)))
-        ranked.append((confidence, category, sorted(families)))
-    ranked.sort(reverse=True)
-    best = ranked[0] if ranked else (0, "Unclassified network device", [])
-    runner = ranked[1] if len(ranked) > 1 else (0, "", [])
-    conflict = bool(runner[0] >= 45 and best[0] - runner[0] < 12)
-    if conflict:
-        confidence = max(25, best[0] - 15)
-        category = "Ambiguous: " + best[1] + " / " + runner[1]
-    else:
-        confidence, category = best[0], best[1]
-    # Explicit device-reported model/manufacturer only. Never infer a model from OUI or ports.
-    reported_model = _clean(device.get("model", ""), 160)
-    reported_maker = _clean(device.get("reported_manufacturer", ""), 160)
-    result = {
-        "category": category, "confidence": confidence,
-        "status": "HIGH" if confidence >= 80 else "PROBABLE" if confidence >= 60 else "LOW" if confidence else "UNKNOWN",
-        "model": reported_model if reported_model and not _placeholder(reported_model) else "",
-        "manufacturer": reported_maker if reported_maker and not _placeholder(reported_maker) else "",
-        "nic_manufacturer": _clean(device.get("oui_manufacturer") or device.get("vendor", ""), 160),
-        "nic_address_block_registrant": oui_detail,
-        "evidence": facts, "matches": matches,
-        "passive_tcp_os_hint": (device.get("passive_tcp") or {}).get("os_family_hint", ""),
-        "alternatives": [{"category": x[1], "confidence": x[0], "source_families": x[2]} for x in ranked[1:4]],
-        "conflicting_classifications": conflict,
-        "limitations": ["NIC manufacturer is not necessarily device manufacturer.",
-                        "Open ports alone do not establish device identity.",
-                        "Exact hardware model is shown only when explicitly reported by a device or service."]
+    family_labels = {
+        "reported_name": "Device-reported name",
+        "upnp": "SSDP/UPnP",
+        "oui": "IEEE NIC registrant (not device maker)",
+        "nmap_os": "Nmap OS fingerprint",
+        "tcpip": "Passive TCP/IP fingerprint",
+        "nmap_service": "Nmap service fingerprint",
+        "service_probe": "Active service probe",
+        "dhcp": "DHCP fingerprint",
+        "mdns": "mDNS/DNS-SD",
+        "snmp": "SNMPv3",
+        "lldp": "LLDP/CDP",
+        "nmap_script": "Nmap safe scripts",
+        "endpoint_agent": "Enrolled endpoint inventory",
+        "network_role": "Network role",
     }
-    result["intelligence_quality"] = assess_identity_quality(device, facts=facts, recognition=result)
-    device["recognition"] = result
-    if confidence >= 55 and not conflict:
-        device["device_type"] = category
-        device["identity_category_confidence"] = confidence
-        device["identification_confidence"] = max(int(device.get("identification_confidence", 0) or 0), confidence)
-    return result
+    methods = [family_labels.get(x, x) for x in profile.get("source_families", [])]
+    device["identification_methods"] = ", ".join(methods)
+    device["identity_evidence"] = list(device.get("identity_evidence", []) or [])
+    existing = {
+        (str(row[0]), str(row[1]), str(row[2]))
+        for row in device["identity_evidence"] if isinstance(row, (list, tuple)) and len(row) >= 5
+    }
+    for fact in profile.get("evidence", []):
+        source = family_labels.get(fact.get("family", ""), fact.get("source", "Identity engine"))
+        attribute = "Identity observation: " + str(fact.get("family", "unknown"))
+        value = fact.get("value", "")
+        key = (source, attribute, str(value))
+        if key in existing:
+            continue
+        device["identity_evidence"].append((
+            source, attribute, value,
+            int(round(float(fact.get("reliability", 0) or 0) * 100)),
+            fact.get("evidence_class", "OBSERVED"),
+        ))
+        existing.add(key)
+    return profile
 
 def identity_fusion(device, ssdp=None, mdns_records=""):
     ssdp = ssdp or {}
