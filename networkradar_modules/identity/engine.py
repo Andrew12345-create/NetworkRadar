@@ -80,7 +80,7 @@ _RULES = {
         # (for example ANDREWSTHINKPAD). This supports a hardware-class
         # hypothesis without inferring Windows or an exact model.
         "reported_name": (r"(thinkpad|elitebook|latitude|optiplex|probook|macbook|mac mini|mac studio|mac pro|imac|surface pro|surface laptop)", 0.96, "Recognised laptop/computer product-family token in reported name"),
-        "endpoint_agent": (r"\\b(laptop|notebook|workstation|desktop)\\b", 0.96, "Authenticated endpoint inventory reports computer hardware class"),
+        "endpoint_agent": (r"\b(laptop|notebook|workstation|desktop)\b", 0.96, "Authenticated endpoint inventory reports computer hardware class"),
     },
     "Linux / Unix computer": {
         "reported_name": (r"\b(ubuntu|debian|fedora|arch linux|freebsd|openbsd|linux workstation)\b", 0.66, "Linux/Unix name token"),
