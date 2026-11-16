@@ -1,5 +1,17 @@
 ﻿"""
-NetworkRadar 12.9.0 — local-first network discovery and device intelligence.
+NetworkRadar 13.0.0 — evidence-fused device intelligence and deep discovery.
+NetworkRadar 13.0.0 changes:
+  - Replaces additive MAC/hostname confidence with a source-independent identity engine.
+  - Ranks device-family hypotheses using DHCP, Nmap OS/service, UPnP, mDNS,
+    SNMP, LLDP/CDP, endpoint inventory and safe Nmap script evidence.
+  - Separates reported device manufacturer/model from the IEEE NIC registrant.
+  - Adds targeted safe TCP/UDP Nmap enrichment, including SMB OS, TLS, UPnP
+    and DNS-SD script observations on deep scans.
+  - Shows ranked hypotheses, source families, OS evidence, TCP/UDP ports,
+    script coverage and collection limitations in the device dossier.
+  - Preserves the last strong identity profile when a shallow scan has weaker
+    evidence; ambiguous competing hypotheses are not promoted to a device type.
+
 NetworkRadar 12.9.0 changes:
   - Uses explicit Nmap ARP host discovery with reverse-DNS lookups disabled.
   - Supplements Nmap with the Windows IPv4 neighbour table, promoting only
@@ -232,6 +244,7 @@ from networkradar_modules.identity.dhcp import (
 from networkradar_modules.identity.oui import parse_ieee_registry, lookup_ieee_assignment
 from networkradar_modules.identity.recognition import recognition_family_compatible
 from networkradar_modules.identity.quality import assess_identity_quality
+from networkradar_modules.identity.engine import analyse_device_profile
 from networkradar_modules.identity.fingerprints import (
     derive_identity as _derive_identity_core,
     dhcp_fingerprint as _dhcp_fingerprint_core,
@@ -2087,134 +2100,85 @@ _RECOGNITION_RULES = [
 ]
 
 def advanced_device_recognition(device):
-    """Produce explainable category, vendor and model assessments from independent signals."""
-    facts = []
-    def add(family, value, source, reliability=0.7):
-        value = _clean(value, 500)
-        if value and not _placeholder(value):
-            facts.append({"family": family, "value": value, "source": source,
-                          "reliability": float(reliability)})
+    """Apply the modular, source-independent device identity profiler.
 
-    # Device-reported identity and naming signals.
-    for key, label in (("hostname", "Hostname"), ("friendly_name", "Friendly name"),
-                       ("device_name", "Discovered name"), ("model", "Reported model"),
-                       ("reported_manufacturer", "Reported manufacturer")):
-        add("reported", device.get(key, ""), label, 0.78 if key in ("hostname", "device_name") else 0.92)
-    oui_detail = device.get("oui_assignment") or {}
-    add("oui", oui_detail.get("organization") or device.get("oui_manufacturer") or device.get("vendor", ""),
-        "IEEE MAC address-block registrant", 0.55)
-    add("os", device.get("os_guess", ""), "Nmap OS fingerprint", 0.82)
-    passive = device.get("passive_tcp") or {}
-    add("tcpip", passive.get("signature", ""), "Passive TCP SYN fingerprint", 0.55)
-    add("tcpip", passive.get("os_family_hint", ""), "Passive TCP OS-family hint", 0.35)
-    add("mdns", device.get("mdns_records", ""), "mDNS/DNS-SD", 0.82)
-    ssdp = device.get("ssdp_intel") or {}
-    for key in ("friendlyname", "manufacturer", "modelname", "modelnumber", "devicetype", "ssdp_server"):
-        add("upnp", ssdp.get(key, ""), "SSDP/UPnP " + key, 0.91)
-    for key in ("sysDescr", "sysObjectID", "sysName"):
-        add("snmp", (device.get("snmp_intel") or {}).get(key, ""), "SNMPv3 " + key, 0.96)
-    for row in device.get("nmap_service_intel", []) or []:
-        desc = " ".join(str(row.get(k, "")) for k in ("name", "product", "version", "extrainfo"))
-        add("service", desc, f"Nmap service {row.get('port')}", 0.86)
-        if row.get("product"):
-            add("product", row.get("product"), f"Nmap product on {row.get('port')}", 0.9)
-    for row in device.get("service_intel", []) or []:
-        add("service", " ".join(str(row.get(k, "")) for k in ("banner", "server", "http_title", "api_identity", "powered_by", "www_authenticate")),
-            f"Active service probe {row.get('port', '')}", 0.84)
-    for row in device.get("dhcp_identity", []) or []:
-        add("dhcp", " ".join(str(row.get(k, "")) for k in ("vendor_class", "hostname", "parameter_request_list")),
-            "DHCP client fingerprint", 0.72)
-    for item in device.get("dhcp_intelligence", []) or []:
-        add("dhcp", item.get("category", "") + " " + item.get("reason", ""),
-            "Interpreted DHCP fingerprint", min(0.78, float(item.get("confidence", 0) or 0) / 100.0))
+    Legacy identity fields remain API-compatible, but the displayed confidence
+    now comes from evidence families rather than additive MAC/hostname bonuses.
+    """
+    profile = analyse_device_profile(device)
+    if profile.get("model"):
+        device["model"] = profile["model"]
+    if profile.get("manufacturer"):
+        device["reported_manufacturer"] = profile["manufacturer"]
+    device["operating_system"] = profile.get("operating_system", {})
+    os_profile = device["operating_system"]
+    if os_profile.get("family"):
+        endpoint_os = any(
+            item.get("source") == "Authenticated endpoint inventory"
+            for item in os_profile.get("candidates", [])
+        )
+        if endpoint_os:
+            device["os_guess"] = f'{os_profile["family"]} (authenticated endpoint inventory)'
+        elif device.get("os_guess") in ("", "Unknown", "Not yet fingerprinted", None):
+            device["os_guess"] = os_profile["family"]
+    profile["intelligence_quality"] = assess_identity_quality(
+        device, facts=profile.get("evidence", []), recognition=profile
+    )
+    device["recognition"] = profile
+    device["identity_profile"] = profile
+    device["device_type"] = profile.get(
+        "selected_category", "Unclassified network device"
+    )
+    device["identity_category_confidence"] = int(profile.get("confidence", 0) or 0)
+    device["identification_confidence"] = int(profile.get("confidence", 0) or 0)
 
-    searchable = " | ".join(x["value"] for x in facts).lower()
-    ports = {int(x) for x in device.get("port_numbers", []) if str(x).isdigit()}
-    # Service combinations are useful but deliberately lower-weight than product/banner evidence.
-    service_tokens = []
-    for row in device.get("nmap_service_intel", []) or []:
-        service_tokens.append(str(row.get("name", "")).lower())
-    service_tokens += [str(x).lower() for x in device.get("services_found", []) or []]
-    service_text = " ".join(service_tokens)
-    candidates = defaultdict(dict)
-    matches = []
-    for category, weight, _rule_family, patterns in _RECOGNITION_RULES:
-        for fact in facts:
-            if not recognition_family_compatible(_rule_family, fact["family"]):
-                continue
-            hit = next((pat for pat in patterns if re.search(pat, fact["value"], re.I)), None)
-            if hit:
-                family = fact["family"]
-                contribution = weight * fact["reliability"]
-                candidates[category][family] = max(candidates[category].get(family, 0), contribution)
-                matches.append({"category": category, "matched": hit, "source_family": family,
-                                "source": fact["source"], "weight": round(contribution, 2)})
-    # High-value combinations which are not reliable from a single open port.
-    combos = [
-        ({"ipp", "http"}, "Printer", "IPP and HTTP services", 0.76),
-        ({"rtsp", "http"}, "IP camera / surveillance", "RTSP and HTTP services", 0.74),
-        ({"smb", "http"}, "NAS / network storage candidate", "SMB and HTTP services", 0.68),
-        ({"ssh", "http"}, "Linux / Unix computer", "SSH and HTTP services", 0.62),
-    ]
-    for required, category, why, score in combos:
-        if required.issubset(set(service_tokens)):
-            candidates[category]["service_combination"] = max(candidates[category].get("service_combination", 0), score)
-            matches.append({"category": category, "matched": why, "source_family": "service_combination", "weight": score})
-    # Ports alone are weak supporting clues, never enough to assert an exact device type.
-    port_rules = [
-        ({631, 9100}, "Printer candidate", 0.40), ({554, 80}, "IP camera candidate", 0.34),
-        ({445, 5000}, "NAS candidate", 0.36), ({5060}, "VoIP endpoint candidate", 0.30),
-    ]
-    for required, category, score in port_rules:
-        if required.issubset(ports):
-            candidates[category]["port_combination"] = score
-            matches.append({"category": category, "matched": f"ports {sorted(required)}", "source_family": "port_combination", "weight": score})
+    # Keep a useful display label without feeding a generated label back into
+    # the profiler as if it were a device-reported hostname.
+    current_name = _clean(device.get("device_name", ""), 180)
+    if (not current_name or current_name.startswith("Unidentified device at ")
+            or current_name.endswith(" device at " + str(device.get("ip", "")))):
+        if profile["selected_category"] != "Unclassified network device":
+            device["device_name"] = (
+                f'{profile["selected_category"]} at {device.get("ip", "")}'
+            )
 
-    ranked = []
-    for category, families in candidates.items():
-        # Combine independent families with diminishing returns; do not count many banners
-        # from the same service family as independent confirmations.
-        vals = sorted(families.values(), reverse=True)
-        score = 1.0
-        for index, val in enumerate(vals):
-            contribution = val * (0.90 if index == 0 else 0.72)
-            score *= (1.0 - min(0.95, contribution))
-        confidence = int(min(97, round((1.0 - score) * 100)))
-        ranked.append((confidence, category, sorted(families)))
-    ranked.sort(reverse=True)
-    best = ranked[0] if ranked else (0, "Unclassified network device", [])
-    runner = ranked[1] if len(ranked) > 1 else (0, "", [])
-    conflict = bool(runner[0] >= 45 and best[0] - runner[0] < 12)
-    if conflict:
-        confidence = max(25, best[0] - 15)
-        category = "Ambiguous: " + best[1] + " / " + runner[1]
-    else:
-        confidence, category = best[0], best[1]
-    # Explicit device-reported model/manufacturer only. Never infer a model from OUI or ports.
-    reported_model = _clean(device.get("model", ""), 160)
-    reported_maker = _clean(device.get("reported_manufacturer", ""), 160)
-    result = {
-        "category": category, "confidence": confidence,
-        "status": "HIGH" if confidence >= 80 else "PROBABLE" if confidence >= 60 else "LOW" if confidence else "UNKNOWN",
-        "model": reported_model if reported_model and not _placeholder(reported_model) else "",
-        "manufacturer": reported_maker if reported_maker and not _placeholder(reported_maker) else "",
-        "nic_manufacturer": _clean(device.get("oui_manufacturer") or device.get("vendor", ""), 160),
-        "nic_address_block_registrant": oui_detail,
-        "evidence": facts, "matches": matches,
-        "passive_tcp_os_hint": (device.get("passive_tcp") or {}).get("os_family_hint", ""),
-        "alternatives": [{"category": x[1], "confidence": x[0], "source_families": x[2]} for x in ranked[1:4]],
-        "conflicting_classifications": conflict,
-        "limitations": ["NIC manufacturer is not necessarily device manufacturer.",
-                        "Open ports alone do not establish device identity.",
-                        "Exact hardware model is shown only when explicitly reported by a device or service."]
+    family_labels = {
+        "reported_name": "Device-reported name",
+        "upnp": "SSDP/UPnP",
+        "oui": "IEEE NIC registrant (not device maker)",
+        "nmap_os": "Nmap OS fingerprint",
+        "tcpip": "Passive TCP/IP fingerprint",
+        "nmap_service": "Nmap service fingerprint",
+        "service_probe": "Active service probe",
+        "dhcp": "DHCP fingerprint",
+        "mdns": "mDNS/DNS-SD",
+        "snmp": "SNMPv3",
+        "lldp": "LLDP/CDP",
+        "nmap_script": "Nmap safe scripts",
+        "endpoint_agent": "Enrolled endpoint inventory",
+        "network_role": "Network role",
     }
-    result["intelligence_quality"] = assess_identity_quality(device, facts=facts, recognition=result)
-    device["recognition"] = result
-    if confidence >= 55 and not conflict:
-        device["device_type"] = category
-        device["identity_category_confidence"] = confidence
-        device["identification_confidence"] = max(int(device.get("identification_confidence", 0) or 0), confidence)
-    return result
+    methods = [family_labels.get(x, x) for x in profile.get("source_families", [])]
+    device["identification_methods"] = ", ".join(methods)
+    device["identity_evidence"] = list(device.get("identity_evidence", []) or [])
+    existing = {
+        (str(row[0]), str(row[1]), str(row[2]))
+        for row in device["identity_evidence"] if isinstance(row, (list, tuple)) and len(row) >= 5
+    }
+    for fact in profile.get("evidence", []):
+        source = family_labels.get(fact.get("family", ""), fact.get("source", "Identity engine"))
+        attribute = "Identity observation: " + str(fact.get("family", "unknown"))
+        value = fact.get("value", "")
+        key = (source, attribute, str(value))
+        if key in existing:
+            continue
+        device["identity_evidence"].append((
+            source, attribute, value,
+            int(round(float(fact.get("reliability", 0) or 0) * 100)),
+            fact.get("evidence_class", "OBSERVED"),
+        ))
+        existing.add(key)
+    return profile
 
 def identity_fusion(device, ssdp=None, mdns_records=""):
     ssdp = ssdp or {}
@@ -2860,8 +2824,9 @@ def service_banner_intelligence(ip, ports, timeout=1.5):
                             try:
                                 obj = json.loads(raw[:16000])
                                 if isinstance(obj, dict):
-                                    for key in ("name", "product", "model", "manufacturer", "deviceName"):
+                                    for key in ("model", "manufacturer", "product", "deviceName", "name"):
                                         if isinstance(obj.get(key), (str, int, float)):
+                                            item["api_identity_key"] = key
                                             item["api_identity"] = _clean(str(obj[key]), 160)
                                             break
                             except Exception:
@@ -2890,7 +2855,74 @@ def service_banner_intelligence(ip, ports, timeout=1.5):
                 out.append(item)
     return out
 
+def attach_enrolled_endpoint_inventory(devices):
+    """Attach fresh authenticated agent inventory using conservative IP/MAC joins."""
+    if not devices:
+        return 0
+    cutoff = (datetime.now() - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with DB_MANAGER.read() as conn:
+            rows = conn.execute(
+                """SELECT agent_id,hostname,platform,os_version,agent_version,status,
+                    last_seen,last_ip,inventory_json,capabilities_json
+                    FROM remote_agents
+                    WHERE status!='REVOKED' AND last_seen>=?
+                    ORDER BY last_seen DESC LIMIT 500""",
+                (cutoff,),
+            ).fetchall()
+    except Exception as exc:
+        for dev in devices:
+            dev.setdefault("collection_notes", []).append(
+                "Endpoint inventory lookup unavailable: " + _clean(exc, 180)
+            )
+        return 0
+
+    decoded = []
+    for row in rows:
+        try:
+            inventory = json.loads(row[8] or "{}")
+            if not isinstance(inventory, dict):
+                inventory = {}
+        except (TypeError, ValueError):
+            inventory = {}
+        try:
+            capabilities = json.loads(row[9] or "[]")
+            if not isinstance(capabilities, list):
+                capabilities = []
+        except (TypeError, ValueError):
+            capabilities = []
+        decoded.append((row, inventory, capabilities))
+
+    attached = 0
+    for dev in devices:
+        matches = []
+        for row, inventory, capabilities in decoded:
+            basis = _endpoint_inventory_association_basis(
+                dev.get("ip", ""), dev.get("mac", ""), row[7], inventory
+            )
+            if not basis:
+                continue
+            rank = 2 if basis == "OBSERVED_SOURCE_IP" else 1
+            matches.append((rank, str(row[6] or ""), row, inventory,
+                            capabilities, basis))
+        if not matches:
+            continue
+        matches.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        _, _, row, inventory, capabilities, basis = matches[0]
+        dev["endpoint_inventory"] = inventory
+        dev["endpoint_inventory_association_basis"] = basis
+        dev["endpoint_agent"] = {
+            "agent_id": row[0], "hostname": row[1], "platform": row[2],
+            "os_version": row[3], "agent_version": row[4], "status": row[5],
+            "last_seen": row[6], "last_ip": row[7],
+            "capabilities": capabilities, "association_basis": basis,
+        }
+        attached += 1
+    return attached
+
+
 def enrich_devices(devices, deep=False, mdns_rows=None):
+    attach_enrolled_endpoint_inventory(devices)
     arp = read_arp_cache()
     local = local_identity()
     with NET_LOCK:
@@ -2982,7 +3014,7 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
                 os_guess=CASE WHEN ? IN ('','Unknown','Not yet fingerprinted')
                     THEN os_guess ELSE ? END,
                 model=CASE WHEN ?='' THEN model ELSE ? END,
-                identification_confidence=MAX(identification_confidence,?),
+                identification_confidence=CASE WHEN ?>=58 THEN ? ELSE identification_confidence END,
                 identification_methods=CASE WHEN ?='' THEN identification_methods ELSE ? END,
                 open_ports=CASE WHEN ? IN ('','Not fingerprinted','No common TCP ports found')
                     THEN open_ports ELSE ? END,
@@ -2999,17 +3031,22 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
                  dev.get("os_guess", ""), dev.get("os_guess", ""),
                  dev.get("model", ""), dev.get("model", ""),
                  dev.get("identification_confidence", 0),
+                 dev.get("identification_confidence", 0),
                  dev.get("identification_methods", ""),
                  dev.get("identification_methods", ""),
                  dev.get("open_ports", ""), dev.get("open_ports", ""),
                  dev.get("service_summary", ""), dev.get("service_summary", ""),
                  ts, ip))
             conn.execute("""UPDATE devices SET oui_manufacturer=?,reported_manufacturer=?,
-                identity_conflicts=?,identity_category_confidence=?,identity_last_assessed=?,
-                recognition_json=? WHERE ip=?""",
+                identity_conflicts=?,identity_category_confidence=CASE WHEN ?>=58 THEN ? ELSE identity_category_confidence END,
+                identity_last_assessed=?,
+                recognition_json=CASE WHEN ?>=58 OR identity_category_confidence<58
+                    THEN ? ELSE recognition_json END WHERE ip=?""",
                 (dev.get("oui_manufacturer", ""), dev.get("reported_manufacturer", ""),
                  json.dumps(dev.get("identity_conflicts", [])),
+                 dev.get("identity_category_confidence", 0),
                  dev.get("identity_category_confidence", 0), ts,
+                 dev.get("identity_category_confidence", 0),
                  json.dumps(dev.get("recognition", {}), ensure_ascii=False), ip))
             if prior:
                 current_values = [dev.get("hostname", ""), dev.get("vendor", ""),
@@ -7471,94 +7508,210 @@ def start_web():
     return server
 
 def deep_fingerprint(devices):
-    """Run authorised Nmap service discovery and persist per-host scan completeness."""
+    """Run authorised TCP, OS, safe-script and targeted UDP identification."""
     if not devices or not is_authorized():
         return False
     for dev in devices:
         dev["_port_scan_complete"] = False
         dev["port_numbers"] = []
+        dev["udp_port_numbers"] = []
         dev["services_found"] = []
         dev["nmap_service_intel"] = []
+        dev["nmap_script_intel"] = []
+        dev["collection_notes"] = []
     ips = [d["ip"] for d in devices if d.get("ip")]
-    if not ips: return False
-    base = [str(NMAP), "-sT", "-sV", "--version-intensity", "5", "--reason", "--top-ports",
-            str(FINGERPRINT_TOP_PORTS), "-O", "--osscan-limit", "--max-os-tries", "1", "-oX", "-"]
+    if not ips:
+        return False
+
+    # These explicitly selected NSE scripts are classified safe/discovery by
+    # Nmap. We do not use -sC or broad script categories.
+    base = [
+        str(NMAP), "-sT", "-sV", "--version-intensity", "5", "--reason",
+        "--top-ports", str(FINGERPRINT_TOP_PORTS), "-O", "--osscan-limit",
+        "--max-os-tries", "1", "--script",
+        "smb-os-discovery,ssl-cert", "--script-timeout", "12s", "-oX", "-"
+    ]
     try:
-        r = subprocess.run(base + ips, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=180)
+        r = subprocess.run(base + ips, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=180)
         if r.returncode != 0 or not r.stdout.strip():
-            fb = [str(NMAP), "-sT", "-sV", "--version-intensity", "5", "--reason", "--top-ports",
-                  str(FINGERPRINT_TOP_PORTS), "-oX", "-"]
-            r = subprocess.run(fb + ips, capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=150)
+            # The fallback deliberately avoids raw-packet OS detection and
+            # NSE so service discovery can still complete without elevation.
+            fallback = [
+                str(NMAP), "-sT", "-sV", "--version-intensity", "5",
+                "--reason", "--top-ports", str(FINGERPRINT_TOP_PORTS), "-oX", "-"
+            ]
+            r = subprocess.run(fallback + ips, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=150)
+            for dev in devices:
+                dev["collection_notes"].append(
+                    "Nmap safe TCP scripts unavailable; used service/OS scan fallback."
+                )
         if not r.stdout.strip():
-            ts=now_text()
+            ts = now_text()
             DB_MANAGER.write(lambda conn: [conn.execute(
                 "INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail) VALUES(?,?,?,?,?,?,?)",
-                (ts,d["ip"],d.get("device_id", ""),0,"","nmap","Nmap returned no XML output")) for d in devices])
+                (ts, d["ip"], d.get("device_id", ""), 0, "", "nmap",
+                 "Nmap returned no XML output")) for d in devices])
             return False
+
         root = ET.fromstring(r.stdout)
         by_ip = {d["ip"]: d for d in devices}
+
+        def collect_scripts(host, dev):
+            for script in host.findall(".//script"):
+                script_id = _clean(script.get("id", "unknown"), 80)
+                output = _clean(script.get("output", ""), 3000)
+                if not output:
+                    continue
+                item = {"id": script_id, "output": output}
+                dev.setdefault("nmap_script_intel", []).append(item)
+
         for host in root.findall("host"):
             addr = host.find("./address[@addrtype='ipv4']")
-            if addr is None: continue
+            if addr is None:
+                continue
             dev = by_ip.get(addr.get("addr"))
-            if not dev: continue
-            status = host.find("status")
+            if not dev:
+                continue
             ports_node = host.find("./ports")
-            # A host block with an explicit ports element is a completed result even if empty.
-            if ports_node is None: continue
-            dev["_port_scan_complete"] = True
+            if ports_node is not None:
+                dev["_port_scan_complete"] = True
             os_fingerprint = best_os_match(host)
             if os_fingerprint:
                 dev["nmap_os_fingerprint"] = os_fingerprint
                 name = _clean(os_fingerprint.get("name", ""))
-                acc = os_fingerprint.get("accuracy", 0)
+                accuracy = os_fingerprint.get("accuracy", 0)
                 if name:
-                    dev["os_guess"] = f"{name} ({acc}% Nmap match accuracy)"
+                    dev["os_guess"] = f"{name} ({accuracy}% Nmap match accuracy)"
+            collect_scripts(host, dev)
+            if ports_node is None:
+                continue
             for port in ports_node.findall("./port"):
-                st = port.find("state")
-                if st is None or st.get("state") != "open": continue
-                pid = port.get("portid", "")
-                svc = port.find("service")
-                sname = svc.get("name", "unknown") if svc is not None else "unknown"
-                prod = svc.get("product", "") if svc is not None else ""
-                ver = svc.get("version", "") if svc is not None else ""
-                extra = svc.get("extrainfo", "") if svc is not None else ""
-                try: dev["port_numbers"].append(int(pid))
-                except ValueError: continue
-                dev["services_found"].append(f"{pid}/{' '.join(x for x in (sname,prod,ver,extra) if x)}")
+                state = port.find("state")
+                if state is None or state.get("state") != "open":
+                    continue
+                try:
+                    port_number = int(port.get("portid", ""))
+                except ValueError:
+                    continue
+                protocol = port.get("protocol", "tcp")
+                service = port.find("service")
+                service_name = service.get("name", "unknown") if service is not None else "unknown"
+                product = service.get("product", "") if service is not None else ""
+                version = service.get("version", "") if service is not None else ""
+                extra = service.get("extrainfo", "") if service is not None else ""
+                if protocol == "udp":
+                    dev["udp_port_numbers"].append(port_number)
+                else:
+                    dev["port_numbers"].append(port_number)
+                dev["services_found"].append(
+                    f"{port_number}/{protocol}/{ ' '.join(x for x in (service_name, product, version, extra) if x)}"
+                )
                 dev.setdefault("nmap_service_intel", []).append({
-                    "port": int(pid), "protocol": port.get("protocol", "tcp"),
-                    "name": _clean(sname, 100), "product": _clean(prod, 160),
-                    "version": _clean(ver, 100), "extrainfo": _clean(extra, 160),
-                    "tunnel": _clean(svc.get("tunnel", "") if svc is not None else "", 40),
-                    "method": _clean(svc.get("method", "") if svc is not None else "", 40),
+                    "port": port_number, "protocol": protocol,
+                    "name": _clean(service_name, 100),
+                    "product": _clean(product, 160),
+                    "version": _clean(version, 100),
+                    "extrainfo": _clean(extra, 160),
+                    "tunnel": _clean(service.get("tunnel", "") if service is not None else "", 40),
+                    "method": _clean(service.get("method", "") if service is not None else "", 40),
                 })
+
+        # Targeted UDP probes often reveal printer, discovery, UPnP and
+        # management capabilities missed by a TCP-only inventory. This is a
+        # bounded optional pass; failure never discards the TCP results.
+        udp_command = [
+            str(NMAP), "-sU", "-sV", "--version-light", "--reason",
+            "--max-retries", "1", "--host-timeout", "18s",
+            "-p", "137,161,1900,3702,5353",
+            "--script", "upnp-info,dns-service-discovery",
+            "--script-timeout", "12s", "-oX", "-"
+        ]
+        try:
+            udp_result = subprocess.run(
+                udp_command + ips, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=100
+            )
+            if udp_result.returncode == 0 and udp_result.stdout.strip():
+                udp_root = ET.fromstring(udp_result.stdout)
+                for host in udp_root.findall("host"):
+                    addr = host.find("./address[@addrtype='ipv4']")
+                    if addr is None:
+                        continue
+                    dev = by_ip.get(addr.get("addr"))
+                    if not dev:
+                        continue
+                    collect_scripts(host, dev)
+                    ports_node = host.find("./ports")
+                    if ports_node is None:
+                        continue
+                    for port in ports_node.findall("./port"):
+                        state = port.find("state")
+                        if state is None or state.get("state") != "open":
+                            continue
+                        try:
+                            port_number = int(port.get("portid", ""))
+                        except ValueError:
+                            continue
+                        dev["udp_port_numbers"].append(port_number)
+                        service = port.find("service")
+                        dev.setdefault("nmap_service_intel", []).append({
+                            "port": port_number, "protocol": "udp",
+                            "name": _clean(service.get("name", "unknown") if service is not None else "unknown", 100),
+                            "product": _clean(service.get("product", "") if service is not None else "", 160),
+                            "version": _clean(service.get("version", "") if service is not None else "", 100),
+                            "extrainfo": _clean(service.get("extrainfo", "") if service is not None else "", 160),
+                            "method": "targeted UDP identification",
+                        })
+            else:
+                detail = _clean(udp_result.stderr or "No UDP XML results.", 220)
+                for dev in devices:
+                    dev["collection_notes"].append("Targeted UDP identification: " + detail)
+        except Exception as udp_error:
+            detail = _clean(udp_error, 220)
+            for dev in devices:
+                dev["collection_notes"].append("Targeted UDP identification unavailable: " + detail)
+
         for dev in devices:
             dev["port_numbers"] = sorted(set(dev.get("port_numbers", [])))
-            dev["open_ports"] = ", ".join(map(str,dev["port_numbers"])) if dev["_port_scan_complete"] else ""
-            dev["service_summary"] = "; ".join(dev.get("services_found", []))[:500]
+            dev["udp_port_numbers"] = sorted(set(dev.get("udp_port_numbers", [])))
+            dev["open_ports"] = ", ".join(map(str, dev["port_numbers"])) if dev["_port_scan_complete"] else ""
+            dev["service_summary"] = "; ".join(dev.get("services_found", []))[:700]
+            dev["nmap_script_intel"] = dev.get("nmap_script_intel", [])[:64]
+
         ts = now_text()
         def _save(conn):
             for dev in devices:
-                did=dev.get("device_id", "")
+                did = dev.get("device_id", "")
                 if not did:
-                    match=conn.execute("SELECT device_id FROM devices WHERE ip=?",(dev["ip"],)).fetchone()
-                    did=(match[0] or "") if match else ""
+                    match = conn.execute(
+                        "SELECT device_id FROM devices WHERE ip=?", (dev["ip"],)
+                    ).fetchone()
+                    did = (match[0] or "") if match else ""
+                detail = "TCP/OS scan plus targeted safe-script and UDP enrichment"
                 if dev.get("_port_scan_complete"):
-                    conn.execute("""INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail)
-                        VALUES(?,?,?,?,?,?,?)""",(ts,dev["ip"],did,1,
-                        ",".join(map(str,dev.get("port_numbers",[]))),"nmap",
-                        "Host returned explicit Nmap ports element"))
+                    conn.execute(
+                        """INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail)
+                        VALUES(?,?,?,?,?,?,?)""",
+                        (ts, dev["ip"], did, 1,
+                         ",".join(map(str, dev.get("port_numbers", []))),
+                         "nmap", detail)
+                    )
                 else:
-                    conn.execute("""INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail)
-                        VALUES(?,?,?,?,?,?,?)""",(ts,dev["ip"],did,0,"","nmap",
-                        "No complete per-host port result; findings retained"))
+                    conn.execute(
+                        """INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail)
+                        VALUES(?,?,?,?,?,?,?)""",
+                        (ts, dev["ip"], did, 0, "", "nmap",
+                         "No complete per-host TCP port result; findings retained")
+                    )
         DB_MANAGER.write(_save)
         return all(d.get("_port_scan_complete") for d in devices)
-    except Exception as e:
-        NMAP_LOG.write_text(f"[{now_text()}] Deep fingerprint: {_clean(e,500)}",encoding="utf-8")
+    except Exception as error:
+        NMAP_LOG.write_text(
+            f"[{now_text()}] Deep fingerprint: {_clean(error, 500)}",
+            encoding="utf-8"
+        )
         return False
 
 
