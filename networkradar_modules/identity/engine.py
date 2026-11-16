@@ -396,7 +396,7 @@ def _score_categories(facts: list[dict], device: Mapping[str, Any]) -> tuple[lis
             "evidence": [entry[1] for entry in family_values.values()],
         })
     ranked.sort(key=lambda row: (row["confidence"], row["category"]), reverse=True)
-    return ranked, port_clues
+    return ranked, port_clues, matches
 
 
 def _extract_reported_model(device: Mapping[str, Any]) -> str:
@@ -481,7 +481,7 @@ def analyse_device_profile(device: Mapping[str, Any] | None) -> dict:
     """Build an explainable, conservative device identity profile."""
     device = device or {}
     facts = _build_facts(device)
-    ranked, port_clues = _score_categories(facts, device)
+    ranked, port_clues, match_records = _score_categories(facts, device)
     best = ranked[0] if ranked else {"category": "Unclassified network device",
                                      "confidence": 0, "source_families": [], "evidence": []}
     runner = ranked[1] if len(ranked) > 1 else None
@@ -526,9 +526,12 @@ def analyse_device_profile(device: Mapping[str, Any] | None) -> dict:
         "model": model,
         "manufacturer": manufacturer,
         "nic_manufacturer": nic_manufacturer,
+        "nic_address_block_registrant": dict(oui) if isinstance(oui, Mapping) else {},
         "operating_system": os_profile,
+        "passive_tcp_os_hint": (device.get("passive_tcp") or {}).get("os_family_hint", ""),
         "evidence": facts,
-        "matches": [
+        "matches": match_records[:128],
+        "ranked_categories": [
             {"category": row["category"], "confidence": row["confidence"],
              "source_families": row["source_families"]}
             for row in ranked[:8]
