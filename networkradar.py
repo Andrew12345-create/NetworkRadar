@@ -1,5 +1,11 @@
 ﻿"""
-NetworkRadar 13.0.0 — evidence-fused device intelligence and deep discovery.
+NetworkRadar 13.1.0 — identity evidence coverage and operational health.
+NetworkRadar 13.1.0 changes:
+  - Uses observed inventory/device names when DHCP hostname fields are absent.
+  - Separates discovery/telemetry health from identity coverage and exposes both.
+  - Makes the status API resilient to individual optional summary-query failures.
+  - Reports component-level scan-quality scoring with a true 100-point maximum.
+
 NetworkRadar 13.0.0 changes:
   - Replaces additive MAC/hostname confidence with a source-independent identity engine.
   - Ranks device-family hypotheses using DHCP, Nmap OS/service, UPnP, mDNS,
@@ -4316,14 +4322,21 @@ def behaviour_diagnostics(conn=None):
             ctx.__exit__(None, None, None)
 
 def scan_quality_report(conn=None):
+    """Report discovery/telemetry quality separately from identity coverage.
+
+    The score is a weighted 100-point operational measure. Identity coverage
+    is returned independently so a successful host sweep cannot disguise weak
+    classification or missing device evidence.
+    """
     own = conn is None
     ctx = None
     if own:
         ctx = DB_MANAGER.read()
         conn = ctx.__enter__()
     try:
-        scan = conn.execute("SELECT timestamp,network,hosts_up,duration FROM scans "
-                            "ORDER BY id DESC LIMIT 1").fetchone()
+        scan = conn.execute(
+            "SELECT timestamp,network,hosts_up,duration FROM scans ORDER BY id DESC LIMIT 1"
+        ).fetchone()
         with NET_LOCK:
             net = dict(NET_CTX)
         with DHCP_STATE_LOCK:
@@ -4332,46 +4345,136 @@ def scan_quality_report(conn=None):
             dns = dict(DNS_STATE)
         with ARP_STATE_LOCK:
             arp = dict(ARP_STATE)
-        score = 0; reasons = []
+
+        score = 0
+        reasons = []
+        components = []
+
+        def add_component(key, label, earned, maximum, detail):
+            nonlocal score
+            earned = max(0, min(int(maximum), int(earned)))
+            score += earned
+            components.append({
+                "key": key, "label": label, "score": earned,
+                "maximum": int(maximum), "detail": str(detail),
+            })
+
         if scan:
-            score += 30
+            add_component("completed_scan", "Completed scan", 25, 25,
+                          "A completed discovery scan is recorded.")
             if int(scan[2] or 0) > 0:
-                score += 15
+                add_component("hosts_found", "Hosts discovered", 10, 10,
+                              f"{int(scan[2])} hosts reported by the latest scan.")
             else:
+                add_component("hosts_found", "Hosts discovered", 0, 10,
+                              "The latest scan reported zero hosts.")
                 reasons.append("Latest scan reported zero hosts.")
         else:
+            add_component("completed_scan", "Completed scan", 0, 25,
+                          "No completed scan is recorded.")
+            add_component("hosts_found", "Hosts discovered", 0, 10,
+                          "Host discovery cannot be assessed without a scan.")
             reasons.append("No completed scan is recorded.")
+
         if net.get("network") and net.get("ip"):
-            score += 15
+            add_component("network_context", "Network context", 15, 15,
+                          "Local address and subnet are available.")
         else:
+            add_component("network_context", "Network context", 0, 15,
+                          "Local address or subnet is missing.")
             reasons.append("Network context is incomplete.")
+
         if net.get("gateway"):
-            score += 10
+            add_component("gateway", "Gateway", 10, 10,
+                          f"Gateway {net.get('gateway')} is known.")
         else:
+            add_component("gateway", "Gateway", 0, 10, "Default gateway is unknown.")
             reasons.append("Default gateway is unknown.")
+
         if net.get("authorized"):
-            score += 10
+            add_component("authorisation", "Network authorisation", 10, 10,
+                          "The active network profile is authorised.")
         else:
+            add_component("authorisation", "Network authorisation", 0, 10,
+                          "The active network is not authorised for active discovery.")
             reasons.append("Active discovery is not authorised on this network.")
-        if dns.get("status") == "ONLINE":
-            score += 5
+
+        dns_state = str(dns.get("status", "UNKNOWN")).upper()
+        dns_observed = int(dns.get("queries", 0) or 0) + int(dns.get("responses", 0) or 0)
+        if dns_state == "ONLINE" and dns_observed:
+            dns_points, dns_detail = 10, f"Capture online; {dns_observed} DNS observations."
+        elif dns_state == "ONLINE":
+            dns_points, dns_detail = 5, "Capture process online; no DNS observations yet."
+            reasons.append("DNS capture is running but has not observed DNS traffic.")
         else:
-            reasons.append("DNS capture is not online.")
-        if dhcp.get("status") in {"ONLINE", "RUNNING"}:
-            score += 5
+            dns_points, dns_detail = 0, f"DNS capture state: {dns_state}."
+            reasons.append(f"DNS capture state: {dns_state}.")
+        add_component("dns", "DNS telemetry", dns_points, 10, dns_detail)
+
+        dhcp_state = str(dhcp.get("status", "UNKNOWN")).upper()
+        dhcp_messages = int(dhcp.get("messages", 0) or 0)
+        if dhcp_state in {"ONLINE", "RUNNING"} and dhcp_messages:
+            dhcp_points, dhcp_detail = 10, f"Capture online; {dhcp_messages} DHCP messages observed."
+        elif dhcp_state in {"ONLINE", "RUNNING"}:
+            dhcp_points, dhcp_detail = 5, "Capture process online; no DHCP packets observed."
+            reasons.append("DHCP capture is running but has not observed DHCP traffic.")
         else:
-            detail = dhcp.get("last_error") or dhcp.get("error") or "No diagnostic detail available."
-            reasons.append(f"DHCP capture state: {dhcp.get('status', 'UNKNOWN')}. {detail}")
-        if arp.get("status") == "ONLINE":
-            score += 5
+            dhcp_points = 0
+            dhcp_detail = f"DHCP capture state: {dhcp_state}; {dhcp.get('last_error') or dhcp.get('error') or 'no error detail'}."
+            reasons.append(dhcp_detail)
+        add_component("dhcp", "DHCP telemetry", dhcp_points, 10, dhcp_detail)
+
+        arp_state = str(arp.get("status", "UNKNOWN")).upper()
+        arp_observations = int(arp.get("observations", 0) or 0)
+        if arp_state == "ONLINE" and arp_observations:
+            arp_points, arp_detail = 10, f"Capture online; {arp_observations} ARP observations."
+        elif arp_state == "ONLINE":
+            arp_points, arp_detail = 5, "Capture process online; no ARP observations yet."
+            reasons.append("ARP capture is running but has not observed ARP traffic.")
         else:
-            reasons.append(f"ARP capture state: {arp.get('status', 'UNKNOWN')}.")
+            arp_points, arp_detail = 0, f"ARP capture state: {arp_state}."
+            reasons.append(f"ARP capture state: {arp_state}.")
+        add_component("arp", "ARP telemetry", arp_points, 10, arp_detail)
+
+        identity = {"total": 0, "classified": 0, "unclassified": 0,
+                    "coverage_percent": 0, "average_confidence": 0}
+        try:
+            row = conn.execute("""SELECT COUNT(*),
+                SUM(CASE WHEN COALESCE(device_type,'') NOT IN
+                    ('','Unclassified network device','Unclassified','Unknown')
+                    AND COALESCE(device_type,'') NOT LIKE 'Ambiguous:%'
+                    AND COALESCE(identification_confidence,0)>0
+                    THEN 1 ELSE 0 END),
+                AVG(CASE WHEN COALESCE(device_type,'') NOT IN
+                    ('','Unclassified network device','Unclassified','Unknown')
+                    AND COALESCE(device_type,'') NOT LIKE 'Ambiguous:%'
+                    AND COALESCE(identification_confidence,0)>0
+                    THEN identification_confidence END)
+                FROM devices""").fetchone()
+            identity["total"] = int(row[0] or 0)
+            identity["classified"] = int(row[1] or 0)
+            identity["unclassified"] = max(0, identity["total"] - identity["classified"])
+            identity["coverage_percent"] = (
+                round(identity["classified"] * 100 / identity["total"])
+                if identity["total"] else 0
+            )
+            identity["average_confidence"] = round(float(row[2] or 0), 1)
+        except Exception as exc:
+            reasons.append("Identity coverage unavailable: " + _clean(exc, 180))
+
         score = min(100, score)
         band = "HIGH" if score >= 85 else "MODERATE" if score >= 65 else "LOW"
-        return {"score": score, "band": band, "latest_scan": scan[0] if scan else "",
-                "network": scan[1] if scan else "", "hosts_up": int(scan[2] or 0) if scan else 0,
-                "duration_seconds": float(scan[3] or 0) if scan else 0,
-                "reasons": reasons}
+        return {
+            "score": score, "band": band,
+            "score_basis": "Discovery and telemetry health; identity coverage is separate.",
+            "components": components,
+            "identity_coverage": identity,
+            "latest_scan": scan[0] if scan else "",
+            "network": scan[1] if scan else "",
+            "hosts_up": int(scan[2] or 0) if scan else 0,
+            "duration_seconds": float(scan[3] or 0) if scan else 0,
+            "reasons": reasons,
+        }
     finally:
         if own and ctx is not None:
             ctx.__exit__(None, None, None)
@@ -6573,29 +6676,43 @@ class Handler(BaseHTTPRequestHandler):
                         out.append({"command_id":r[0],"agent_id":r[1],"hostname":r[2] or r[1],"action":r[3],"status":r[4],"created_at":r[5],"completed_at":r[6],"result":result})
                     return self.send_json(out)
                 if p.path == "/api/status":
-                    online, hist, off = conn.execute("""SELECT
+                    status_errors = []
+
+                    def _status_query(label, sql, default=None, all_rows=False):
+                        try:
+                            cursor = conn.execute(sql)
+                            return cursor.fetchall() if all_rows else cursor.fetchone()
+                        except Exception as exc:
+                            status_errors.append(f"{label}: {_clean(exc, 180)}")
+                            return default
+
+                    counts = _status_query("device inventory", """SELECT
                         SUM(CASE WHEN status='ONLINE' THEN 1 ELSE 0 END),
                         COUNT(*), SUM(CASE WHEN status='OFFLINE' THEN 1 ELSE 0 END)
-                        FROM devices""").fetchone()
-                    dq, ud, dc, nx, _dr, ac = conn.execute("""SELECT
+                        FROM devices""", (0, 0, 0))
+                    online, hist, off = counts or (0, 0, 0)
+
+                    dns_counts = _status_query("DNS summary", """SELECT
                         (SELECT COUNT(*) FROM dns_events WHERE is_response=0),
                         (SELECT COUNT(*) FROM domain_intel),
                         (SELECT COUNT(DISTINCT client_ip) FROM dns_client_domains),
                         (SELECT COUNT(*) FROM dns_events WHERE response_code='NXDOMAIN'),
                         (SELECT COUNT(*) FROM dns_events WHERE is_response=1),
-                        (SELECT COUNT(*) FROM dns_alerts)""").fetchone()
-                    scan = conn.execute("SELECT duration FROM scans "
-                                        "ORDER BY id DESC LIMIT 1").fetchone()
-                    open_inv = conn.execute("SELECT COUNT(*) FROM investigations "
-                                            "WHERE status IN ('OPEN','INVESTIGATING')"
-                                            ).fetchone()[0]
-                    bands = conn.execute("SELECT band FROM device_risk_scores").fetchall()
+                        (SELECT COUNT(*) FROM dns_alerts)""", (0, 0, 0, 0, 0, 0))
+                    dq, ud, dc, nx, _dr, ac = dns_counts or (0, 0, 0, 0, 0, 0)
+                    scan = _status_query("latest scan", "SELECT duration FROM scans ORDER BY id DESC LIMIT 1")
+                    open_row = _status_query("investigations", """SELECT COUNT(*) FROM investigations
+                        WHERE status IN ('OPEN','INVESTIGATING')""", (0,))
+                    open_inv = (open_row or (0,))[0]
+                    bands = _status_query("risk summary",
+                        "SELECT band FROM device_risk_scores", [], all_rows=True) or []
                     rank = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4, "UNKNOWN": 0}
-                    worst, wr = "LOW", 0
+                    worst, wr = "UNKNOWN", 0
                     for (bn,) in bands:
-                        r = rank.get(bn or "UNKNOWN", 0)
-                        if r > wr:
-                            wr, worst = r, bn
+                        value = rank.get(bn or "UNKNOWN", 0)
+                        if value > wr:
+                            wr, worst = value, bn
+
                     with DNS_STATE_LOCK:
                         dns = dict(DNS_STATE)
                     with DHCP_STATE_LOCK:
@@ -6604,6 +6721,7 @@ class Handler(BaseHTTPRequestHandler):
                         arp = dict(ARP_STATE)
                     with NET_LOCK:
                         network = NET_CTX.get("network", "")
+                    db_health = DB_MANAGER.health()
                     return self.send_json({
                         "network": network, "timestamp": now_text(),
                         "online": online or 0, "historical": hist or 0,
@@ -6620,7 +6738,10 @@ class Handler(BaseHTTPRequestHandler):
                         "last_scan_duration": scan[0] if scan else 0,
                         "open_investigations": open_inv,
                         "network_risk_band": worst,
-                        "db_health": DB_MANAGER.health()})
+                        "db_health": db_health,
+                        "status_degraded": bool(status_errors),
+                        "status_errors": status_errors[:8],
+                    })
 
                 if p.path == "/api/diagnostics":
                     with DNS_STATE_LOCK:
