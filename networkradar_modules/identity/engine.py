@@ -101,7 +101,7 @@ _RULES = {
         "mdns": (r"_googlecast\._tcp|_airplay\._tcp|_raop\._tcp|_mediaremotetv\._tcp|_companion-link\._tcp", 0.80, "Media streaming DNS-SD service"),
         "nmap_service": (r"\b(dial|plex|dlna|upnp)\b", 0.66, "Nmap identifies a media service"),
     },
-    "Smart speaker / audio": {
+    "Media receiver / streamer": {\n        "mdns": (r"_googlecast\\._tcp", 0.94, "Google Cast receiver service; form factor not established"),\n        "upnp": (r"\\b(google cast|chromecast|media renderer|dlna renderer)\\b", 0.78, "UPnP media receiver description"),\n    },\n    "Smart speaker / audio": {
         "reported_name": (r"\b(sonos|homepod|echo dot|echo show|smart speaker|bose speaker)\b", 0.72, "Audio-device name token"),
         "upnp": (r"\b(sonos|homepod|smart speaker|audio renderer)\b", 0.84, "UPnP audio-device description"),
         "mdns": (r"_sonos\._tcp|_spotify-connect\._tcp|_raop\._tcp", 0.74, "Audio ecosystem DNS-SD service"),
@@ -353,7 +353,7 @@ def _score_categories(facts: list[dict], device: Mapping[str, Any]) -> tuple[lis
     service_names = _service_names(device)
     ports = {int(x) for x in device.get("port_numbers", []) if str(x).isdigit()}
     combos = [
-        ({"ipp", "http"}, "Printer", 0.70, "IPP + HTTP service combination"),
+        ({"ipp", "http"}, "Printer", 0.84, "IPP + HTTP service combination"),
         ({"rtsp", "http"}, "IP camera / surveillance", 0.68, "RTSP + HTTP service combination"),
         ({"smb", "http"}, "NAS / network storage", 0.52, "SMB + HTTP; storage role remains tentative"),
         ({"ssh", "http"}, "Linux / Unix computer", 0.42, "SSH + HTTP; Unix role remains tentative"),
