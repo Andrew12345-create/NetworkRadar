@@ -153,17 +153,15 @@ def _bind_error_hint(port: int, exc: OSError) -> str:
                 for family, start, end, starred in ranges
             )
             return (
-                f" Windows reports TCP port {port} in an excluded/reserved range "
-                f"({details}); no listening process is required for this bind "
-                "failure. Choose a different NETWORKRADAR_PORT or explicitly "
-                "use --allow-alt-port."
+                " Windows denied the bind (WSAEACCES/10013). "
+                f"TCP port {port} is in an excluded/reserved range ({details}); "
+                "no listening process is required for this bind failure."
             )
         return (
             " Windows denied the bind (WSAEACCES/10013). This can be caused by "
             "an excluded/reserved TCP port or a local security policy, even when "
             "no process is listening. Check the command 'netsh interface ipv4 "
-            "show excludedportrange protocol=tcp' and the IPv6 equivalent, then "
-            "choose another NETWORKRADAR_PORT or explicitly use --allow-alt-port."
+            "show excludedportrange protocol=tcp' and the IPv6 equivalent."
         )
     if winerror == 10048 or exc.errno == errno.EADDRINUSE:
         return (
