@@ -4,23 +4,15 @@
 <div class="actions"><span id="connection" class="pill warn">CONNECTING</span><button id="scanButton" onclick="scanNow()">SCAN NOW</button><button class="secondary" onclick="refreshAll()">REFRESH</button></div></header>
 <nav id="sideNavigation" aria-label="Main navigation">
  <div class="nav-brand"><div class="nav-brand-mark">NR</div><div class="nav-brand-copy">NETWORKRADAR<small>CONTROL CENTRE</small></div></div>
- <div class="nav-search-wrap"><span class="nav-search-icon">⌕</span><input id="navSearch" type="search" placeholder="Find a section…" aria-label="Search navigation sections"></div>
- <div class="nav-group">Live operations</div>
- <a href="#top" data-short="NW" title="Nightwatch overview"><span class="nav-label">Nightwatch overview</span></a><a href="#topology" data-short="TP" title="Live topology"><span class="nav-label">Live topology</span></a><a href="#activity" data-short="AF" title="Activity feed"><span class="nav-label">Activity feed</span></a>
- <div class="nav-group">Overview</div>
- <a href="#cmd" data-short="CC" title="Command centre"><span class="nav-label">Command centre</span></a><a href="#devices" data-short="DV" title="Devices"><span class="nav-label">Devices</span></a><a href="#engines" data-short="EH" title="Engine health"><span class="nav-label">Engine health</span></a>
- <div class="nav-group">Device intelligence</div>
- <a href="#identity" data-short="ID" title="Radar identity"><span class="nav-label">Radar identity</span></a><a href="#continuity" data-short="PT" title="Phantom Track"><span class="nav-label">Phantom Track</span></a><a href="#candidates" data-short="IC" title="Identity candidates"><span class="nav-label">Identity candidates</span></a><a href="#unknownHunter" data-short="UH" title="Unknown Device Hunter"><span class="nav-label">Unknown Device Hunter</span></a><a href="#ipv6" data-short="V6" title="IPv6 intelligence"><span class="nav-label">IPv6 intelligence</span></a>
- <div class="nav-group">Network activity</div>
- <a href="#networkWorkspaces" data-short="NW" title="Network workspaces"><span class="nav-label">Network workspaces</span></a><a href="#profiles" data-short="NP" title="Network profiles"><span class="nav-label">Network profiles</span></a><a href="#dns" data-short="DN" title="DNS intelligence"><span class="nav-label">DNS intelligence</span></a><a href="#dhcp" data-short="DH" title="DHCP"><span class="nav-label">DHCP</span></a><a href="#arp" data-short="AR" title="ARP"><span class="nav-label">ARP</span></a><a href="#behaviour" data-short="BH" title="Behaviour"><span class="nav-label">Behaviour</span></a><a href="#changes" data-short="CH" title="Network changes"><span class="nav-label">Network changes</span></a>
- <div class="nav-group">Security &amp; investigations</div>
- <a href="#firewall" data-short="FW" title="Firewall command centre"><span class="nav-label">Firewall command centre</span></a>
- <a href="#investigations" data-short="IN" title="Investigations"><span class="nav-label">Investigations</span></a><a href="#alerts" data-short="AL" title="Alert stream"><span class="nav-label">Alert stream</span></a><a href="#config" data-short="AU" title="Configuration audit"><span class="nav-label">Configuration audit</span></a><a href="#hunt" data-short="TH" title="Threat hunt"><span class="nav-label">Threat hunt</span></a><a href="#exposure" data-short="EX" title="Exposure intelligence"><span class="nav-label">Exposure intelligence</span></a>
- <div class="nav-group">Remote management</div>
- <a href="#phantomAccess" data-short="PA" title="Phantom Access"><span class="nav-label">Phantom Access</span></a><a href="#commandCenter" data-short="ME" title="Managed endpoints"><span class="nav-label">Managed endpoints</span></a>
- <div class="nav-group">Tools &amp; reports</div>
- <a href="#assistant" data-short="AI" title="Intelligence assistant"><span class="nav-label">Intelligence assistant</span></a><a href="#reports" data-short="RP" title="Reports"><span class="nav-label">Reports</span></a>
- <div class="nav-empty" id="navEmpty">No matching sections.</div>
+ <div class="nav-search-wrap"><span class="nav-search-icon">⌕</span><input id="navSearch" type="search" placeholder="Find a workspace…" aria-label="Search workspaces"></div>
+ <div class="nav-group">WORKSPACES</div>
+ <a href="#workspace-command" data-short="CC" title="Command centre"><span class="nav-label">Command Centre</span></a>
+ <a href="#workspace-devices" data-short="DI" title="Devices and identity"><span class="nav-label">Devices &amp; Identity</span></a>
+ <a href="#workspace-network" data-short="NA" title="Network activity"><span class="nav-label">Network Activity</span></a>
+ <a href="#workspace-security" data-short="SI" title="Security and investigations"><span class="nav-label">Security &amp; Investigations</span></a>
+ <a href="#workspace-management" data-short="RM" title="Remote management"><span class="nav-label">Remote Management</span></a>
+ <a href="#workspace-intelligence" data-short="IR" title="Intelligence and reports"><span class="nav-label">Intelligence &amp; Reports</span></a>
+ <div class="nav-empty" id="navEmpty">No matching workspaces.</div>
 </nav><div id="navBackdrop" aria-hidden="true" onclick="closeNavigation()"></div>
 <main>
 
