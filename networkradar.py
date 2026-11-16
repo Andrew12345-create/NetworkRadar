@@ -2949,12 +2949,15 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
                  dev.get("service_summary", ""), dev.get("service_summary", ""),
                  ts, ip))
             conn.execute("""UPDATE devices SET oui_manufacturer=?,reported_manufacturer=?,
-                identity_conflicts=?,identity_category_confidence=CASE WHEN ?>=58 THEN ? ELSE identity_category_confidence END,identity_last_assessed=?,
-                recognition_json=? WHERE ip=?""",
+                identity_conflicts=?,identity_category_confidence=CASE WHEN ?>=58 THEN ? ELSE identity_category_confidence END,
+                identity_last_assessed=?,
+                recognition_json=CASE WHEN ?>=58 OR identity_category_confidence<58
+                    THEN ? ELSE recognition_json END WHERE ip=?""",
                 (dev.get("oui_manufacturer", ""), dev.get("reported_manufacturer", ""),
                  json.dumps(dev.get("identity_conflicts", [])),
                  dev.get("identity_category_confidence", 0),
                  dev.get("identity_category_confidence", 0), ts,
+                 dev.get("identity_category_confidence", 0),
                  json.dumps(dev.get("recognition", {}), ensure_ascii=False), ip))
             if prior:
                 current_values = [dev.get("hostname", ""), dev.get("vendor", ""),
