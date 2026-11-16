@@ -64,6 +64,7 @@ async function openDevice(ip){
   if(rec.ranked_categories?.length)identity+='<h3>RANKED DEVICE HYPOTHESES</h3>'+deviceRows(rec.ranked_categories,[["CANDIDATE","category"],["SCORE","confidence"],["INDEPENDENT FAMILIES","source_families"]]);
   if(rec.port_clues?.length)identity+='<div class="notice">Low-weight port context only: '+esc(rec.port_clues.join(" · "))+'. Ports alone do not establish a device type.</div>';
   if(rec.conflicting_classifications)identity+='<div class="notice">Competing device-family hypotheses detected. NetworkRadar has withheld a definitive category.</div>';
+  if(rec.collection_notes?.length)identity+='<div class="notice">COLLECTION NOTES: '+esc(rec.collection_notes.join(' · '))+'</div>';
   identity+='</section>';
   const oui=rec.nic_address_block_registrant||{};
    let hardware=deviceProfileCards([["DEVICE-REPORTED MANUFACTURER",d.reported_manufacturer||"Not observed"],["IEEE ADDRESS-BLOCK REGISTRANT",oui.organization||d.oui_manufacturer||"Not found"],["IEEE REGISTRY",oui.registry||"Unknown"],["ASSIGNED PREFIX",oui.prefix||"—"],["PREFIX LENGTH",oui.prefix_bits?oui.prefix_bits+" bits":"—"],["REGISTRY RECORD UPDATED",oui.updated_at||"Unknown"],["NMAP MAC VENDOR",d.manufacturer],["REPORTED MODEL",d.model],["HOSTNAME",d.hostname],["DEVICE CATEGORY",d.device_type],["MAC ADDRESS",d.mac],["MAC IDENTITY BASIS",d.identity_basis]]);
