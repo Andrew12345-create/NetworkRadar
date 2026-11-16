@@ -21,7 +21,8 @@ from typing import Any, Mapping
 
 _PLACEHOLDERS = {"", "-", "unknown", "unavailable", "none", "n/a",
                  "not observed", "not yet fingerprinted", "unclassified",
-                 "unclassified network device"}
+                 "unclassified device", "unclassified network device",
+                 "unidentified device", "unknown device", "device unknown"}
 
 # Family reliabilities are conservative starting weights. Multiple fields
 # from one family are collapsed to the strongest contribution.
@@ -262,7 +263,9 @@ def _build_facts(device: Mapping[str, Any]) -> list[dict]:
         value = _text(device.get(key), 180)
         folded = value.casefold()
         if (not _present(value) or folded == _text(device.get("ip")).casefold()
-                or folded.startswith(("unidentified device at ", "unknown device at "))
+                or folded in _PLACEHOLDERS
+                or folded.startswith(("unidentified device", "unknown device",
+                                      "unclassified device", "device at "))
                 or folded in seen_names):
             continue
         seen_names.add(folded)
