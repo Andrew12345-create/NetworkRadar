@@ -114,9 +114,9 @@ class BindLocalServerTests(unittest.TestCase):
         class Result:
             returncode = 0
             stdout = (
-                "Start Port    End Port\\n"
-                "----------    --------\\n"
-                "      8700        8799     *\\n"
+                "Start Port    End Port\n"
+                "----------    --------\n"
+                "      8700        8799     *\n"
             )
 
         with patch.object(startup.os, "name", "nt"), patch.object(
