@@ -49,6 +49,22 @@ class AdvancedDeviceProfileTests(unittest.TestCase):
         self.assertIn("reported_name", result["source_families"])
         self.assertEqual(result["evidence"][0]["value"], "ANDREWSTHINKPAD")
 
+    def test_generic_database_placeholder_names_are_not_identity_evidence(self):
+        for placeholder in (
+            "Unidentified device",
+            "Unclassified device",
+            "Unknown device",
+            "Unidentified device at 192.168.100.120",
+            "Unknown device at 192.168.100.120",
+        ):
+            with self.subTest(placeholder=placeholder):
+                result = analyse_device_profile({
+                    "ip": "192.168.100.120",
+                    "device_name": placeholder,
+                })
+                self.assertEqual(result["confidence"], 0)
+                self.assertNotIn("reported_name", result["source_families"])
+
     def test_generated_unidentified_device_label_is_not_identity_evidence(self):
         result = analyse_device_profile({
             "ip": "192.168.100.120",
