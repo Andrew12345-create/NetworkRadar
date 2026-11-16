@@ -42,6 +42,7 @@ def assess_identity_quality(
         ]),
         ("network", "Network identity", [
             device.get("ip"), device.get("mac"), device.get("hostname"),
+            device.get("device_name"), device.get("friendly_name"),
             device.get("mdns_records"),
         ]),
         ("services", "Services", [
