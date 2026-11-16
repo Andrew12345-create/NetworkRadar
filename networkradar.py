@@ -1,5 +1,19 @@
 ﻿"""
-NetworkRadar 12.8.0 — local-first network discovery and device intelligence.
+NetworkRadar 12.9.0 — local-first network discovery and device intelligence.
+NetworkRadar 12.9.0 changes:
+  - Uses explicit Nmap ARP host discovery with reverse-DNS lookups disabled.
+  - Supplements Nmap with the Windows IPv4 neighbour table, promoting only
+    current Reachable entries and retaining provenance for added sightings.
+  - Preserves locally administered MAC addresses as observed link-layer values;
+    they are never treated as stable factory identifiers or cross-device merge keys.
+  - Resolves DHCP capture fields against the installed TShark registry, supports
+    legacy BOOTP field aliases, and reports missing optional fields without
+    shifting DHCP record columns or crashing the capture process.
+  - Keeps stale neighbour entries out of ONLINE inventory and preserves
+    conflicting MAC observations without overwriting the scan result.
+  - Adds regression coverage for randomized/local MACs, neighbour-state gating,
+    subnet scoping, MAC conflicts and TShark field compatibility.
+
 NetworkRadar 12.4.1 changes:
   - Explains missing fingerprint causes, including manual scope override mode.
   - Preserves per-query Windows adapter collection diagnostics for troubleshooting.
@@ -232,6 +246,12 @@ from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
 from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
 from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
+from networkradar_modules.discovery.neighbors import (
+    collect_windows_neighbor_cache, merge_reachable_neighbors,
+)
+from networkradar_modules.discovery.capture import (
+    DHCP_CAPTURE_FIELDS, resolve_tshark_fields,
+)
 from networkradar_modules.discovery.adapters import (
     _norm_mac, _is_real_mac, _select_primary_adapter,
     _select_ipv4_interface_rows, _select_tshark_interface,
@@ -1680,8 +1700,20 @@ def mdns_active_snapshot(duration=2.0):
         return []
 
 def discover_devices():
-    """Run the authorised-network discovery scan through the modular Nmap engine."""
-    return run_nmap_discovery(current_network(), NMAP, NMAP_LOG)
+    """Run authorised Nmap ARP discovery plus fresh Windows neighbour evidence."""
+    network = current_network()
+    devices, duration = run_nmap_discovery(network, NMAP, NMAP_LOG)
+    neighbour_started = time.monotonic()
+    with NET_LOCK:
+        interface_index = NET_CTX.get("interface_index")
+    snapshot = collect_windows_neighbor_cache(
+        network, interface_index=interface_index
+    )
+    devices = merge_reachable_neighbors(devices, snapshot.get("records", []))
+    duration = round(duration + (time.monotonic() - neighbour_started), 2)
+    if snapshot.get("status") == "ERROR":
+        print("WINDOWS NEIGHBOUR DISCOVERY:", _clean(snapshot.get("detail", ""), 180))
+    return devices, duration
 
 def derive_identity(device):
     """Compatibility wrapper around the pure identity-key derivation module."""
@@ -3627,6 +3659,8 @@ class DHCPEngine(threading.Thread):
         self.iface = "Not selected"
         self.known = set()
         self.cool = {}
+        self.capture_field_map = []
+        self.missing_capture_fields = []
 
     def state(self, **kw):
         with DHCP_STATE_LOCK:
@@ -3698,19 +3732,28 @@ class DHCPEngine(threading.Thread):
         self.state(status="STOPPED", error="")
 
     def capture(self):
-        fields = ["frame.time_epoch", "ip.src", "ip.dst", "dhcp.option.dhcp",
-                  "dhcp.hw.mac_addr", "dhcp.ip.your", "dhcp.option.hostname",
-                  "dhcp.option.dhcp_server_id", "dhcp.option.requested_ip_address",
-                  "dhcp.option.router", "dhcp.option.domain_name_server",
-                  "dhcp.option.subnet_mask", "dhcp.option.lease_time",
-                  "dhcp.option.vendor_class_id", "dhcp.option.request_list_item",
-                  "dhcp.option.client_id", "dhcp.option.client_system_architecture",
-                  "dhcp.option.user_class.text", "dhcp.fqdn.name"]
+        registry = subprocess.run(
+            [str(TSHARK), "-G", "fields"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=20,
+        )
+        if registry.returncode != 0:
+            detail = _clean(registry.stderr or "TShark field registry query failed.", 240)
+            raise RuntimeError(f"Could not inspect installed TShark fields: {detail}")
+        resolved = resolve_tshark_fields(registry.stdout or "")
+        if resolved["missing_required"]:
+            missing = ", ".join(resolved["missing_required"])
+            raise RuntimeError(
+                "Installed TShark lacks required DHCP fields: " + missing +
+                ". Update Wireshark/TShark or check its DHCP/BOOTP dissector."
+            )
+        self.capture_field_map = resolved["fields"]
+        self.missing_capture_fields = resolved["missing_optional"]
         cmd = [str(TSHARK), "-l", "-n", "-i", self.iface,
                "-f", DHCP_CAPTURE_FILTER, "-T", "fields",
                "-E", "separator=/t", "-E", "quote=d", "-E", "occurrence=f"]
-        for f in fields:
-            cmd.extend(["-e", f])
+        for _logical, actual in self.capture_field_map:
+            cmd.extend(["-e", actual])
         with open(DHCP_LOG, "a", encoding="utf-8", errors="replace") as log:
             log.write(f"\n[{now_text()}] DHCP on {self.iface}\n")
             log.flush()
@@ -3739,7 +3782,9 @@ class DHCPEngine(threading.Thread):
                     f"interface={self.iface}; exit_code={self.proc.returncode}; "
                     f"stderr={diagnostic}")
             self.state(status="ONLINE", error="", last_error="", failure_streak=0,
-                       last_started=now_text())
+                       last_started=now_text(),
+                       capture_field_count=len(self.capture_field_map),
+                       missing_optional_fields=self.missing_capture_fields[:])
             try:
                 for line in self.proc.stdout:
                     if STOP_EVENT.is_set():
@@ -3786,6 +3831,12 @@ class DHCPEngine(threading.Thread):
     def handle(self, line):
         try:
             row = next(csv.reader([line.rstrip("\r\n")], delimiter="\t", quotechar='"'))
+            if self.capture_field_map:
+                mapped = {
+                    logical: (row[index] if index < len(row) else "")
+                    for index, (logical, _actual) in enumerate(self.capture_field_map)
+                }
+                row = [mapped.get(field, "") for field in DHCP_CAPTURE_FIELDS]
             row += [""] * (19 - len(row))
             (epoch, sip, dip, mt, cmac, yip, hn, sid, rip, ro, do,
              sm, lease, vc, prl, client_id, client_architecture,

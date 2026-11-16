@@ -1,4 +1,29 @@
-# NetworkRadar 12.8.0
+# NetworkRadar 12.9.0
+
+## Multi-source Android-friendly discovery (12.9.0)
+
+The discovery pass now explicitly uses Nmap ARP host discovery (-PR) and
+disables per-address reverse-DNS lookups during the host sweep. It also reads
+the Windows IPv4 neighbour table and supplements the scan only with entries
+currently in the Reachable state. Stale neighbour entries are not promoted
+to online inventory.
+
+Locally administered MAC addresses (including common Android Wi-Fi randomized
+addresses) remain visible as observed link-layer addresses. NetworkRadar does
+not attempt to recover a device's factory MAC and does not merge two randomized
+addresses based on OUI, hostname similarity, TTL, or weak fingerprints.
+
+DHCP capture now checks the installed TShark field registry before launching.
+Optional fields that are missing in a particular Wireshark build are omitted
+without shifting the DHCP event columns; required-field incompatibilities are
+reported explicitly rather than causing a silent restart loop.
+
+These sources improve discovery, not guaranteed identification. Wi-Fi client
+isolation, VLAN boundaries, AP policies, and the scanner's network vantage
+point can still prevent peer discovery. Router/AP association-table integration
+remains vendor-specific and requires an explicitly configured, read-only
+integration.
+
 
 NetworkRadar is a Windows-focused, local-first network discovery and device-intelligence application. It combines authorised network discovery, device inventory, DNS/DHCP/ARP observations, identity evidence, historical tracking, exposure observations, investigations and a localhost dashboard. Optional management features include SSH terminal access and Windows/endpoint-management integrations.
 

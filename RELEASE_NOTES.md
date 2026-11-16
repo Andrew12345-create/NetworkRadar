@@ -1,4 +1,29 @@
-# NetworkRadar 12.8.0 — RADAR IDENTITY DHCP Architecture Intelligence
+# NetworkRadar 12.9.0 — Multi-source ARP and DHCP Capture Compatibility
+
+## Discovery improvements
+- Explicit Nmap ARP host discovery (-PR) on the selected authorised local subnet.
+- Reverse DNS disabled during the host sweep to avoid resolver delays; host enrichment remains separate.
+- Windows IPv4 neighbour cache supplement, scoped to the selected subnet.
+- Only Reachable neighbour entries can add a device to the current online inventory.
+- Stale, incomplete, multicast, invalid, out-of-subnet and conflicting neighbour rows are rejected or retained as conflicts without overwriting the Nmap observation.
+- Locally administered MAC addresses are labelled as potentially randomized or locally assigned, never as stable hardware identities.
+
+## DHCP capture reliability
+- TShark field registry is inspected at startup.
+- Logical DHCP fields resolve against DHCP or legacy BOOTP field abbreviations.
+- Missing optional fields are reported and safely left blank; required-field gaps produce an actionable startup error.
+- DHCP row positions remain stable when optional fields are absent.
+
+## Safety and limitations
+- No attempt is made to recover factory MAC addresses.
+- No identity merge is based solely on randomized MAC, OUI, hostname resemblance, TTL, or generic TCP/IP fingerprints.
+- Router/AP association-table integration remains vendor-specific and requires an explicitly configured read-only interface.
+- Client isolation and VLAN segmentation can still hide peers from a laptop-based scanner.
+
+## Validation
+- Added unit tests for neighbour parsing, scope/state filtering, randomized MAC handling, conflict preservation, and TShark field compatibility.
+- CI validation is required before merge; live Windows/TShark and physical Wi-Fi smoke tests remain necessary.
+
 
 ## Delivered
 

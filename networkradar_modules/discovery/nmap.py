@@ -37,6 +37,14 @@ def parse_nmap_xml(xml_text: str) -> list[dict]:
             if candidates:
                 hostname = candidates[0]
         if ip:
+            status_reason = status.get("reason", "") if status is not None else ""
+            mac_valid = mac not in ("", "Unavailable")
+            locally_administered = False
+            if mac_valid:
+                try:
+                    locally_administered = bool(int(mac.split(":")[0], 16) & 0x02)
+                except (ValueError, IndexError):
+                    locally_administered = False
             devices.append({
                 "ip": ip,
                 "mac": mac,
@@ -51,6 +59,17 @@ def parse_nmap_xml(xml_text: str) -> list[dict]:
                 "identification_methods": "",
                 "open_ports": "",
                 "service_summary": "",
+                "discovery_method": "Nmap host discovery",
+                "discovery_reason": status_reason,
+                "mac_address_scope": (
+                    "locally administered" if locally_administered else
+                    "globally administered" if mac_valid else "unknown"
+                ),
+                "mac_identity_note": (
+                    "May be randomized or locally assigned; not a stable factory identity."
+                    if locally_administered else ""
+                ),
+                "discovery_sources": ["Nmap"],
             })
     return devices
 
@@ -66,28 +85,77 @@ def run_nmap_discovery(
     """Run a bounded Nmap ping scan and return parsed devices and duration."""
     if not network:
         return [], 0.0
+    # Explicit ARP discovery is more reliable than ICMP on a directly
+    # attached Ethernet/Wi-Fi LAN. Disable reverse DNS here to avoid slow
+    # resolver lookups for every address; hostname enrichment runs separately.
     command: Sequence[str] = (
-        str(executable), "-sn", "-R", "-oX", "-", str(network)
+        str(executable), "-sn", "-PR", "-n", "--reason", "-oX", "-", str(network)
     )
     started = time.time()
-    result = runner(
-        list(command),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-    )
+    primary_error = ""
+    primary_stdout = ""
+    try:
+        result = runner(
+            list(command),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+        primary_stdout = result.stdout or ""
+        primary_error = (result.stderr or "")[-1000:]
+        devices = parse_nmap_xml(primary_stdout) if result.returncode == 0 else []
+        if result.returncode != 0 and not primary_error:
+            primary_error = f"Nmap ARP discovery exited with code {result.returncode}."
+    except Exception as exc:
+        devices = []
+        primary_error = str(exc)[:1000]
+
+    # If raw ARP discovery is unavailable (for example, Npcap permissions),
+    # retry using Nmap's ordinary host-discovery probes. This keeps scans
+    # functional for non-elevated launches without silently claiming ARP worked.
+    fallback_error = ""
+    fallback_stdout = ""
+    if not devices:
+        fallback_command = (
+            str(executable), "-sn", "-n", "--reason", "-oX", "-", str(network)
+        )
+        try:
+            fallback = runner(
+                list(fallback_command),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+            )
+            fallback_stdout = fallback.stdout or ""
+            fallback_error = (fallback.stderr or "")[-1000:]
+            if fallback.returncode != 0:
+                raise RuntimeError(fallback_error or f"Nmap fallback exited with code {fallback.returncode}.")
+            devices = parse_nmap_xml(fallback_stdout)
+        except Exception as exc:
+            fallback_error = str(exc)[:1000]
+            Path(log_path).write_text(
+                "ARP discovery error: " + primary_error + "\nFallback error: " +
+                fallback_error + "\n" + primary_stdout[:1000] + fallback_stdout[:1000],
+                encoding="utf-8",
+            )
+            raise RuntimeError(
+                "Nmap ARP discovery and fallback both failed. ARP: " +
+                (primary_error or "no hosts returned") + "; fallback: " +
+                fallback_error[-500:]
+            ) from exc
+
     duration = round(time.time() - started, 2)
-    stdout = result.stdout or ""
-    stderr = result.stderr or ""
-    Path(log_path).write_text(
-        stderr + "\n" + stdout[:2000],
-        encoding="utf-8",
+    log_text = (
+        "ARP discovery stderr: " + primary_error + "\n" +
+        "Fallback stderr: " + fallback_error + "\n" +
+        (primary_stdout[:1000] + fallback_stdout[:1000])
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"Nmap failed: {stderr[-1000:]}")
-    return parse_nmap_xml(stdout), duration
+    Path(log_path).write_text(log_text[:5000], encoding="utf-8")
+    return devices, duration
 
 
 def best_os_match(host: ET.Element) -> dict:
