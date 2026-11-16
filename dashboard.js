@@ -343,9 +343,13 @@ async function refreshAll(){
   settled.forEach((r,i)=>{const name=specs[i][0];if(r.status==="fulfilled")data[name]=r.value;else{data[name]=null;failed.push(name+": "+String(r.reason?.message||r.reason||"request failed"));}});
   const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{},fw=data.firewall||{};
   const statusOK=!!data.status;
-  pill($("connection"),!statusOK?"API DEGRADED":(failed.length?"CONNECTED · PARTIAL":"CONNECTED"),!statusOK?"bad":(failed.length?"warn":"ok"));
+  const partial=failed.length>0||!!s.status_degraded;
+  pill($("connection"),!statusOK?"API DEGRADED":(partial?"CONNECTED · PARTIAL":"CONNECTED"),!statusOK?"bad":(partial?"warn":"ok"));
   if(!statusOK){$("updated").textContent="Status API unavailable. "+failed.join(" | ");}
-  else{$("updated").textContent="Updated "+(s.timestamp||new Date().toLocaleTimeString())+(failed.length?" · "+failed.length+" API request(s) failed: "+failed.map(x=>x.split(":")[0]).join(", "):"");}
+  else{
+   const issues=[...failed,...(s.status_errors||[])];
+   $("updated").textContent="Updated "+(s.timestamp||new Date().toLocaleTimeString())+(issues.length?" · "+issues.slice(0,4).join(" | "):"");
+  }
   $("network").textContent=s.network||n.network||"—";$("activeSubnet").textContent=n.network||s.network||"—";
   $("defaultGateway").textContent=n.gateway||"—";$("fingerprint").textContent=n.fingerprint||"—";$("fpConf").textContent=(n.confidence||0)+"%";
   $("networkWarning").textContent=n.warning||(n.authorized?"Authorised.":"Passive only.");$("authorizeNetwork").style.display=n.authorized?"none":"inline-block";$("netAuthz").textContent=n.auth_decision||"—";
@@ -354,7 +358,7 @@ async function refreshAll(){
   const nr=$("networkRisk");nr.textContent=s.network_risk_band||"UNKNOWN";nr.className="value risk-"+(s.network_risk_band||"UNKNOWN");
   pill($("dnsStatus"),s.dns_status||"UNKNOWN",s.dns_status==="ONLINE"?"ok":"warn");pill($("dhcpStatus"),s.dhcp_status||"UNKNOWN",s.dhcp_status==="ONLINE"?"ok":"warn");pill($("arpStatus"),s.arp_status||"UNKNOWN",s.arp_status==="ONLINE"?"ok":"warn");
   const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"");$("dhcpClass").title=dhcp.reason||"No DHCP diagnostic detail returned.";
-  $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";$("scanQuality").textContent=(diag.scan_quality?.score??"—")+"/100 · "+(diag.scan_quality?.band||"—");
+  $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";const quality=diag.scan_quality||{},coverage=quality.identity_coverage||{};$("scanQuality").textContent=(quality.score??"—")+"/100 · "+(quality.band||"—")+" · Identity "+(coverage.coverage_percent??"—")+"%";
   if(data.devices){deviceCache=d;filterDevices();}else{$("deviceRows").innerHTML='<tr><td colspan="7">Device API unavailable. Check server log and /api/devices.</td></tr>';}
   $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||'<tr><td colspan="3">—</td></tr>';
   $("alertRows").innerHTML=a.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.client_ip)}</td><td>${esc(x.rule_id)}</td><td class="${x.severity==="HIGH"?"red":"amber"}">${esc(x.severity)}</td></tr>`).join("")||'<tr><td colspan="4">—</td></tr>';
