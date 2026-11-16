@@ -1,3 +1,36 @@
+# NetworkRadar 13.0.0 — Evidence-fused Device Intelligence
+
+## Identity engine
+- Replaces additive MAC/hostname confidence with independent evidence-family scoring.
+- Caps repeated observations from the same family to prevent confidence inflation.
+- Ranks device-family hypotheses and retains close competitors as ambiguous instead of forcing a category.
+- Separates device-reported manufacturer/model from the IEEE NIC address-block registrant.
+- Uses explicit DHCP Android vendor-class evidence where present; hostnames alone remain low-confidence clues.
+- Google Cast DNS-SD is reported as a media receiver/streamer capability, not proof of an Android phone or television.
+- Exact model/manufacturer fields are populated only from explicit endpoint/service-reported model fields.
+
+## Deep discovery
+- Adds selected Nmap safe/discovery scripts for SMB OS discovery and TLS certificate metadata during deep TCP scans.
+- Adds a bounded targeted UDP pass for common NetBIOS, SNMP, UPnP, WS-Discovery and mDNS ports.
+- Adds safe UPnP and DNS-SD Nmap script observations to the identity evidence graph.
+- Captures script IDs, outputs, TCP/UDP service details and scan collection notes.
+
+## Dashboard
+- Adds an evidence-fused profile panel with selected category, source-family diversity, OS-family candidates, ranked hypotheses, TCP/UDP ports and script coverage.
+- Keeps the existing dossier and API field contracts.
+
+## Confidence and history safeguards
+- Weak shallow scans do not erase the last strong persisted profile.
+- New strong classifications replace old scores; weak evidence does not inflate or overwrite confidence.
+- Port-only and OUI-only clues remain contextual and cannot assert device type or model.
+
+## Validation boundary
+- Automated CI must pass on Python 3.10–3.13.
+- Real Windows/Nmap/Npcap/TShark scans are still required to validate network visibility and script behaviour.
+- Client isolation, VLANs and missing DHCP renewals can still limit visibility. Router/AP association integration remains the highest-value next step for Wi-Fi clients.
+
+---
+
 # NetworkRadar 12.9.0 — Multi-source ARP and DHCP Capture Compatibility
 
 ## Discovery improvements
