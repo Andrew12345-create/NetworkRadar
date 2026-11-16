@@ -2141,8 +2141,19 @@ def advanced_device_recognition(device):
     # Keep a useful display label without feeding a generated label back into
     # the profiler as if it were a device-reported hostname.
     current_name = _clean(device.get("device_name", ""), 180)
-    if (not current_name or current_name.startswith("Unidentified device at ")
-            or current_name.endswith(" device at " + str(device.get("ip", "")))):
+    current_name_folded = current_name.casefold()
+    placeholder_name = (
+        current_name_folded in {
+            "", "-", "unknown", "unavailable", "unidentified device",
+            "unclassified device", "unclassified network device", "unknown device",
+        }
+        or current_name_folded.startswith((
+            "unidentified device at ", "unknown device at ",
+            "unclassified device at ",
+        ))
+        or current_name_folded.endswith(" device at " + str(device.get("ip", "")).casefold())
+    )
+    if placeholder_name:
         if profile["selected_category"] != "Unclassified network device":
             device["device_name"] = (
                 f'{profile["selected_category"]} at {device.get("ip", "")}'
