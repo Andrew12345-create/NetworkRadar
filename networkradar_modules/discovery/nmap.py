@@ -37,6 +37,14 @@ def parse_nmap_xml(xml_text: str) -> list[dict]:
             if candidates:
                 hostname = candidates[0]
         if ip:
+            status_reason = status.get("reason", "") if status is not None else ""
+            mac_valid = mac not in ("", "Unavailable")
+            locally_administered = False
+            if mac_valid:
+                try:
+                    locally_administered = bool(int(mac.split(":")[0], 16) & 0x02)
+                except (ValueError, IndexError):
+                    locally_administered = False
             devices.append({
                 "ip": ip,
                 "mac": mac,
@@ -51,6 +59,17 @@ def parse_nmap_xml(xml_text: str) -> list[dict]:
                 "identification_methods": "",
                 "open_ports": "",
                 "service_summary": "",
+                "discovery_method": "Nmap host discovery",
+                "discovery_reason": status_reason,
+                "mac_address_scope": (
+                    "locally administered" if locally_administered else
+                    "globally administered" if mac_valid else "unknown"
+                ),
+                "mac_identity_note": (
+                    "May be randomized or locally assigned; not a stable factory identity."
+                    if locally_administered else ""
+                ),
+                "discovery_sources": ["Nmap"],
             })
     return devices
 
@@ -66,8 +85,11 @@ def run_nmap_discovery(
     """Run a bounded Nmap ping scan and return parsed devices and duration."""
     if not network:
         return [], 0.0
+    # Explicit ARP discovery is more reliable than ICMP on a directly
+    # attached Ethernet/Wi-Fi LAN. Disable reverse DNS here to avoid slow
+    # resolver lookups for every address; hostname enrichment runs separately.
     command: Sequence[str] = (
-        str(executable), "-sn", "-R", "-oX", "-", str(network)
+        str(executable), "-sn", "-PR", "-n", "--reason", "-oX", "-", str(network)
     )
     started = time.time()
     result = runner(
