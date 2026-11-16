@@ -540,6 +540,9 @@ def analyse_device_profile(device: Mapping[str, Any] | None) -> dict:
         "conflicting_classifications": conflict,
         "source_families": evidence_families,
         "evidence_count": len(facts),
+        "tcp_ports": sorted({int(x) for x in device.get("port_numbers", []) if str(x).isdigit()}),
+        "udp_ports": sorted({int(x) for x in device.get("udp_port_numbers", []) if str(x).isdigit()}),
+        "nmap_scripts": sorted({item[0] for item in _extract_script_values(device.get("nmap_script_intel")) if item[0]}),
         "port_clues": port_clues,
         "limitations": [
             "Confidence is an explainable heuristic evidence score, not a probability.",
