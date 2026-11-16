@@ -73,14 +73,13 @@ _RULES = {
         "nmap_script": (r"\bwindows (?:10|11|server)|microsoft windows|smb-os-discovery", 0.86, "SMB/Nmap host script reports Windows"),
         "snmp": (r"\b(windows|microsoft)\b", 0.75, "SNMP system description reports Windows"),
         "dhcp": (r"\bmsft\s*\d", 0.72, "Microsoft DHCP vendor-class identifier"),
-        "endpoint_agent": (r"\b(windows|thinkpad|elitebook|latitude|optiplex|probook|surface)\b", 0.98, "Authenticated endpoint OS/hardware inventory"),
+        "endpoint_agent": (r"\b(windows|win10|win11)\b", 0.98, "Authenticated endpoint inventory reports Windows OS"),
     },
     "Laptop / computer": {
         # Product-family tokens can be concatenated in Windows hostnames
         # (for example ANDREWSTHINKPAD). This supports a hardware-class
         # hypothesis without inferring Windows or an exact model.
         "reported_name": (r"(thinkpad|elitebook|latitude|optiplex|probook|macbook|mac mini|mac studio|mac pro|imac|surface pro|surface laptop)", 0.96, "Recognised laptop/computer product-family token in reported name"),
-        "endpoint_agent": (r"\b(laptop|notebook|workstation|desktop)\b", 0.96, "Authenticated endpoint inventory reports computer hardware class"),
     },
     "Linux / Unix computer": {
         "reported_name": (r"\b(ubuntu|debian|fedora|arch linux|freebsd|openbsd|linux workstation)\b", 0.66, "Linux/Unix name token"),
