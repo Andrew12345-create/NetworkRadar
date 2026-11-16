@@ -7660,8 +7660,7 @@ def start_web():
             Handler, WEB_HOST, port, allow_alternate=allow_alt, search_span=30
         )
     except (ValueError, StartupError) as exc:
-        print(f"ERROR: web console startup failed: {exc}")
-        sys.exit(2)
+        raise StartupError(f"web console startup failed: {exc}") from exc
     WEB_PORT = bound_port
     WEB_URL = f"http://{WEB_HOST}:{WEB_PORT}"
     threading.Thread(target=server.serve_forever, name="NR-Web", daemon=True).start()
@@ -7995,7 +7994,27 @@ def _main_inner():
         print("ENDPOINT AGENT HUB STARTUP WARNING:", _clean(_agent_exc, 240))
     print("DATABASE INITIALISED (serialized writer active).")
 
-    web = start_web()
+    try:
+        web = start_web()
+    except StartupError as exc:
+        # A dashboard bind failure is fatal, but it must not leave the optional
+        # agent listener or database writer running after startup aborts.
+        print(f"ERROR: {exc}")
+        try:
+            stop_agent_hub()
+        except Exception as cleanup_error:
+            print("AGENT HUB CLEANUP WARNING:", _clean(cleanup_error, 180))
+        try:
+            DB_MANAGER.flush(timeout=10)
+        except Exception as cleanup_error:
+            print("DATABASE FLUSH WARNING:", _clean(cleanup_error, 180))
+        try:
+            if not DB_MANAGER.stop(timeout=10):
+                print("DATABASE SHUTDOWN WARNING: writer did not stop before timeout.")
+        except Exception as cleanup_error:
+            print("DATABASE SHUTDOWN WARNING:", _clean(cleanup_error, 180))
+        raise SystemExit(2)
+
     dns = DNSEngine()
     dhcp = DHCPEngine()
     arp = ARPEngine()
