@@ -1,3 +1,15 @@
+# NetworkRadar 13.3.2 — Firewall Snapshot Timeout Recovery
+
+## Dashboard request reliability
+- Batches Windows Defender Firewall profile collection and active-rule counting into one PowerShell process instead of two serial launches.
+- Bounds the combined firewall collection to 20 seconds and returns a clear DEGRADED result on timeout; no firewall settings are modified.
+- Gives only the dashboard's firewall API request a 30-second client timeout. All other dashboard API requests retain their existing 10-second timeout.
+- The firewall inspection remains read-only and does not block or alter the active network authorisation decision.
+
+## Validation
+- Adds regression tests for the combined profile/rule response, single-process execution and timeout handling.
+- Dashboard JavaScript syntax and the full Python test matrix are required before merge.
+
 # NetworkRadar 13.3.1 — Windows Network Context Recovery
 
 ## Faster, more resilient network identification

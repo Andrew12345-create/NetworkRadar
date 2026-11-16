@@ -4,7 +4,7 @@ try{const c=$("connection");if(c){c.textContent="SCRIPT ACTIVE";c.className="pil
 window.addEventListener("error",e=>{try{const c=$("connection");if(c){c.textContent="SCRIPT ERROR";c.className="pill bad";}const u=$("updated");if(u)u.textContent="Dashboard error: "+(e.message||"unknown script error");}catch(_x){}});
 window.addEventListener("unhandledrejection",e=>{try{const u=$("updated");if(u)u.textContent="Dashboard request error: "+String(e.reason?.message||e.reason||"unknown");}catch(_x){}});
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-async function getJSON(p){const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),10000);try{const r=await fetch(p,{cache:"no-store",signal:ctl.signal});if(!r.ok)throw new Error("HTTP "+r.status);return await r.json();}finally{clearTimeout(timer);}}
+async function getJSON(p,timeoutMs=10000){const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),timeoutMs);try{const r=await fetch(p,{cache:"no-store",signal:ctl.signal});if(!r.ok)throw new Error("HTTP "+r.status);return await r.json();}finally{clearTimeout(timer);}}
 function pill(el,text,state){el.textContent=text;el.className="pill"+(state==="bad"?" bad":state==="warn"?" warn":"");}
 function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";setTimeout(()=>t.style.display="none",3500);}
 let deviceCache=[];
@@ -357,7 +357,7 @@ async function refreshAll(){
   ["engine","/api/engine_diagnostics"],["firewall","/api/firewall"]
  ];
  try{
-  const settled=await Promise.allSettled(specs.map(([,path])=>getJSON(path)));
+  const settled=await Promise.allSettled(specs.map(([name,path])=>getJSON(path,name==="firewall"?30000:10000)));
   const data={},failed=[];
   settled.forEach((r,i)=>{const name=specs[i][0];if(r.status==="fulfilled")data[name]=r.value;else{data[name]=null;failed.push(name+": "+String(r.reason?.message||r.reason||"request failed"));}});
   const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{},fw=data.firewall||{};
