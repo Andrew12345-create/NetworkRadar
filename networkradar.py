@@ -2106,6 +2106,11 @@ def advanced_device_recognition(device):
     now comes from evidence families rather than additive MAC/hostname bonuses.
     """
     profile = analyse_device_profile(device)
+    if profile.get("model"):
+        device["model"] = profile["model"]
+    if profile.get("manufacturer"):
+        device["reported_manufacturer"] = profile["manufacturer"]
+    device["operating_system"] = profile.get("operating_system", {})
     profile["intelligence_quality"] = assess_identity_quality(
         device, facts=profile.get("evidence", []), recognition=profile
     )
@@ -2116,11 +2121,6 @@ def advanced_device_recognition(device):
     )
     device["identity_category_confidence"] = int(profile.get("confidence", 0) or 0)
     device["identification_confidence"] = int(profile.get("confidence", 0) or 0)
-    device["operating_system"] = profile.get("operating_system", {})
-    if profile.get("model"):
-        device["model"] = profile["model"]
-    if profile.get("manufacturer"):
-        device["reported_manufacturer"] = profile["manufacturer"]
 
     # Keep a useful display label without feeding a generated label back into
     # the profiler as if it were a device-reported hostname.
