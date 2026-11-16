@@ -1930,7 +1930,7 @@ def _classify_from_signatures(device, dhcp_rows):
     ports = set(int(p) for p in (device.get("port_numbers", []) or []) if str(p).isdigit())
     dhcp_text = []
     for row in dhcp_rows:
-        hn, vc, prl, cid, _mac = row
+        hn, vc, prl, cid, _mac = row[:5]
         dhcp_text.extend(str(x or "").lower() for x in (hn, vc, prl, cid))
     text += " " + " ".join(dhcp_text)
 
