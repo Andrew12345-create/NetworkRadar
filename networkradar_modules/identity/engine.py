@@ -102,17 +102,17 @@ _RULES = {
     "Smart TV / media streamer": {
         "reported_name": (r"\b(chromecast|google tv|fire tv|roku|smart.?tv|webos|tizen|bravia|appletv|apple tv)\b", 0.70, "Media-device name token"),
         "upnp": (r"\b(mediarenderer|smart.?tv|chromecast|roku|fire.?tv|bravia|webos|tizen|dlna)\b", 0.84, "UPnP media-renderer/device description"),
-        "mdns": (r"_airplay\._tcp|_raop\._tcp|_mediaremotetv\._tcp|_companion-link\._tcp", 0.80, "Apple/media ecosystem DNS-SD service"),
+        "mdns": (r"_mediaremotetv\._tcp", 0.78, "Apple TV media-remote DNS-SD service"),
         "nmap_service": (r"\b(dial|plex|dlna|upnp)\b", 0.66, "Nmap identifies a media service"),
     },
     "Media receiver / streamer": {
-        "mdns": (r"_googlecast\._tcp", 0.94, "Google Cast receiver service; form factor not established"),
+        "mdns": (r"_googlecast\._tcp|_airplay\._tcp|_raop\._tcp|_mediaremotetv\._tcp|_spotify-connect\._tcp", 0.84, "Media receiver/streaming service; physical form factor not established"),
         "upnp": (r"\b(google cast|chromecast|media renderer|dlna renderer)\b", 0.78, "UPnP media receiver description"),
     },
     "Smart speaker / audio": {
         "reported_name": (r"\b(sonos|homepod|echo dot|echo show|smart speaker|bose speaker)\b", 0.72, "Audio-device name token"),
         "upnp": (r"\b(sonos|homepod|smart speaker|audio renderer)\b", 0.84, "UPnP audio-device description"),
-        "mdns": (r"_sonos\._tcp|_spotify-connect\._tcp|_raop\._tcp", 0.74, "Audio ecosystem DNS-SD service"),
+        "mdns": (r"_sonos\._tcp", 0.78, "Sonos audio-device DNS-SD service"),
     },
     "Gaming console": {
         "reported_name": (r"\b(xbox|playstation|ps[345]|nintendo switch)\b", 0.78, "Gaming platform name"),
