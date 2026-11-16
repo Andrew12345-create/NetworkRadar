@@ -139,6 +139,23 @@ class AdvancedDeviceProfileTests(unittest.TestCase):
         })
         self.assertEqual(result["model"], "Acme Model 9000")
 
+    def test_authenticated_endpoint_inventory_supplies_exact_hardware_and_os(self):
+        result = analyse_device_profile({
+            "ip": "192.168.100.82",
+            "endpoint_inventory": {
+                "manufacturer": "Lenovo",
+                "model": "ThinkPad X1 Carbon",
+                "system_family": "Laptop",
+                "operating_system": {"caption": "Microsoft Windows 11 Pro",
+                                     "version": "10.0.26100"},
+            },
+        })
+        self.assertEqual(result["selected_category"], "Windows computer")
+        self.assertEqual(result["manufacturer"], "Lenovo")
+        self.assertEqual(result["model"], "ThinkPad X1 Carbon")
+        self.assertEqual(result["operating_system"]["family"], "Windows")
+        self.assertIn("endpoint_agent", result["source_families"])
+
     def test_gateway_role_is_explicit_and_high_confidence(self):
         result = analyse_device_profile({"ip": "192.168.100.1", "_is_gateway": True})
         self.assertEqual(result["selected_category"], "Router / firewall")
