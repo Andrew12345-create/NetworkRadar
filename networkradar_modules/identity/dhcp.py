@@ -74,7 +74,7 @@ def parse_client_architecture(value: Any) -> list[dict[str, Any]]:
     text = str(value).strip()
     if not text:
         return []
-    tokens = re.split(r"[,;\\s()]+", text)
+    tokens = re.split(r"[,;\s()]+", text)
     found: list[dict[str, Any]] = []
     seen: set[int] = set()
     for token in tokens[:32]:
