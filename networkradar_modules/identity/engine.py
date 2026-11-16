@@ -343,7 +343,7 @@ def _build_facts(device: Mapping[str, Any]) -> list[dict]:
     return facts
 
 
-def _score_categories(facts: list[dict], device: Mapping[str, Any]) -> tuple[list, list]:
+def _score_categories(facts: list[dict], device: Mapping[str, Any]) -> tuple[list, list, list]:
     contributions: dict[str, dict[str, tuple[float, dict]]] = defaultdict(dict)
     matches = []
     for category, family_rules in _RULES.items():
