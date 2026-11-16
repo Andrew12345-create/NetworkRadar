@@ -4,7 +4,7 @@
 - Uses observed inventory/device names when DHCP hostname fields are absent.
 - Recognises computer-name, NetBIOS-name, DHCP-hostname and mDNS-hostname fields as one bounded reported-name evidence family.
 - Filters generated unidentified-device labels and IP-address placeholders so the application does not manufacture identity evidence.
-- Preserves conservative thresholds: a ThinkPad-like inventory name can produce a Windows-computer hypothesis without asserting a confirmed OS or exact model.
+- Preserves conservative thresholds: a ThinkPad-like inventory name can support a laptop/computer hardware-class hypothesis without inferring Windows or an exact model.
 
 ## Operational health
 - Reworks scan quality into a 100-point score with explicit component breakdown.
