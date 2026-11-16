@@ -1,3 +1,30 @@
+# NetworkRadar 13.1.0 — Identity Coverage and Operational Health
+
+## Identity evidence
+- Uses observed inventory/device names when DHCP hostname fields are absent.
+- Filters generic database defaults such as `Unidentified device` and `Unclassified device` from identity evidence and evidence-coverage metrics.
+- Replaces those generic display labels after a device is successfully classified, including case-insensitive legacy labels.
+- Recognises computer-name, NetBIOS-name, DHCP-hostname and mDNS-hostname fields as one bounded reported-name evidence family.
+- Filters generated unidentified-device labels and IP-address placeholders so the application does not manufacture identity evidence.
+- Preserves conservative thresholds: a ThinkPad-like inventory name can support a laptop/computer hardware-class hypothesis without inferring Windows or an exact model.
+
+## Operational health
+- Reworks scan quality into a 100-point score with explicit component breakdown and a scan-recency component, so an old scan cannot receive full freshness credit.
+- Separates discovery/telemetry quality from identity coverage; a high host-discovery score can no longer imply that most devices are identified.
+- Reports inventory total, classified/unclassified counts, identity coverage percentage and average confidence; excludes legacy `Unclassified device`, `Unidentified device`, `Unknown` and `Ambiguous:` labels from classified totals.
+- Marks identity coverage unavailable rather than displaying a false 0% when the backing query fails.
+- Makes the status summary endpoint tolerant of individual optional-query failures and exposes the errors while preserving the rest of the dashboard status.
+- Dashboard distinguishes connected/partial status from a complete API outage and displays identity coverage beside scan quality.
+
+## Data safety and validation
+- No destructive database migration.
+- No device records, history, credentials or packet captures are deleted.
+- Existing API fields are retained; new status and scan-quality fields are additive.
+- Automated tests cover inventory-name fallback, rejection of generated placeholder names, legacy classification labels, exact 100-point scoring, scan freshness and unavailable identity metrics.
+- A live Windows/TShark/browser run is still required to confirm local capture and API behaviour.
+
+---
+
 # NetworkRadar 13.0.0 — Evidence-fused Device Intelligence
 
 ## Identity engine

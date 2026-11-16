@@ -19,6 +19,27 @@ class DeviceIdentityDerivationTests(unittest.TestCase):
         self.assertEqual(basis, "MAC")
 
 
+class DeviceDisplayNameTests(unittest.TestCase):
+    def test_successfully_classified_device_replaces_generic_database_label(self):
+        device = {
+            "ip": "192.168.100.1",
+            "device_name": "Unidentified device",
+            "_is_gateway": True,
+        }
+        app.advanced_device_recognition(device)
+        self.assertEqual(device["device_type"], "Router / firewall")
+        self.assertEqual(device["device_name"], "Router / firewall at 192.168.100.1")
+
+    def test_generic_unclassified_label_is_replaced_case_insensitively(self):
+        device = {
+            "ip": "192.168.100.1",
+            "device_name": "UNIDENTIFIED DEVICE",
+            "_is_gateway": True,
+        }
+        app.advanced_device_recognition(device)
+        self.assertEqual(device["device_name"], "Router / firewall at 192.168.100.1")
+
+
 class ApplicationIdentityIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime.now(timezone.utc)

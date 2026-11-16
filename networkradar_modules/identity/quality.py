@@ -13,9 +13,14 @@ def _present(value: Any) -> bool:
         return False
     if isinstance(value, (list, tuple, set, dict)):
         return bool(value)
-    text = str(value).strip()
-    return text.casefold() not in {"", "-", "unknown", "unavailable", "not observed",
-                                   "not reported", "not yet fingerprinted", "none", "n/a"}
+    text = str(value).strip().casefold()
+    if text in {"", "-", "unknown", "unavailable", "not observed",
+                "not reported", "not yet fingerprinted", "none", "n/a",
+                "unidentified device", "unclassified device",
+                "unclassified network device", "unknown device"}:
+        return False
+    return not text.startswith(("unidentified device", "unclassified device",
+                                "unknown device", "device at "))
 
 
 def assess_identity_quality(
@@ -42,6 +47,7 @@ def assess_identity_quality(
         ]),
         ("network", "Network identity", [
             device.get("ip"), device.get("mac"), device.get("hostname"),
+            device.get("device_name"), device.get("friendly_name"),
             device.get("mdns_records"),
         ]),
         ("services", "Services", [

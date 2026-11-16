@@ -21,7 +21,8 @@ from typing import Any, Mapping
 
 _PLACEHOLDERS = {"", "-", "unknown", "unavailable", "none", "n/a",
                  "not observed", "not yet fingerprinted", "unclassified",
-                 "unclassified network device"}
+                 "unclassified device", "unclassified network device",
+                 "unidentified device", "unknown device", "device unknown"}
 
 # Family reliabilities are conservative starting weights. Multiple fields
 # from one family are collapsed to the strongest contribution.
@@ -68,12 +69,18 @@ _RULES = {
         "endpoint_agent": (r"\b(macos|macbook|imac|mac mini|darwin)\b", 0.96, "Authenticated endpoint inventory reports Apple platform"),
     },
     "Windows computer": {
-        "reported_name": (r"\b(windows|win10|win11|thinkpad|elitebook|latitude|optiplex|probook|surface pro|surface laptop)\b", 0.70, "Windows/computer name token"),
+        "reported_name": (r"\b(windows|win10|win11|windows computer)\b", 0.70, "Windows OS/computer name token"),
         "nmap_os": (r"\b(windows|microsoft)\b", 0.91, "Nmap OS fingerprint reports Windows"),
         "nmap_script": (r"\bwindows (?:10|11|server)|microsoft windows|smb-os-discovery", 0.86, "SMB/Nmap host script reports Windows"),
         "snmp": (r"\b(windows|microsoft)\b", 0.75, "SNMP system description reports Windows"),
         "dhcp": (r"\bmsft\s*\d", 0.72, "Microsoft DHCP vendor-class identifier"),
-        "endpoint_agent": (r"\b(windows|thinkpad|elitebook|latitude|optiplex|probook|surface)\b", 0.98, "Authenticated endpoint OS/hardware inventory"),
+        "endpoint_agent": (r"\b(windows|win10|win11)\b", 0.98, "Authenticated endpoint inventory reports Windows OS"),
+    },
+    "Laptop / computer": {
+        # Product-family tokens can be concatenated in Windows hostnames
+        # (for example ANDREWSTHINKPAD). This supports a hardware-class
+        # hypothesis without inferring Windows or an exact model.
+        "reported_name": (r"(thinkpad|elitebook|latitude|optiplex|probook|macbook|mac mini|mac studio|mac pro|imac|surface pro|surface laptop)", 0.96, "Recognised laptop/computer product-family token in reported name"),
     },
     "Linux / Unix computer": {
         "reported_name": (r"\b(ubuntu|debian|fedora|arch linux|freebsd|openbsd|linux workstation)\b", 0.66, "Linux/Unix name token"),
@@ -238,14 +245,31 @@ def _build_facts(device: Mapping[str, Any]) -> list[dict]:
     if device.get("_is_gateway"):
         _add(facts, "network_role", "default gateway", "Default-route interface", 1.0)
 
-    # User/client-supplied names are useful clues but are not treated as unique IDs.
-    for key, label in (("hostname", "DHCP/reverse-resolved hostname"),
-                       ("friendly_name", "Device-advertised friendly name")):
-        value = device.get(key)
-        if key == "hostname" and _text(value).casefold() == _text(device.get("ip")).casefold():
+    # Names can arrive through different collectors and database fields.
+    # In particular, the inventory's display/device_name is often populated
+    # while hostname is empty. Preserve that observed label as evidence rather
+    # than silently scoring the device as if no name had been collected.
+    name_fields = (
+        ("hostname", "DHCP/reverse-resolved hostname", 0.52),
+        ("friendly_name", "Device-advertised friendly name", 0.60),
+        ("device_name", "Observed inventory device name", 0.68),
+        ("netbios_name", "NetBIOS computer name", 0.68),
+        ("computer_name", "Computer name observation", 0.64),
+        ("dhcp_hostname", "DHCP option 12 hostname", 0.55),
+        ("mdns_hostname", "mDNS hostname", 0.58),
+    )
+    seen_names = set()
+    for key, label, reliability in name_fields:
+        value = _text(device.get(key), 180)
+        folded = value.casefold()
+        if (not _present(value) or folded == _text(device.get("ip")).casefold()
+                or folded in _PLACEHOLDERS
+                or folded.startswith(("unidentified device", "unknown device",
+                                      "unclassified device", "device at "))
+                or folded in seen_names):
             continue
-        _add(facts, "reported_name", value, label, 0.60 if key == "friendly_name" else 0.52,
-             "DEVICE_REPORTED")
+        seen_names.add(folded)
+        _add(facts, "reported_name", value, label, reliability, "DEVICE_REPORTED")
 
     if device.get("reported_manufacturer"):
         _add(facts, "upnp", device["reported_manufacturer"], "UPnP-reported manufacturer", 0.91, "DEVICE_REPORTED")

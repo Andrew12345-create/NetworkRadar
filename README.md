@@ -1,4 +1,14 @@
-# NetworkRadar 13.0.0
+# NetworkRadar 13.1.0
+
+## Identity coverage and operational health (13.1.0)
+
+- Device identity now consumes observed inventory/device names when the DHCP hostname field is empty, while filtering generated "Unidentified device at ..." labels.
+- Device-name clues remain one evidence family and do not become confirmed identity or exact hardware-model claims by themselves.
+- Scan quality now has a true 100-point maximum, includes scan recency, and shows component-level discovery, network-context, authorisation and telemetry health.
+- Identity coverage is reported separately from discovery/telemetry quality, excludes legacy unclassified/ambiguous labels and generated placeholder names, and includes classified/unclassified counts and average confidence. Unavailable coverage is not misreported as zero.
+- The status endpoint isolates optional summary-query failures and returns partial status plus explicit error details instead of failing the entire dashboard status response.
+- The dashboard labels partial status accurately and displays identity coverage alongside scan quality.
+
 
 ## Evidence-fused device intelligence (13.0.0)
 

@@ -42,6 +42,15 @@ class IdentityQualityTests(unittest.TestCase):
         self.assertEqual(domains["classification"]["score"], 0)
         self.assertEqual(domains["hardware"]["score"], 25)
 
+    def test_generated_device_name_placeholder_does_not_inflate_network_coverage(self):
+        result = assess_identity_quality({
+            "device_name": "Unidentified device",
+            "friendly_name": "Unknown device at 192.168.1.20",
+        })
+        domains = {item["key"]: item for item in result["domains"]}
+        self.assertEqual(domains["network"]["observed"], 0)
+        self.assertEqual(domains["network"]["score"], 0)
+
     def test_coverage_is_not_reported_as_probability(self):
         result = assess_identity_quality({"ip": "192.168.1.1"})
         self.assertTrue(any("not identity probability" in x for x in result["limitations"]))
