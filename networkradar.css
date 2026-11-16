@@ -2205,3 +2205,16 @@ th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hov
 @media(max-width:700px){.actions{width:100%;justify-content:space-between;gap:7px}.scan-monitor{flex:1 1 125px;min-width:110px;width:auto;padding:5px 7px}.scan-monitor-detail{max-width:150px}.scan-monitor-top{gap:4px;font-size:8px}}
 @media(max-width:420px){.scan-monitor{min-width:95px}.scan-monitor-detail{display:none}.scan-monitor-top{grid-template-columns:auto minmax(0,1fr) auto}.actions #connection{display:none}}
 @media(prefers-reduced-motion:reduce){.scan-monitor-track i{transition:none}}
+
+
+/* Keep the sticky header single-line on compact desktop widths. */
+@media(min-width:901px) and (max-width:1050px){
+ .scan-monitor{width:132px;min-width:122px}
+ .scan-monitor-detail{max-width:112px}
+ .actions #connection{display:none}
+ .actions{gap:7px}
+ .actions button{padding:8px 10px;font-size:11px}
+ .brand{gap:9px}
+ .brand h1{font-size:15px;letter-spacing:1px}
+ .brand .sub{display:none}
+}
