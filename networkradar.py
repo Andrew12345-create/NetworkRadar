@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 12.7.0 — local-first network discovery and device intelligence.
+NetworkRadar 12.8.0 — local-first network discovery and device intelligence.
 NetworkRadar 12.4.1 changes:
   - Explains missing fingerprint causes, including manual scope override mode.
   - Preserves per-query Windows adapter collection diagnostics for troubleshooting.
@@ -570,7 +570,8 @@ def initialize_database():
             "timestamp TEXT NOT NULL, msg_type TEXT, client_mac TEXT, client_ip TEXT, "
             "server_ip TEXT, requested_ip TEXT, hostname TEXT, vendor_class TEXT, "
             "router_opt TEXT, dns_opt TEXT, subnet_mask TEXT, lease_seconds INTEGER, "
-            "network TEXT, interface TEXT, is_rogue INTEGER DEFAULT 0, details TEXT DEFAULT '')",
+            "network TEXT, interface TEXT, is_rogue INTEGER DEFAULT 0, details TEXT DEFAULT '', "
+            "client_architecture TEXT DEFAULT '', user_class TEXT DEFAULT '', client_fqdn TEXT DEFAULT '')",
             "CREATE TABLE IF NOT EXISTS arp_observations(id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "timestamp TEXT NOT NULL, opcode TEXT, sender_mac TEXT, sender_ip TEXT, "
             "target_mac TEXT, target_ip TEXT, interface TEXT, "
@@ -856,6 +857,9 @@ def initialize_database():
             "parameter_request_list": "TEXT DEFAULT ''",
             "client_identifier": "TEXT DEFAULT ''",
             "fingerprint": "TEXT DEFAULT ''",
+            "client_architecture": "TEXT DEFAULT ''",
+            "user_class": "TEXT DEFAULT ''",
+            "client_fqdn": "TEXT DEFAULT ''",
         })
         add_cols("network_profiles", {
             "fingerprint": "TEXT DEFAULT ''",
@@ -1889,11 +1893,13 @@ def _recent_dhcp_evidence(conn, device):
     ip = device.get("ip", "")
     if mac:
         rows = conn.execute("""SELECT hostname,vendor_class,parameter_request_list,
-            client_identifier,client_mac FROM dhcp_events WHERE upper(client_mac)=?
+            client_identifier,client_mac,client_architecture,user_class,client_fqdn
+            FROM dhcp_events WHERE upper(client_mac)=?
             ORDER BY id DESC LIMIT 8""", (mac,)).fetchall()
     else:
         rows = conn.execute("""SELECT hostname,vendor_class,parameter_request_list,
-            client_identifier,client_mac FROM dhcp_events WHERE client_ip=?
+            client_identifier,client_mac,client_architecture,user_class,client_fqdn
+            FROM dhcp_events WHERE client_ip=?
             ORDER BY id DESC LIMIT 8""", (ip,)).fetchall()
     return rows
 
@@ -2218,7 +2224,8 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
     dhcp_hints = {}
     dhcp_profiles = []
     for row in dhcp_rows:
-        hn, vc, prl, cid, _ = row
+        hn, vc, prl, cid, _ = row[:5]
+        architecture, user_class, client_fqdn = (row[5] or "", row[6] or "", row[7] or "") if len(row) > 5 else ("", "", "")
         if hn:
             evidence.append(("DHCP", "Hostname", hn, 78, "DEVICE_REPORTED"))
         if vc:
@@ -2229,15 +2236,25 @@ def identity_fusion(device, ssdp=None, mdns_records=""):
             evidence.append(("DHCP", "Client identifier", cid, 55, "OBSERVED"))
         analysis = _analyse_dhcp_identity(
             vendor_class=vc, hostname=hn, parameter_request_list=prl,
-            client_identifier=cid)
+            client_identifier=cid, client_architecture=architecture,
+            user_class=user_class, client_fqdn=client_fqdn)
         identity_row = {"hostname": hn, "vendor_class": vc,
                         "parameter_request_list": prl, "client_identifier": cid,
+                        "client_architecture": architecture, "user_class": user_class,
+                        "client_fqdn": client_fqdn,
+                        "architecture_details": analysis["fingerprint"]["client_architecture"],
                         "parameter_request_list_names":
                             analysis["fingerprint"]["parameter_request_list_names"]}
         device["dhcp_identity"].append(identity_row)
         for feature in analysis.get("features", []):
             if feature not in dhcp_profiles:
                 dhcp_profiles.append(feature)
+        if architecture:
+            evidence.append(("DHCP PXE option 93", "Pre-boot architecture", architecture, 72, "OBSERVED"))
+        if user_class:
+            evidence.append(("DHCP option 77", "User class", user_class, 62, "DEVICE_REPORTED"))
+        if client_fqdn:
+            evidence.append(("DHCP option 81", "Client FQDN", client_fqdn, 72, "DEVICE_REPORTED"))
         for item in analysis.get("hints", []):
             key = (item.get("category", ""), item.get("attribute", "client_family"))
             if key not in dhcp_hints or int(item.get("confidence", 0)) > int(dhcp_hints[key].get("confidence", 0)):
@@ -3680,7 +3697,8 @@ class DHCPEngine(threading.Thread):
                   "dhcp.option.router", "dhcp.option.domain_name_server",
                   "dhcp.option.subnet_mask", "dhcp.option.lease_time",
                   "dhcp.option.vendor_class_id", "dhcp.option.request_list_item",
-                  "dhcp.option.client_id"]
+                  "dhcp.option.client_id", "dhcp.option.client_system_architecture",
+                  "dhcp.option.user_class.text", "dhcp.fqdn.name"]
         cmd = [str(TSHARK), "-l", "-n", "-i", self.iface,
                "-f", DHCP_CAPTURE_FILTER, "-T", "fields",
                "-E", "separator=/t", "-E", "quote=d", "-E", "occurrence=f"]
@@ -3761,9 +3779,10 @@ class DHCPEngine(threading.Thread):
     def handle(self, line):
         try:
             row = next(csv.reader([line.rstrip("\r\n")], delimiter="\t", quotechar='"'))
-            row += [""] * (16 - len(row))
+            row += [""] * (19 - len(row))
             (epoch, sip, dip, mt, cmac, yip, hn, sid, rip, ro, do,
-             sm, lease, vc, prl, client_id) = row[:16]
+             sm, lease, vc, prl, client_id, client_architecture,
+             user_class, client_fqdn) = row[:19]
             if not cmac:
                 return
             ts = (datetime.fromtimestamp(float(epoch)).strftime("%Y-%m-%d %H:%M:%S")
@@ -3780,14 +3799,16 @@ class DHCPEngine(threading.Thread):
                     client_mac, client_ip, server_ip, requested_ip, hostname,
                     vendor_class, router_opt, dns_opt, subnet_mask, lease_seconds,
                     network, interface, is_rogue, details, parameter_request_list,
-                    client_identifier, fingerprint)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    client_identifier, fingerprint, client_architecture, user_class, client_fqdn)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (ts, mtname, cmac, yip or "", sid or sip, rip or "",
                      hn or "", vc or "", ro or "", do or "", sm or "",
                      int(lease) if lease.isdigit() else None,
                      current_network(), self.iface, rogue,
                      f"src={sip} dst={dip}", _clean(prl, 300),
-                     _clean(client_id, 160), dhcp_fingerprint(vc, prl)))
+                     _clean(client_id, 160), dhcp_fingerprint(vc, prl),
+                     _clean(client_architecture, 120), _clean(user_class, 240),
+                     _clean(client_fqdn, 255)))
                 record_event(conn, yip or sip or cmac, f"DHCP_{mtname}",
                              f"MAC={cmac} host={hn or '-'} server={sid or sip or '-'}",
                              category="dhcp",
@@ -6787,7 +6808,7 @@ class Handler(BaseHTTPRequestHandler):
                     identity_history = _rows_or_empty("""SELECT timestamp,attribute,old_value,new_value,reason
                         FROM device_identity_history WHERE ip=? ORDER BY timestamp DESC LIMIT 100""", (ip,))
                     dhcp_rows = _rows_or_empty("""SELECT timestamp,msg_type,hostname,vendor_class,
-                        client_mac,client_ip,server_ip,details FROM dhcp_events
+                        client_mac,client_ip,server_ip,details,client_architecture,user_class,client_fqdn FROM dhcp_events
                         WHERE client_ip=? OR client_mac=? ORDER BY timestamp DESC LIMIT 60""",
                         (ip, d[1] or ""))
                     dns_rows = _rows_or_empty("""SELECT timestamp,domain,query_type,response_code,answers
@@ -6899,7 +6920,7 @@ class Handler(BaseHTTPRequestHandler):
                             "conflicts":json.loads(r[5] or "[]"),"evidence_count":r[6],
                             "independent_sources":r[7],"rationale":r[8],"last_seen":r[9]} for r in assessments],
                         "identity_history": [{"timestamp":r[0],"attribute":r[1],"old":r[2],"new":r[3],"reason":r[4]} for r in identity_history],
-                        "dhcp_history": [{"timestamp":r[0],"message":r[1],"hostname":r[2],"vendor_class":r[3],"mac":r[4],"client_ip":r[5],"server_ip":r[6],"details":r[7]} for r in dhcp_rows],
+                        "dhcp_history": [{"timestamp":r[0],"message":r[1],"hostname":r[2],"vendor_class":r[3],"mac":r[4],"client_ip":r[5],"server_ip":r[6],"details":r[7],"client_architecture":r[8] if len(r)>8 else "","user_class":r[9] if len(r)>9 else "","client_fqdn":r[10] if len(r)>10 else ""} for r in dhcp_rows],
                         "dns_activity": [{"timestamp":r[0],"domain":r[1],"type":r[2],"rcode":r[3],"answers":r[4]} for r in dns_rows],
                         "observations": [{"timestamp":r[0],"method":r[1],"observation":r[2],"confidence":r[3]} for r in observation_rows],
                         "behaviour_alerts": [{"timestamp":r[0],"metric":r[1],"observed":r[2],"baseline":r[3],"severity":r[4],"details":r[5],"status":r[6]} for r in behaviour_rows],
