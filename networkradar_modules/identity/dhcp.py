@@ -74,13 +74,16 @@ def parse_client_architecture(value: Any) -> list[dict[str, Any]]:
     text = str(value).strip()
     if not text:
         return []
-    tokens = re.findall(r"(?i)0x[0-9a-f]{1,4}|(?<![A-Za-z-])\d{1,5}(?![A-Za-z-])", text)
+    tokens = re.split(r"[,;\\s()]+", text)
     found: list[dict[str, Any]] = []
     seen: set[int] = set()
-    for token in tokens[:16]:
-        try:
-            number = int(token, 16) if token.lower().startswith("0x") else int(token, 10)
-        except ValueError:
+    for token in tokens[:32]:
+        token = token.strip().rstrip(":")
+        if re.fullmatch(r"0x[0-9a-fA-F]{1,4}", token):
+            number = int(token[2:], 16)
+        elif re.fullmatch(r"[0-9]{1,5}", token):
+            number = int(token, 10)
+        else:
             continue
         if not 0 <= number <= 65535 or number in seen:
             continue
