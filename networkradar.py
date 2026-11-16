@@ -1,5 +1,11 @@
 ﻿"""
-NetworkRadar 13.3.0 — Layered TCP reachability discovery.
+NetworkRadar 13.3.1 — Windows network-context recovery.
+NetworkRadar 13.3.1 changes:
+  - Replaces five serial PowerShell launches with one bounded batched network-context query.
+  - Adds a native ipconfig /all fallback when PowerShell network cmdlets time out or return incomplete data.
+  - Keeps route, interface, DNS and DHCP observations tied to the selected adapter; missing values remain missing.
+  - Records PowerShell timeouts distinctly and keeps active discovery authorisation fail-closed.
+  
 NetworkRadar 13.3.0 changes:
   - Supplements Nmap ARP/host discovery with a bounded, authorised TCP connect
     sweep over common service ports to find hosts that filter echo/ARP probes.
@@ -290,6 +296,9 @@ from networkradar_modules.discovery.capture import (
 from networkradar_modules.discovery.adapters import (
     _norm_mac, _is_real_mac, _select_primary_adapter,
     _select_ipv4_interface_rows, _select_tshark_interface,
+)
+from networkradar_modules.network.windows_context import (
+    build_network_context_script, parse_ipconfig_all,
 )
 from networkradar_modules.discovery.classification import infer_type as _classify_device_type
 from networkradar_modules.discovery.probes import (
@@ -999,7 +1008,7 @@ FP_WEIGHTS = {"subnet": 0.30, "gateway": 0.20, "gateway_mac": 0.25,
 _PS_DIAGNOSTICS = threading.local()
 
 
-def _ps(cmd, timeout=15, label="PowerShell query"):
+def _ps(cmd, timeout=8, label="PowerShell query"):
     """Run a read-only PowerShell query and retain safe, bounded diagnostics."""
     try:
         p = subprocess.run(
@@ -1007,6 +1016,12 @@ def _ps(cmd, timeout=15, label="PowerShell query"):
              "-Command", cmd],
             capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        records = getattr(_PS_DIAGNOSTICS, "records", None)
+        if records is not None:
+            records.append({"operation": label, "state": "TIMEOUT",
+                            "detail": f"PowerShell query exceeded its {timeout}s limit."})
+        return []
     except Exception as exc:
         records = getattr(_PS_DIAGNOSTICS, "records", None)
         if records is not None:
@@ -1186,27 +1201,51 @@ def detect_network():
         except ValueError:
             raise RuntimeError("NETWORKRADAR_NETWORK invalid CIDR")
 
-    adapters_raw = _ps(
-        "Get-NetAdapter | Select-Object Name,InterfaceIndex,InterfaceDescription,InterfaceGuid,"
-        "MacAddress,Status,MediaType | ConvertTo-Json -Depth 3",
-        label="Get-NetAdapter")
-    ip_raw = _ps(
-        "Get-NetIPAddress -AddressFamily IPv4 | "
-        "Select-Object InterfaceIndex,IPAddress,PrefixLength,AddressState,SkipAsSource | ConvertTo-Json -Depth 3",
-        label="Get-NetIPAddress")
-    route_raw = _ps(
-        "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | "
-        "Select-Object InterfaceIndex,NextHop,RouteMetric,InterfaceMetric | "
-        "ConvertTo-Json -Depth 3",
-        label="Get-NetRoute")
-    dns_raw = _ps(
-        "Get-DnsClientServerAddress -AddressFamily IPv4 | "
-        "Select-Object InterfaceIndex,ServerAddresses | ConvertTo-Json -Depth 3",
-        label="Get-DnsClientServerAddress")
-    dhcp_raw = _ps(
-        "Get-NetIPInterface -AddressFamily IPv4 | "
-        "Select-Object InterfaceIndex,Dhcp | ConvertTo-Json -Depth 3",
-        label="Get-NetIPInterface")
+    # Prefer one bounded PowerShell process over five serial 15-second launches.
+    batch_rows = _ps(
+        build_network_context_script(), timeout=25,
+        label="Batched Windows network context")
+    batch = batch_rows[0] if batch_rows and isinstance(batch_rows[0], dict) else {}
+    adapters_raw = batch.get("adapters") or []
+    ip_raw = batch.get("addresses") or []
+    route_raw = batch.get("routes") or []
+    dns_raw = batch.get("dns") or []
+    dhcp_raw = batch.get("dhcp") or []
+
+    if not adapters_raw or not ip_raw:
+        # ipconfig.exe is a native Windows fallback that does not depend on the
+        # NetTCPIP PowerShell module being responsive.
+        try:
+            native = subprocess.run(
+                ["ipconfig.exe", "/all"], capture_output=True, text=True,
+                timeout=8, encoding="utf-8", errors="replace", check=False)
+            if native.returncode == 0:
+                fallback = parse_ipconfig_all(native.stdout)
+                if fallback.get("adapters") and fallback.get("addresses"):
+                    adapters_raw = fallback["adapters"]
+                    ip_raw = fallback["addresses"]
+                    route_raw = fallback["routes"]
+                    dns_raw = fallback["dns"]
+                    dhcp_raw = fallback["dhcp"]
+                    _PS_DIAGNOSTICS.records.append({
+                        "operation": "ipconfig.exe /all", "state": "OK",
+                        "detail": "Native Windows fallback supplied interface, IPv4, gateway, DNS and DHCP data.",
+                    })
+                else:
+                    _PS_DIAGNOSTICS.records.append({
+                        "operation": "ipconfig.exe /all", "state": "EMPTY",
+                        "detail": "Native fallback returned no parseable active IPv4 adapters.",
+                    })
+            else:
+                _PS_DIAGNOSTICS.records.append({
+                    "operation": "ipconfig.exe /all", "state": "ERROR",
+                    "detail": (native.stderr or "ipconfig exited unsuccessfully.")[-240:],
+                })
+        except Exception as exc:
+            _PS_DIAGNOSTICS.records.append({
+                "operation": "ipconfig.exe /all", "state": "ERROR",
+                "detail": str(exc)[:240],
+            })
 
     ips_by_idx = _select_ipv4_interface_rows(ip_raw)
     dns_by_idx, dhcp_by_idx = {}, {}
@@ -1244,7 +1283,8 @@ def detect_network():
                          "status": status,
                          "media_type": str(a.get("MediaType") or ""),
                          "mac": mac_val if _is_real_mac(mac_val) else "",
-                         "ip": ip_val, "prefix": pfx})
+                         "ip": ip_val, "prefix": pfx,
+                         "_native_fallback": bool(a.get("_native_fallback"))})
 
     up = [x for x in adapters if x["status"] == "Up" and x["ip"]]
     primary = _select_primary_adapter(up, default_routes)
@@ -1283,7 +1323,10 @@ def detect_network():
             if next_hop and next_hop not in ("0.0.0.0", ""):
                 gateway_val = str(next_hop)
                 gw_class = Conf.CONFIRMED
-                gw_mac = _gateway_mac_via_neighbor(gateway_val, idx) or ""
+                # ipconfig fallback has no trustworthy interface index.
+                # Do not read an unscoped neighbour entry as a strong identity anchor.
+                if not adapter.get("_native_fallback"):
+                    gw_mac = _gateway_mac_via_neighbor(gateway_val, idx) or ""
         dns_servers = sorted(set(dns_by_idx.get(idx, [])))
         dhcp_flag = dhcp_by_idx.get(idx, "")
         ssid, bssid = _wifi_details(adapter["name"])

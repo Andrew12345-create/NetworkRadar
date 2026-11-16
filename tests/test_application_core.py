@@ -357,20 +357,20 @@ class NetworkFingerprintDiagnosticsTests(unittest.TestCase):
     @patch.object(app, "_gateway_mac_via_neighbor", return_value="F4:A4:D6:17:32:72")
     @patch.object(app, "_ps")
     def test_windows_adapter_evidence_produces_fingerprint(self, ps, gateway_mac, wifi):
-        ps.side_effect = [
-            [{"Name": "Wi-Fi", "InterfaceIndex": 8,
-              "InterfaceDescription": "Intel(R) Wireless-AC 9560 160MHz",
-              "InterfaceGuid": "{4a54e23f-455a-4e34-b9f2-4ab74d8cf34f}",
-              "MacAddress": "96-03-C3-D8-6E-A8", "Status": "Up",
-              "MediaType": "Native 802.11"}],
-            [{"InterfaceIndex": 8, "IPAddress": "192.168.100.82",
-              "PrefixLength": 24, "AddressState": "Preferred",
-              "SkipAsSource": False}],
-            [{"InterfaceIndex": 8, "NextHop": "192.168.100.1",
-              "RouteMetric": 25, "InterfaceMetric": 10}],
-            [{"InterfaceIndex": 8, "ServerAddresses": ["192.168.100.1"]}],
-            [{"InterfaceIndex": 8, "Dhcp": "Enabled"}],
-        ]
+        ps.return_value = [{
+            "adapters": [{"Name": "Wi-Fi", "InterfaceIndex": 8,
+                          "InterfaceDescription": "Intel(R) Wireless-AC 9560 160MHz",
+                          "InterfaceGuid": "{4a54e23f-455a-4e34-b9f2-4ab74d8cf34f}",
+                          "MacAddress": "96-03-C3-D8-6E-A8", "Status": "Up",
+                          "MediaType": "Native 802.11"}],
+            "addresses": [{"InterfaceIndex": 8, "IPAddress": "192.168.100.82",
+                           "PrefixLength": 24, "AddressState": "Preferred",
+                           "SkipAsSource": False}],
+            "routes": [{"InterfaceIndex": 8, "NextHop": "192.168.100.1",
+                        "RouteMetric": 25, "InterfaceMetric": 10}],
+            "dns": [{"InterfaceIndex": 8, "ServerAddresses": ["192.168.100.1"]}],
+            "dhcp": [{"InterfaceIndex": 8, "Dhcp": "Enabled"}],
+        }]
         with patch.object(app, "NETWORK_OVERRIDE", ""):
             detected = app.detect_network()
         self.assertTrue(detected["fingerprint"])
@@ -381,6 +381,37 @@ class NetworkFingerprintDiagnosticsTests(unittest.TestCase):
         self.assertEqual(detected["fingerprint_diagnostics"]["strong_anchors"],
                          ["gateway_mac", "bssid"])
         self.assertTrue(app.has_strong_network_anchor(detected))
+        ps.assert_called_once()
+
+    @patch.object(app, "_gateway_mac_via_neighbor")
+    @patch.object(app, "_wifi_details", return_value=("Andrew", "B0:19:21:4A:14:6F"))
+    @patch.object(app.subprocess, "run")
+    @patch.object(app, "_ps", return_value=[])
+    def test_native_ipconfig_fallback_builds_context_without_unscoped_gateway_mac(
+            self, ps, run, wifi, gateway_mac):
+        output = """Windows IP Configuration
+
+Wireless LAN adapter Wi-Fi:
+
+   Physical Address. . . . . . . . . : AA-BB-CC-DD-EE-FF
+   DHCP Enabled. . . . . . . . . . . : Yes
+   IPv4 Address. . . . . . . . . . . : 192.168.100.25(Preferred)
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . . : 192.168.100.1
+   DNS Servers . . . . . . . . . . . : 192.168.100.1
+"""
+        run.return_value = app.subprocess.CompletedProcess(
+            args=["ipconfig.exe", "/all"], returncode=0,
+            stdout=output, stderr="")
+        with patch.object(app, "NETWORK_OVERRIDE", ""):
+            detected = app.detect_network()
+        self.assertEqual(detected["network"], "192.168.100.0/24")
+        self.assertEqual(detected["gateway"], "192.168.100.1")
+        self.assertEqual(detected["interface"], "Wi-Fi")
+        self.assertEqual(detected["gateway_mac"], "")
+        self.assertTrue(detected["fingerprint"])
+        ps.assert_called_once()
+        gateway_mac.assert_not_called()
 
     def test_authorise_error_explains_manual_override(self):
         original = dict(app.NET_CTX)

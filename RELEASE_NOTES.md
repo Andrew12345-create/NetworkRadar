@@ -1,3 +1,21 @@
+# NetworkRadar 13.3.1 — Windows Network Context Recovery
+
+## Faster, more resilient network identification
+- Replaces five serial PowerShell process launches with one bounded 25-second batched query for adapters, IPv4 addresses, default routes, DNS servers and DHCP state.
+- Adds a native Windows `ipconfig /all` fallback when the PowerShell query times out or returns incomplete adapter/address data.
+- Keeps adapter, address, route, DNS and DHCP evidence associated by interface; the native fallback only creates a gateway observation when Windows actually reports one.
+- Gateway-neighbour lookup remains scoped to the exact observed gateway. The native fallback does not invent an interface index or gateway MAC.
+- PowerShell timeouts are now reported as `TIMEOUT` diagnostics instead of generic errors.
+- Active discovery authorisation thresholds and approval requirements are unchanged. If a sufficiently strong current network fingerprint cannot be established, active discovery remains disabled.
+
+## Coverage and limitations
+- The native parser currently targets English-language Windows `ipconfig /all` labels. Localised output that cannot be parsed is reported as unavailable rather than guessed.
+- A fallback subnet/gateway observation is not by itself proof of network authorisation; a strong gateway-MAC or BSSID anchor and a current approved profile are still required.
+- This is source-level and CI validation. A live Windows run is still required to confirm the behaviour on the affected laptop.
+
+## Validation
+- Adds tests for batched query composition, IPv4/subnet parsing, gateway and DNS extraction, DHCP state, virtual-interface separation and missing-gateway handling.
+
 # NetworkRadar 13.3.0 — Layered Reachability Discovery
 
 ## Vigorous but bounded discovery
