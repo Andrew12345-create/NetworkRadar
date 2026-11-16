@@ -36,6 +36,26 @@ class AdvancedDeviceProfileTests(unittest.TestCase):
         })
         self.assertEqual(result["selected_category"], "Unclassified network device")
 
+    def test_inventory_device_name_is_used_when_hostname_is_missing(self):
+        result = analyse_device_profile({
+            "ip": "192.168.100.82",
+            "hostname": "",
+            "device_name": "ANDREWSTHINKPAD",
+        })
+        self.assertEqual(result["category"], "Windows computer")
+        self.assertEqual(result["selected_category"], "Unclassified network device")
+        self.assertGreater(result["confidence"], 0)
+        self.assertIn("reported_name", result["source_families"])
+        self.assertEqual(result["evidence"][0]["value"], "ANDREWSTHINKPAD")
+
+    def test_generated_unidentified_device_label_is_not_identity_evidence(self):
+        result = analyse_device_profile({
+            "ip": "192.168.100.120",
+            "device_name": "Unidentified device at 192.168.100.120",
+        })
+        self.assertEqual(result["confidence"], 0)
+        self.assertNotIn("reported_name", result["source_families"])
+
     def test_android_hostname_is_only_a_probable_name_signal(self):
         result = analyse_device_profile({
             "ip": "192.168.100.120",
