@@ -383,6 +383,36 @@ class NetworkFingerprintDiagnosticsTests(unittest.TestCase):
         self.assertTrue(app.has_strong_network_anchor(detected))
         ps.assert_called_once()
 
+    @patch.object(app, "_gateway_mac_via_neighbor")
+    @patch.object(app, "_wifi_details", return_value=("Andrew", "B0:19:21:4A:14:6F"))
+    @patch.object(app.subprocess, "run")
+    @patch.object(app, "_ps", return_value=[])
+    def test_native_ipconfig_fallback_builds_context_without_unscoped_gateway_mac(
+            self, ps, run, wifi, gateway_mac):
+        output = """Windows IP Configuration
+
+Wireless LAN adapter Wi-Fi:
+
+   Physical Address. . . . . . . . . : AA-BB-CC-DD-EE-FF
+   DHCP Enabled. . . . . . . . . . . : Yes
+   IPv4 Address. . . . . . . . . . . : 192.168.100.25(Preferred)
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . . : 192.168.100.1
+   DNS Servers . . . . . . . . . . . : 192.168.100.1
+"""
+        run.return_value = app.subprocess.CompletedProcess(
+            args=["ipconfig.exe", "/all"], returncode=0,
+            stdout=output, stderr="")
+        with patch.object(app, "NETWORK_OVERRIDE", ""):
+            detected = app.detect_network()
+        self.assertEqual(detected["network"], "192.168.100.0/24")
+        self.assertEqual(detected["gateway"], "192.168.100.1")
+        self.assertEqual(detected["interface"], "Wi-Fi")
+        self.assertEqual(detected["gateway_mac"], "")
+        self.assertTrue(detected["fingerprint"])
+        ps.assert_called_once()
+        gateway_mac.assert_not_called()
+
     def test_authorise_error_explains_manual_override(self):
         original = dict(app.NET_CTX)
         try:
