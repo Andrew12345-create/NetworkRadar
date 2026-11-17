@@ -29,6 +29,12 @@ class IdentitySubscanCoordinator:
         self._started_at = time.time()
         self._counts = {"queued": 0, "running": 0, "resolved": 0,
                         "exhausted": 0, "deferred": 0}
+        self._progress = {
+            "state": "IDLE", "ip": "", "phase": "Waiting for an unidentified device.",
+            "percent": 0, "message": "No identity subscan is currently running.",
+            "started_at": None, "updated_at": time.time(),
+        }
+        self._last_result: dict[str, Any] = {}
 
     @staticmethod
     def _key(device: Mapping[str, Any]) -> str:
@@ -132,6 +138,12 @@ class IdentitySubscanCoordinator:
             item["attempts"] += 1
             item["last_attempt_at"] = now
             self._active_key = item["key"]
+            self._progress = {
+                "state": "RUNNING", "ip": item["ip"],
+                "phase": "Preparing targeted investigation", "percent": 3,
+                "message": "Checking current authorisation and device availability.",
+                "started_at": now, "updated_at": now,
+            }
             self._refresh_counts()
             return dict(item)
 
@@ -158,8 +170,36 @@ class IdentitySubscanCoordinator:
                 item["next_attempt_at"] = now + delay
             if self._active_key == key:
                 self._active_key = None
+            self._progress = {
+                "state": "COMPLETED" if recognised else item["state"],
+                "ip": item["ip"],
+                "phase": "Identity assessment complete" if recognised else "Investigation attempt complete",
+                "percent": 100,
+                "message": ("Device identity now meets the recognition threshold."
+                            if recognised else item["last_error"] or "No conclusive new identity evidence."),
+                "started_at": self._progress.get("started_at"),
+                "updated_at": now,
+                "completed_at": now,
+            }
+            self._last_result = dict(self._progress)
             self._refresh_counts()
             return dict(item)
+
+    def update_progress(self, key: str, phase: str, percent: int,
+                        message: str = "", *, now: float | None = None) -> None:
+        """Update the independent progress state for the currently claimed host."""
+        now = time.time() if now is None else float(now)
+        with self._lock:
+            if self._active_key != key:
+                return
+            self._progress.update({
+                "state": "RUNNING",
+                "phase": str(phase or "Investigating")[:100],
+                "percent": max(int(self._progress.get("percent", 0)),
+                               min(99, max(0, int(percent)))),
+                "message": str(message or "")[:240],
+                "updated_at": now,
+            })
 
     def defer_active(self, reason: str = "Deferred by scheduler", *, now: float | None = None) -> None:
         now = time.time() if now is None else float(now)
@@ -173,6 +213,12 @@ class IdentitySubscanCoordinator:
                 item["next_attempt_at"] = now + self.base_backoff
                 item["last_error"] = str(reason)[:240]
             self._active_key = None
+            self._progress = {
+                "state": "DEFERRED", "ip": item["ip"] if item else "",
+                "phase": "Waiting for main scan", "percent": 0,
+                "message": str(reason)[:240], "started_at": None,
+                "updated_at": now,
+            }
             self._refresh_counts()
 
     def pause(self) -> None:
@@ -189,13 +235,19 @@ class IdentitySubscanCoordinator:
             self._refresh_counts()
             items = sorted(self._items.values(),
                            key=lambda item: (item["state"], item["next_attempt_at"] or float("inf")))
+            processed = self._counts["resolved"] + self._counts["exhausted"]
+            total = len(items)
             return {
                 "enabled": not self._paused,
                 "paused": self._paused,
                 "worker_alive": bool(getattr(self, "_worker_alive", False)),
                 "active_key": self._active_key,
                 "counts": dict(self._counts),
-                "total_targets": len(items),
+                "total_targets": total,
+                "processed_targets": processed,
+                "queue_progress_percent": round((processed / total) * 100) if total else 0,
+                "progress": dict(self._progress),
+                "last_result": dict(self._last_result),
                 "max_attempts_per_target": self.max_attempts,
                 "next_due_in_seconds": min(
                     (max(0.0, item["next_attempt_at"] - now)
