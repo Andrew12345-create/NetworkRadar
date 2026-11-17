@@ -8,6 +8,7 @@
 - Uses only globally administered unicast MAC addresses as cross-IP subscan queue anchors; locally administered/randomised MACs remain IP-scoped.
 - Redesigns Devices & Identity with live inventory metrics, category quick-filters, search, responsive device cards, grid/list modes, confidence bars, last-seen context and clearer online/offline states.
 - Adds individual worker cards for concurrent investigations, with stage-based progress and responsive/reduced-motion styling.
+- Adds evidence-gap guidance tailored to likely Windows, printer, TV/media, infrastructure, embedded/VxWorks and mobile device families; recommendations remain passive or authorisation-gated and never assert exact models from weak clues.
 - Preserves the existing SQLite inventory, identity evidence, continuity ledger, manual identity-candidate review and authorisation boundaries.
 
 ## Configuration
