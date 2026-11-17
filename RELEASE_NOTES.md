@@ -1,3 +1,16 @@
+# NetworkRadar 13.7.0 — Dashboard Consistency & Accessibility
+
+## Frontend refinements
+- Adds consistent keyboard focus indicators to interactive controls and links.
+- Prevents nested dashboard grids and workspace panels from forcing page-level horizontal overflow.
+- Improves horizontal table scrolling and touch interaction on compact screens.
+- Applies reduced-motion preferences consistently to animations, transitions and smooth scrolling.
+- This is an additive CSS-only presentation update; the Python discovery engine, API contracts, database schema and authorisation gates are unchanged.
+
+## Validation
+- Existing static-asset regression tests cover stylesheet presence and balanced CSS blocks.
+- Full Windows CI, Node.js syntax validation and live browser checks remain required before calling the release fully verified.
+
 # NetworkRadar 13.6.1 — Independent Subscan Progress & Scan Isolation
 
 ## Identity subscan progress
