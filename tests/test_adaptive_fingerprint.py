@@ -68,6 +68,26 @@ class AdaptiveFingerprintPlanTests(unittest.TestCase):
         plan = build_fingerprint_plan(devices, {}, now=5_000_000)
         self.assertEqual(plan["targets"], ["192.168.10.7"])
 
+    def test_targets_must_belong_to_the_authorised_subnet(self):
+        devices = [
+            {"ip": "192.168.100.20", "identification_confidence": 0},
+            {"ip": "192.168.101.20", "identification_confidence": 0},
+        ]
+        plan = build_fingerprint_plan(
+            devices, {}, now=7_000_000, allowed_network="192.168.100.0/24"
+        )
+        self.assertEqual(plan["targets"], ["192.168.100.20"])
+        self.assertEqual(plan["scope"], "192.168.100.0/24")
+
+    def test_invalid_authorised_subnet_fails_closed(self):
+        plan = build_fingerprint_plan(
+            [{"ip": "192.168.100.20", "identification_confidence": 0}],
+            {}, now=8_000_000, allowed_network="not-a-subnet",
+        )
+        self.assertEqual(plan["targets"], [])
+        self.assertEqual(plan["udp_targets"], [])
+        self.assertIn("fails closed", plan["deferred"][0]["reason"])
+
     def test_plan_never_exceeds_hard_clamped_limits(self):
         devices = [{"ip": f"10.0.0.{n}", "identification_confidence": 0}
                    for n in range(1, 40)]
