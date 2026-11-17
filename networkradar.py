@@ -299,6 +299,7 @@ from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
 from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
 from networkradar_modules.discovery.tcp_sweep import sweep_tcp_hosts
+from networkradar_modules.discovery.scan_budget import deep_scan_profile
 from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
 from networkradar_modules.discovery.neighbors import (
     collect_windows_neighbor_cache, merge_reachable_neighbors,
@@ -3142,12 +3143,40 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
                 obs_by_ip[dev["ip"]] = fut.result()
             except Exception as e:
                 obs_by_ip[dev["ip"]] = [("Error", _clean(e, 160), 0)]
+    # Network probes are independent across hosts. Run the bounded read-only
+    # enrichments concurrently so one slow endpoint cannot serialize the scan.
+    def _collect_probe_bundle(dev):
+        ip = dev["ip"]
+        ports = dev.get("port_numbers", [])
+        return (
+            ip,
+            tls_certificate_intelligence(ip, ports),
+            snmpv3_intelligence(ip),
+            service_banner_intelligence(ip, ports) if deep else [],
+        )
+
+    probe_results = {}
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(devices)))) as pool:
+        futures = {pool.submit(_collect_probe_bundle, dev): dev for dev in devices}
+        for future in as_completed(futures):
+            dev = futures[future]
+            try:
+                ip, tls_rows, snmp_rows, service_rows = future.result()
+                probe_results[ip] = (tls_rows, snmp_rows, service_rows)
+            except Exception as exc:
+                probe_results[dev["ip"]] = ([], {}, [])
+                dev.setdefault("collection_notes", []).append(
+                    "Parallel identity enrichment: " + _clean(exc, 140)
+                )
+
     for dev in devices:
         try:
-            dev["tls_intel"] = tls_certificate_intelligence(dev["ip"], dev.get("port_numbers", []))
-            dev["snmp_intel"] = snmpv3_intelligence(dev["ip"])
-            dev["service_intel"] = (service_banner_intelligence(dev["ip"], dev.get("port_numbers", []))
-                                    if deep else [])
+            tls_rows, snmp_rows, service_rows = probe_results.get(
+                dev["ip"], ([], {}, [])
+            )
+            dev["tls_intel"] = tls_rows
+            dev["snmp_intel"] = snmp_rows
+            dev["service_intel"] = service_rows
             dev["mdns_records"] = " | ".join(mdns_by_ip.get(dev["ip"], []))[:500]
             dev["ssdp_intel"] = ssdp.get(dev["ip"], {})
             if dev.get("lldp_cdp"):
@@ -3889,14 +3918,30 @@ class DHCPEngine(threading.Thread):
                     "reason": "capture engine is (re)starting"}
         if status in ("ONLINE", "RUNNING"):
             messages = int(s.get("messages", 0))
+            interface = str(s.get("interface") or "interface not identified")
             if messages == 0:
-                return {"state": "TRAFFIC_NOT_OBSERVED",
-                        "reason": ("Capture is running but zero DHCP packets have "
-                                   "been observed. Possible causes: wrong interface, "
-                                   "switched segment, static IPs, or no DHCP "
-                                   "activity in observation window.")}
-            return {"state": "OBSERVING",
-                    "reason": f"{messages} DHCP messages observed"}
+                return {
+                    "state": "TRAFFIC_NOT_OBSERVED",
+                    "interface": interface,
+                    "capture_filter": DHCP_CAPTURE_FILTER,
+                    "messages": 0,
+                    "reason": (
+                        "TShark is running on " + interface + " with filter "
+                        + DHCP_CAPTURE_FILTER + ", but no DHCP frames have been "
+                        "visible. This is not proof of capture failure: DHCP is "
+                        "normally visible during address acquisition/renewal, "
+                        "and Wi-Fi client isolation or switched-network forwarding "
+                        "can hide other clients. Verify the selected adapter and "
+                        "observe a device reconnect or renew its lease."
+                    ),
+                }
+            return {
+                "state": "OBSERVING",
+                "interface": interface,
+                "capture_filter": DHCP_CAPTURE_FILTER,
+                "messages": messages,
+                "reason": f"{messages} DHCP messages observed on {interface}",
+            }
         return {"state": "UNKNOWN", "reason": s.get("error") or "state unknown"}
 
     def stop(self):
@@ -3989,7 +4034,7 @@ class DHCPEngine(threading.Thread):
                     f"interface={self.iface}; exit_code={self.proc.returncode}; "
                     f"stderr={diagnostic}")
             self.state(status="ONLINE", error="", last_error="", failure_streak=0,
-                       last_started=now_text(),
+                       last_started=now_text(), capture_filter=DHCP_CAPTURE_FILTER,
                        capture_field_count=len(self.capture_field_map),
                        missing_optional_fields=self.missing_capture_fields[:])
             try:
@@ -4093,6 +4138,7 @@ class DHCPEngine(threading.Thread):
                 if rogue:
                     DHCP_STATE["rogue"] += 1
                 DHCP_STATE["last_event"] = f"{mtname} from {cmac}"
+                DHCP_STATE["last_packet_at"] = ts
         except Exception as e:
             self.state(error=f"DHCP parse: {e}")
 
@@ -7837,29 +7883,63 @@ def deep_fingerprint(devices):
     if not ips:
         return False
 
-    # These explicitly selected NSE scripts are classified safe/discovery by
-    # Nmap. We do not use -sC or broad script categories.
+    profile = deep_scan_profile(len(ips), FINGERPRINT_TOP_PORTS)
+    update_job(
+        phase="Deep identity fingerprinting", percent=48,
+        message=(f"Bounded Nmap enrichment: {profile['tcp_top_ports']} TCP ports "
+                 f"across {len(ips)} hosts; per-host cap "
+                 f"{profile['tcp_host_timeout']}s.")
+    )
+
+    # Use only explicitly selected safe discovery scripts. Per-host and
+    # whole-process budgets prevent filtered devices from holding the scan
+    # open for several minutes. The fallback preserves service evidence.
     base = [
-        str(NMAP), "-sT", "-sV", "--version-intensity", "5", "--reason",
-        "--top-ports", str(FINGERPRINT_TOP_PORTS), "-O", "--osscan-limit",
-        "--max-os-tries", "1", "--script",
-        "smb-os-discovery,ssl-cert", "--script-timeout", "12s", "-oX", "-"
+        str(NMAP), "-sT", "-sV", "--version-intensity", "4", "--reason",
+        "--max-retries", "1", "--host-timeout", f"{profile['tcp_host_timeout']}s",
+        "--max-rate", "300", "--top-ports", str(profile["tcp_top_ports"]),
+        "-O", "--osscan-limit", "--max-os-tries", "1", "--script",
+        "smb-os-discovery,ssl-cert", "--script-timeout", "8s", "-oX", "-"
     ]
+    first_error = ""
     try:
         r = subprocess.run(base + ips, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=180)
-        if r.returncode != 0 or not r.stdout.strip():
-            # The fallback deliberately avoids raw-packet OS detection and
-            # NSE so service discovery can still complete without elevation.
+                           encoding="utf-8", errors="replace",
+                           timeout=profile["tcp_timeout"])
+    except subprocess.TimeoutExpired:
+        r = None
+        first_error = (
+            f"Full TCP/OS pass exceeded {profile['tcp_timeout']} seconds; "
+            "retrying with a smaller service set."
+        )
+
+    try:
+        if r is None or r.returncode != 0 or not r.stdout.strip():
+            # Fallback avoids OS detection and NSE, reduces port volume and has
+            # its own strict host/process timeouts. No credentials or exploit probes.
             fallback = [
-                str(NMAP), "-sT", "-sV", "--version-intensity", "5",
-                "--reason", "--top-ports", str(FINGERPRINT_TOP_PORTS), "-oX", "-"
+                str(NMAP), "-sT", "-sV", "--version-light", "--reason",
+                "--max-retries", "1",
+                "--host-timeout", f"{profile['tcp_fallback_host_timeout']}s",
+                "--max-rate", "300",
+                "--top-ports", str(profile["tcp_fallback_top_ports"]), "-oX", "-"
             ]
-            r = subprocess.run(fallback + ips, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", timeout=150)
+            fallback_timeout = profile["tcp_fallback_timeout"]
+            try:
+                r = subprocess.run(fallback + ips, capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace",
+                                   timeout=fallback_timeout)
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"Bounded Nmap fallback exceeded {fallback_timeout} seconds."
+                ) from exc
+            if r.returncode != 0 or not r.stdout.strip():
+                detail = _clean(r.stderr or first_error or "No XML output from bounded Nmap passes.", 300)
+                raise RuntimeError("Nmap deep fingerprinting failed: " + detail)
             for dev in devices:
                 dev["collection_notes"].append(
-                    "Nmap safe TCP scripts unavailable; used service/OS scan fallback."
+                    "Used reduced bounded TCP service fallback; full OS/script pass "
+                    + (first_error or "was unavailable.")
                 )
         if not r.stdout.strip():
             ts = now_text()
@@ -7937,15 +8017,17 @@ def deep_fingerprint(devices):
         # bounded optional pass; failure never discards the TCP results.
         udp_command = [
             str(NMAP), "-sU", "-sV", "--version-light", "--reason",
-            "--max-retries", "1", "--host-timeout", "18s",
+            "--max-retries", "0",
+            "--host-timeout", f"{profile['udp_host_timeout']}s",
             "-p", "137,161,1900,3702,5353",
             "--script", "upnp-info,dns-service-discovery",
-            "--script-timeout", "12s", "-oX", "-"
+            "--script-timeout", "8s", "-oX", "-"
         ]
         try:
             udp_result = subprocess.run(
                 udp_command + ips, capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=100
+                encoding="utf-8", errors="replace",
+                timeout=profile["udp_timeout"]
             )
             if udp_result.returncode == 0 and udp_result.stdout.strip():
                 udp_root = ET.fromstring(udp_result.stdout)

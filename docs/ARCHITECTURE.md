@@ -1,4 +1,4 @@
-# NetworkRadar architecture — repository snapshot 12.3.0
+# NetworkRadar architecture — repository snapshot 13.4.0
 
 ## Runtime overview
 
@@ -7,6 +7,8 @@ The application runtime is still centred on `networkradar.py`. It retains schema
 The dashboard markup lives in `index.html`; its responsive stylesheet and browser client live in `networkradar.css` and `dashboard.js`. The Python server reads the HTML template, substitutes the application version and serves the assets locally.
 
 ## Reusable modules
+
+- `discovery.scan_budget` — adaptive TCP/OS and UDP deep-scan budgets with per-host and whole-process limits.
 
 The `networkradar_modules` package contains components now used by the running application:
 

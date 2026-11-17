@@ -1,3 +1,23 @@
+# NetworkRadar 13.4.0 — Bounded Discovery and Faster Identity Enrichment
+
+## Scan performance and reliability
+- Replaces the fixed deep-scan budget with an adaptive profile based on the number of discovered hosts.
+- Uses a smaller port set for larger inventories, bounded Nmap process timeouts, per-host timeouts and a reduced service-only fallback.
+- Adds bounded retry behaviour and rate caps; TCP/OS and targeted UDP enrichment can no longer each consume the previous 180/150/100-second process budgets.
+- Runs independent TLS certificate, explicitly configured SNMPv3 and service-banner enrichment concurrently across devices. Each module retains its own authorisation checks and per-device failures do not cancel other results.
+- Keeps full identity evidence fusion and historical persistence intact.
+
+## DHCP capture diagnostics
+- Reports the selected TShark interface and capture filter when no DHCP frames have been observed.
+- Explains that a healthy passive capture with zero frames is not necessarily broken: DHCP is most visible during acquisition/renewal, while switched Wi-Fi/client isolation can hide other clients.
+- Records the timestamp of the latest observed DHCP message.
+
+## Validation and limitations
+- Adds unit coverage for adaptive scan budgets and clamping.
+- Existing Windows CI remains the source of compile, dashboard syntax and regression-test results.
+- A live authorised Windows scan is still required to measure real-world duration and confirm DHCP visibility on the selected adapter.
+- No active DHCP lease requests, credential guessing, exploit probes, destructive database changes or automatic firewall policy changes are introduced.
+
 # NetworkRadar 13.3.3 — Enforce Network Authorisation for Active Discovery
 
 ## Security and discovery-mode correctness
