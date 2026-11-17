@@ -129,6 +129,7 @@ def rank_evidence(evidence: Iterable[Any], *, now: datetime | None = None,
     ignored = 0
     for raw in evidence or []:
         source, attribute, value, confidence, evidence_class, observed_at = _row_parts(raw)
+        attribute = attribute.removeprefix("Identity observation:").strip()
         if not attribute or not value or value.casefold() in _PLACEHOLDERS:
             ignored += 1
             continue
