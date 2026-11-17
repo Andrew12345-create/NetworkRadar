@@ -15,6 +15,9 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertEqual(content.count("{"), content.count("}"))
         self.assertIn("#sideNavigation", content)
         self.assertIn(".terminal-output", content)
+        self.assertIn("NETWORKRADAR 13.7.0", content)
+        self.assertIn(":focus-visible", content)
+        self.assertIn("prefers-reduced-motion:reduce", content)
 
     def test_dashboard_javascript_is_a_real_nonempty_asset(self):
         js = ROOT / "dashboard.js"
