@@ -237,6 +237,8 @@ class IdentitySubscanCoordinator:
                            key=lambda item: (item["state"], item["next_attempt_at"] or float("inf")))
             processed = self._counts["resolved"] + self._counts["exhausted"]
             total = len(items)
+            attempted_targets = sum(1 for item in items if int(item.get("attempts", 0)) > 0)
+            total_attempts = sum(int(item.get("attempts", 0)) for item in items)
             return {
                 "enabled": not self._paused,
                 "paused": self._paused,
@@ -245,6 +247,9 @@ class IdentitySubscanCoordinator:
                 "counts": dict(self._counts),
                 "total_targets": total,
                 "processed_targets": processed,
+                "attempted_targets": attempted_targets,
+                "total_attempts": total_attempts,
+                "unattempted_targets": max(0, total - attempted_targets),
                 "queue_progress_percent": round((processed / total) * 100) if total else 0,
                 "progress": dict(self._progress),
                 "last_result": dict(self._last_result),

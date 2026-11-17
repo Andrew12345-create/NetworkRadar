@@ -7,6 +7,10 @@ from .recognition import recognition_family_compatible
 from .quality import assess_identity_quality
 from .protocols import analyse_mdns_services, parse_ssdp_message
 from .investigation import build_identity_next_steps
+from .evidence_intelligence import (
+    evidence_freshness, rank_evidence, reconcile_identity_assessment,
+    plan_investigation_methods,
+)
 from .subscan import IdentitySubscanCoordinator
 
 __all__ = [
@@ -15,4 +19,6 @@ __all__ = [
     "lookup_ieee_assignment", "parse_ieee_registry", "recognition_family_compatible",
     "analyse_mdns_services", "parse_ssdp_message",
     "assess_identity_quality", "build_identity_next_steps", "IdentitySubscanCoordinator",
+    "evidence_freshness", "rank_evidence", "reconcile_identity_assessment",
+    "plan_investigation_methods",
 ]

@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 13.7.0 — Dashboard consistency and accessibility refinements.
+NetworkRadar 14.2.0 — Evidence intelligence, identity reconciliation and adaptive investigation.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
@@ -307,11 +307,18 @@ from networkradar_modules.core.startup import (
 from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.diagnostics.scan_profiler import ScanProfiler, measure_phase
 from networkradar_modules.identity.investigation import build_identity_next_steps
+from networkradar_modules.identity.evidence_intelligence import (
+    rank_evidence, reconcile_identity_assessment,
+)
 from networkradar_modules.identity.subscan import IdentitySubscanCoordinator
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
 from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
 from networkradar_modules.discovery.tcp_sweep import sweep_tcp_hosts
 from networkradar_modules.discovery.scan_budget import deep_scan_profile
+from networkradar_modules.discovery.adaptive_fingerprint import build_fingerprint_plan
+from networkradar_modules.discovery.port_intelligence import run_full_tcp_scan, validate_target as validate_full_port_target
+from networkradar_modules.identity.domain_intelligence import build_domain_activity
+from networkradar_modules.identity.cache import IdentityLookupCache
 from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
 from networkradar_modules.discovery.neighbors import (
     collect_windows_neighbor_cache, merge_reachable_neighbors,
@@ -1800,11 +1807,21 @@ def local_identity():
             pass
     return ident
 
+_IDENTITY_NAME_CACHE = IdentityLookupCache(
+    positive_ttl=600.0, negative_ttl=60.0, max_entries=2048
+)
+
 def reverse_dns(ip):
-    return _reverse_dns(ip)
+    scope = str(current_network() or "")
+    return _IDENTITY_NAME_CACHE.get(
+        "reverse_dns", ip, scope, lambda: _reverse_dns(ip)
+    )
 
 def netbios_name(ip):
-    return _netbios_name(ip)
+    scope = str(current_network() or "")
+    return _IDENTITY_NAME_CACHE.get(
+        "netbios", ip, scope, lambda: _netbios_name(ip)
+    )
 
 def _same_private_host(src_ip, url):
     return is_same_private_http_host(src_ip, url)
@@ -2282,6 +2299,18 @@ def advanced_device_recognition(device):
     now comes from evidence families rather than additive MAC/hostname bonuses.
     """
     profile = analyse_device_profile(device)
+    evidence_rows = []
+    for fact in profile.get("evidence", []):
+        evidence_rows.append({
+            "source": fact.get("source", fact.get("family", "Identity engine")),
+            "attribute": fact.get("family", "identity"),
+            "value": fact.get("value", ""),
+            "confidence": int(round(float(fact.get("reliability", 0) or 0) * 100)),
+            "evidence_class": fact.get("evidence_class", "OBSERVED"),
+            "last_seen": now_text(),
+        })
+    evidence_rows.extend(device.get("_historical_identity_evidence", []) or [])
+    profile["evidence_intelligence"] = rank_evidence(evidence_rows)
     if profile.get("model"):
         device["model"] = profile["model"]
     if profile.get("manufacturer"):
@@ -3142,6 +3171,34 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                 ssdp = ssdp_scan(timeout=2.0)
         except Exception:
             pass
+    # Load timestamped prior observations once per scan. Historical facts are
+    # shown with freshness/conflict metadata but do not masquerade as current
+    # probe results or independently force a new device classification.
+    history_by_ip = defaultdict(list)
+    try:
+        scan_ips = sorted({str(dev.get("ip") or "") for dev in devices if dev.get("ip")})
+        if scan_ips:
+            placeholders = ",".join("?" for _ in scan_ips)
+            with DB_MANAGER.read() as conn:
+                history_rows = conn.execute(
+                    "SELECT ip,source,attribute,observed_value,confidence,evidence_class,last_seen "
+                    f"FROM device_identity_evidence WHERE ip IN ({placeholders}) "
+                    "ORDER BY last_seen DESC",
+                    tuple(scan_ips),
+                ).fetchall()
+            for row in history_rows:
+                ip_key = str(row[0])
+                if len(history_by_ip[ip_key]) >= 160:
+                    continue
+                history_by_ip[ip_key].append({
+                    "source": row[1], "attribute": row[2], "value": row[3],
+                    "confidence": row[4], "evidence_class": row[5],
+                    "last_seen": row[6],
+                })
+    except Exception:
+        history_by_ip = defaultdict(list)
+    for dev in devices:
+        dev["_historical_identity_evidence"] = history_by_ip.get(str(dev.get("ip") or ""), [])
     mdns_by_ip = defaultdict(list)
     for item in (mdns_rows or []):
         if item.get("ip") and item.get("records"):
@@ -3250,8 +3307,23 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
         for dev in devices:
             ip = dev["ip"]
             prior = conn.execute(
-                "SELECT hostname,manufacturer,device_type,os_guess,model FROM devices WHERE ip=?",
+                "SELECT hostname,manufacturer,device_type,os_guess,model,"
+                "identification_confidence,identity_category_confidence FROM devices WHERE ip=?",
                 (ip,)).fetchone()
+            retained_identity = ({
+                "device_type": prior[2], "identification_confidence": prior[5],
+                "identity_category_confidence": prior[6],
+            } if prior else {})
+            identity_decision = reconcile_identity_assessment(
+                {"device_type": dev.get("device_type", ""),
+                 "confidence": dev.get("identification_confidence", 0)},
+                retained_identity,
+            )
+            dev["identity_reconciliation"] = identity_decision
+            if isinstance(dev.get("recognition"), dict):
+                dev["recognition"]["reconciliation"] = identity_decision
+            accepted_type = identity_decision["accepted"]["device_type"]
+            accepted_confidence = identity_decision["accepted"]["confidence"]
             conn.execute("""UPDATE devices SET
                 mac=CASE WHEN ? IN ('','Unavailable') THEN mac ELSE ? END,
                 hostname=CASE WHEN ? IN ('','-','Unknown') THEN hostname ELSE ? END,
@@ -3277,30 +3349,29 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                  dev.get("device_name", f"Unidentified device at {ip}"),
                  dev.get("device_name", f"Unidentified device at {ip}"),
                  dev.get("friendly_name", ""), dev.get("friendly_name", ""),
-                 dev.get("device_type", ""), dev.get("device_type", ""),
+                 accepted_type, accepted_type,
                  dev.get("os_guess", ""), dev.get("os_guess", ""),
                  dev.get("model", ""), dev.get("model", ""),
-                 dev.get("identification_confidence", 0),
-                 dev.get("identification_confidence", 0),
+                 accepted_confidence,
+                 accepted_confidence,
                  dev.get("identification_methods", ""),
                  dev.get("identification_methods", ""),
                  dev.get("open_ports", ""), dev.get("open_ports", ""),
                  dev.get("service_summary", ""), dev.get("service_summary", ""),
                  ts, ip))
-            conn.execute("""UPDATE devices SET oui_manufacturer=?,reported_manufacturer=?,
+            conn.execute("""UPDATE devices SET
+                oui_manufacturer=CASE WHEN ?='' THEN oui_manufacturer ELSE ? END,
+                reported_manufacturer=CASE WHEN ?='' THEN reported_manufacturer ELSE ? END,
                 identity_conflicts=?,identity_category_confidence=CASE WHEN ?>=58 THEN ? ELSE identity_category_confidence END,
-                identity_last_assessed=?,
-                recognition_json=CASE WHEN ?>=58 OR identity_category_confidence<58
-                    THEN ? ELSE recognition_json END WHERE ip=?""",
-                (dev.get("oui_manufacturer", ""), dev.get("reported_manufacturer", ""),
+                identity_last_assessed=?,recognition_json=? WHERE ip=?""",
+                (dev.get("oui_manufacturer", ""), dev.get("oui_manufacturer", ""),
+                 dev.get("reported_manufacturer", ""), dev.get("reported_manufacturer", ""),
                  json.dumps(dev.get("identity_conflicts", [])),
-                 dev.get("identity_category_confidence", 0),
-                 dev.get("identity_category_confidence", 0), ts,
-                 dev.get("identity_category_confidence", 0),
+                 accepted_confidence, accepted_confidence, ts,
                  json.dumps(dev.get("recognition", {}), ensure_ascii=False), ip))
             if prior:
                 current_values = [dev.get("hostname", ""), dev.get("vendor", ""),
-                                  dev.get("device_type", ""), dev.get("os_guess", ""),
+                                  accepted_type, dev.get("os_guess", ""),
                                   dev.get("model", "")]
                 for attr, old_value, new_value in zip(
                         ("hostname", "manufacturer", "device_type", "os_guess", "model"),
@@ -3324,9 +3395,27 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
             for src, attr, val, conf, cls in dev.get("identity_evidence", []):
                 _add_identity_evidence(conn, dev, src, attr, val, conf, cls, APP_VERSION)
             persist_identity_assessments(conn, dev, dev.get("identity_assessments", []), ts)
+            persisted = conn.execute(
+                "SELECT device_name,device_type,identification_confidence FROM devices WHERE ip=?",
+                (ip,)).fetchone()
+            retained_name, retained_type, retained_confidence = (
+                persisted if persisted else ("", "", 0))
+            current_name = str(dev.get("device_name") or "")
+            current_type = str(dev.get("device_type") or "")
+            current_confidence = int(dev.get("identification_confidence") or 0)
+            record_event(conn, ip, "DEVICE_IDENTITY_ASSESSED",
+                         f"Current assessment: {current_name} / {current_type} "
+                         f"({current_confidence}%). Accepted inventory: "
+                         f"{retained_name} / {retained_type} ({int(retained_confidence or 0)}%). "
+                         f"Decision: {identity_decision['action']} — {identity_decision['explanation']}",
+                         category="discovery", severity="INFO",
+                         device_id=dev.get("device_id", ""))
+            # Preserve the legacy event for presence/history consumers, but make
+            # its payload explicit about current assessment versus retained state.
             record_event(conn, ip, "DEVICE_FINGERPRINTED",
-                         f"{dev.get('device_name')} | {dev.get('device_type')} | "
-                         f"{dev.get('identification_confidence')}%",
+                         f"Assessment {current_type} ({current_confidence}%); "
+                         f"accepted inventory {retained_type} ({int(retained_confidence or 0)}%); "
+                         f"{identity_decision['action']}.",
                          category="discovery", severity="INFO",
                          device_id=dev.get("device_id", ""))
     DB_MANAGER.write(_w)
@@ -4544,7 +4633,7 @@ def evaluate_presence_for_device(conn, device_id, prior_state=None):
     obs_rows = conn.execute(
         "SELECT timestamp FROM network_events WHERE device_id=? "
         "AND event_type IN ('DEVICE_FINGERPRINTED','NEW_DEVICE','DEVICE_RETURNED') "
-        "AND timestamp >= datetime('now','-7 days') "
+        "AND timestamp >= datetime('now','localtime','-7 days') "
         "ORDER BY timestamp DESC LIMIT 500", (device_id,)).fetchall()
     scan_rows = conn.execute(
         "SELECT timestamp FROM scans WHERE timestamp >= datetime('now','-7 days') "
@@ -5853,6 +5942,14 @@ def unknown_device_hunter(conn, limit=100):
         LIMIT ?""", (max(1,min(int(limit),250)),)).fetchall()
     results=[]
     active_authorised = is_authorized()
+    dhcp_capture_status = str(DHCP_STATE.get("status", "UNKNOWN")).upper()
+    queue_by_ip = {}
+    try:
+        queue_snapshot = IDENTITY_SUBSCAN.snapshot()
+        for target in queue_snapshot.get("targets", []):
+            queue_by_ip[str(target.get("ip") or "")] = target
+    except Exception:
+        queue_by_ip = {}
     for r in rows:
         ip = r[0]
         sources = [x[0] for x in conn.execute(
@@ -5862,11 +5959,23 @@ def unknown_device_hunter(conn, limit=100):
         dhcp_seen = bool(conn.execute(
             "SELECT 1 FROM dhcp_events WHERE client_ip=? LIMIT 1", (ip,)
         ).fetchone())
+        queue_target = queue_by_ip.get(ip, {})
+        queue_attempts = {}
+        if queue_target:
+            queue_attempts["nmap"] = {
+                "attempts": queue_target.get("attempts", 0),
+                "max_attempts": 3,
+                "state": queue_target.get("state", ""),
+                "next_eligible_at": queue_target.get("next_attempt_at"),
+            }
         profile = {
-            "ip": ip, "device_type": r[5] or "Unclassified network device",
+            "ip": ip, "status": r[9],
+            "device_type": r[5] or "Unclassified network device",
             "os_guess": r[6] or "Unknown", "model": r[7] or "",
             "identification_confidence": int(r[8] or 0),
             "open_ports": r[13] or "",
+            "dhcp_capture_status": dhcp_capture_status,
+            "investigation_attempts": queue_attempts,
         }
         guidance = build_identity_next_steps(
             profile, sources, dhcp_observed=dhcp_seen,
@@ -7606,6 +7715,34 @@ class Handler(BaseHTTPRequestHandler):
                         "domain": r[2], "query_type": r[3],
                         "response_code": r[4]} for r in rows])
 
+                if p.path == "/api/domain-intelligence":
+                    rows = conn.execute("""SELECT MAX(timestamp), client_ip, domain,
+                        query_type, COUNT(*) FROM dns_events
+                        WHERE is_response=0
+                          AND timestamp >= datetime('now','-7 days')
+                          AND COALESCE(client_ip,'') != ''
+                        GROUP BY client_ip, lower(domain)
+                        ORDER BY COUNT(*) DESC LIMIT 1200""").fetchall()
+                    return self.send_json(build_domain_activity(rows, limit=300))
+
+                if p.path == "/api/port-intelligence":
+                    rows = conn.execute("""SELECT timestamp,ip,device_id,completed,
+                        open_ports,detail FROM port_scan_observations
+                        WHERE scan_method='nmap-full-tcp'
+                        ORDER BY id DESC LIMIT 40""").fetchall()
+                    results = []
+                    for row in rows:
+                        try:
+                            detail = json.loads(row[5] or "{}")
+                        except (TypeError, ValueError):
+                            detail = {}
+                        results.append({"timestamp":row[0],"ip":row[1],
+                            "device_id":row[2],"completed":bool(row[3]),
+                            "open_ports":[int(x) for x in str(row[4] or "").split(",")
+                                if str(x).isdigit()],
+                            "detail":detail})
+                    return self.send_json(results)
+
                 if p.path == "/api/domains":
                     rows = conn.execute("""SELECT domain, query_count, risk_level
                         FROM domain_intel
@@ -7816,6 +7953,127 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local_request_allowed():
             return self.send_json({"error": "Local access only."}, 403)
         try:
+            if self.path == "/api/port-intelligence/scan":
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0 or length > 4096:
+                    return self.send_json({"error": "Invalid scan request body."}, 400)
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                if not isinstance(payload, dict) or payload.get("confirm") is not True:
+                    return self.send_json({"error": "Explicit confirmation is required for a full 65,535-port scan."}, 400)
+                if not is_authorized():
+                    return self.send_json({"error": "Full port intelligence is disabled until this network is explicitly authorised."}, 403)
+                with NET_LOCK:
+                    network_text = str(NET_CTX.get("network") or "")
+                try:
+                    target = validate_full_port_target(payload.get("ip", ""), network_text)
+                except ValueError as exc:
+                    return self.send_json({"error": str(exc)}, 400)
+                with DB_MANAGER.read() as conn:
+                    device_row = conn.execute(
+                        "SELECT * FROM devices WHERE ip=? LIMIT 1",
+                        (target,)).fetchone()
+                if not device_row or device_row["status"] != "ONLINE":
+                    return self.send_json({"error": "Target must be an ONLINE device in the current inventory."}, 409)
+                device = dict(device_row)
+                device_id = str(device.get("device_id") or "")
+                # Share the atomic scan slot with normal discovery and the identity worker.
+                with SCAN_SUBSCAN_GATE:
+                    with JOB_LOCK:
+                        main_scan_running = JOB_STATE.get("state") == "RUNNING"
+                    scan_busy = (MAIN_SCAN_RESERVED_EVENT.is_set() or main_scan_running
+                                 or SUBSCAN_ACTIVE_EVENT.is_set())
+                    if not scan_busy:
+                        SUBSCAN_ACTIVE_EVENT.set()
+                if scan_busy:
+                    return self.send_json({"error": "Another NetworkRadar scan is active. Retry when it finishes."}, 409)
+                try:
+                    try:
+                        result = run_full_tcp_scan(target, network_text, str(NMAP), timeout=190)
+                    except Exception as exc:
+                        detail = _clean(exc, 400)
+                        DB_MANAGER.write(lambda conn: (
+                            conn.execute("""INSERT INTO port_scan_observations(
+                                timestamp,ip,device_id,completed,open_ports,scan_method,detail)
+                                VALUES(?,?,?,0,'','nmap-full-tcp',?)""",
+                                (now_text(),target,device_id,detail)),
+                            record_event(conn,target,"FULL_TCP_PORT_SCAN_INCOMPLETE",
+                                detail,category="discovery",severity="INFO",device_id=device_id)
+                        ))
+                        return self.send_json({"error": detail, "completed": False}, 504 if isinstance(exc, TimeoutError) else 502)
+                    # Feed the full-range service evidence into the same identity
+                    # profiler used by routine Nmap enrichment; preserve stronger
+                    # persisted identity when this assessment remains low-confidence.
+                    device["ip"] = target
+                    device["port_numbers"] = list(result["open_ports"])
+                    device["open_ports"] = ", ".join(str(port) for port in result["open_ports"])
+                    device["nmap_service_intel"] = list(result["services"])
+                    device["services_found"] = [
+                        f"{item['port']}/tcp/{' '.join(x for x in (item['name'], item['product'], item['version'], item['extrainfo']) if x)}"
+                        for item in result["services"]
+                    ]
+                    device["service_summary"] = "; ".join(device["services_found"])[:700]
+                    device["identity_evidence"] = list(device.get("identity_evidence") or [])
+                    advanced_device_recognition(device)
+                    identity_assessments = assess_identity_evidence(
+                        device, device.get("identity_evidence", [])
+                    )
+                    current_type = str(device.get("device_type") or "Unclassified network device")
+                    current_confidence = int(device.get("identification_confidence") or 0)
+                    detail_json = json.dumps(result, ensure_ascii=False)
+                    ports_csv = ",".join(str(port) for port in result["open_ports"])
+                    def _save_full_port_intelligence(conn):
+                        ts = now_text()
+                        conn.execute("""INSERT INTO port_scan_observations(
+                            timestamp,ip,device_id,completed,open_ports,scan_method,detail)
+                            VALUES(?,?,?,?,?,'nmap-full-tcp',?)""",
+                            (ts,target,device_id,1,ports_csv,detail_json))
+                        conn.execute("""UPDATE devices SET
+                            open_ports=?,service_summary=?,
+                            identification_methods=CASE WHEN ?='' THEN identification_methods ELSE ? END,
+                            device_type=CASE WHEN ?>=58 THEN ? ELSE device_type END,
+                            identification_confidence=CASE WHEN ?>=58 THEN ? ELSE identification_confidence END,
+                            identity_category_confidence=CASE WHEN ?>=58 THEN ? ELSE identity_category_confidence END,
+                            recognition_json=CASE WHEN ?>=58 OR identity_category_confidence<58 THEN ? ELSE recognition_json END,
+                            reported_manufacturer=CASE WHEN ?='' THEN reported_manufacturer ELSE ? END,
+                            model=CASE WHEN ?='' THEN model ELSE ? END,
+                            identity_last_assessed=?,last_identified=? WHERE ip=?""",
+                            (device["open_ports"],device["service_summary"],
+                             device.get("identification_methods",""),device.get("identification_methods",""),
+                             current_confidence,current_type,current_confidence,current_confidence,
+                             current_confidence,current_confidence,
+                             current_confidence,json.dumps(device.get("recognition",{}),ensure_ascii=False),
+                             device.get("reported_manufacturer",""),device.get("reported_manufacturer",""),
+                             device.get("model",""),device.get("model",""),ts,ts,target))
+                        device["device_id"] = device_id
+                        for evidence in device.get("identity_evidence",[]):
+                            if isinstance(evidence,(list,tuple)) and len(evidence)>=5:
+                                _add_identity_evidence(conn,device,evidence[0],evidence[1],evidence[2],evidence[3],evidence[4],APP_VERSION)
+                        persist_identity_assessments(conn,device,identity_assessments,ts)
+                        for service in result["services"]:
+                            observation = f"{service['port']}/tcp {service['name']} {service['product']} {service['version']}".strip()
+                            conn.execute("""INSERT INTO device_observations(
+                                timestamp,ip,method,observation,confidence) VALUES(?,?,?,?,?)""",
+                                (ts,target,"Nmap full TCP service",observation,
+                                 78 if service.get("product") else 58))
+                        retained = conn.execute(
+                            "SELECT device_type,identification_confidence FROM devices WHERE ip=?",
+                            (target,)).fetchone()
+                        retained_type, retained_confidence = (
+                            retained[0],int(retained[1] or 0)) if retained else ("",0)
+                        record_event(conn,target,"DEVICE_IDENTITY_ASSESSED",
+                            f"Full-port evidence assessment: {current_type} ({current_confidence}%). "
+                            f"Persisted inventory: {retained_type} ({retained_confidence}%).",
+                            category="discovery",severity="INFO",device_id=device_id)
+                        record_event(conn,target,"FULL_TCP_PORT_SCAN_COMPLETED",
+                            f"Completed all TCP ports; {result['open_count']} open; "
+                            f"{result['duration_seconds']}s; identity evidence refreshed.",
+                            category="discovery",severity="INFO",device_id=device_id)
+                    DB_MANAGER.write(_save_full_port_intelligence)
+                    return self.send_json({"ok": True, "result": result,
+                        "identity_assessment": {"device_type": current_type,
+                            "confidence": current_confidence}}, 200)
+                finally:
+                    SUBSCAN_ACTIVE_EVENT.clear()
             if self.path in ("/api/phantom-access/ssh/hostkey", "/api/phantom-access/ssh/trust", "/api/phantom-access/ssh/connect", "/api/phantom-access/ssh/close"):
                 length = int(self.headers.get("Content-Length", "0"))
                 if length <= 0 or length > 16384:
@@ -8057,22 +8315,84 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
     """Run authorised TCP, OS, safe-script and targeted UDP identification."""
     if not devices or not is_authorized():
         return False
-    for dev in devices:
+    # Use the latest port-scan attempt as the fingerprint freshness clock.
+    # last_identified is intentionally unsuitable: passive evidence fusion
+    # refreshes it even when Nmap has not run.
+    all_ips = [str(d.get("ip") or "").strip() for d in devices if d.get("ip")]
+    last_fingerprint_at = {}
+    confidence_by_ip = {}
+    if all_ips:
+        try:
+            marks = ",".join("?" for _ in all_ips)
+            with DB_MANAGER.read() as conn:
+                rows = conn.execute(
+                    "SELECT ip, MAX(timestamp) FROM port_scan_observations "
+                    f"WHERE ip IN ({marks}) GROUP BY ip",
+                    all_ips,
+                ).fetchall()
+                confidence_rows = conn.execute(
+                    "SELECT ip, COALESCE(identification_confidence, 0) "
+                    f"FROM devices WHERE ip IN ({marks})",
+                    all_ips,
+                ).fetchall()
+            last_fingerprint_at = {
+                str(row[0]): row[1] for row in rows if row and row[0]
+            }
+            confidence_by_ip = {
+                str(row[0]): row[1] for row in confidence_rows if row and row[0]
+            }
+        except Exception as history_error:
+            # Fail open for coverage: if history cannot be read, treat targets
+            # as new rather than silently suppressing their first fingerprint.
+            for dev in devices:
+                dev.setdefault("collection_notes", []).append(
+                    "Adaptive fingerprint history unavailable; using new-device priority: "
+                    + _clean(history_error, 140)
+                )
+
+    planner_devices = [
+        {
+            **dev,
+            "identification_confidence": confidence_by_ip.get(
+                str(dev.get("ip") or ""), dev.get("identification_confidence", 0)
+            ),
+        }
+        for dev in devices
+    ]
+    plan = build_fingerprint_plan(
+        planner_devices, last_fingerprint_at, max_targets=8, max_udp_targets=3,
+        allowed_network=current_network(),
+    )
+    selected_ips = set(plan["targets"])
+    target_devices = [dev for dev in devices if str(dev.get("ip") or "") in selected_ips]
+    ips = [dev["ip"] for dev in target_devices if dev.get("ip")]
+    udp_ips = list(plan["udp_targets"])
+    if not ips:
+        if str(plan.get("policy") or "").startswith("scope validation failed"):
+            reason = "current authorised subnet is missing or invalid; active fingerprinting was blocked."
+        else:
+            reason = "no live device is due for a fresh fingerprint; recent attempts and retry cooldowns are being respected."
+        note = "Adaptive fingerprint scheduler deferred Nmap: " + reason
+        for dev in devices:
+            dev.setdefault("collection_notes", []).append(note)
+        return False
+
+    for dev in target_devices:
         dev["_port_scan_complete"] = False
         dev["port_numbers"] = []
         dev["udp_port_numbers"] = []
         dev["services_found"] = []
         dev["nmap_service_intel"] = []
         dev["nmap_script_intel"] = []
-        dev["collection_notes"] = []
-    ips = [d["ip"] for d in devices if d.get("ip")]
-    if not ips:
-        return False
+        dev["collection_notes"] = list(dev.get("collection_notes") or [])
 
-    profile = deep_scan_profile(len(ips), FINGERPRINT_TOP_PORTS)
-    progress_message = (f"Bounded Nmap enrichment: {profile['tcp_top_ports']} TCP ports "
-                         f"across {len(ips)} hosts; per-host cap "
-                         f"{profile['tcp_host_timeout']}s.")
+    profile = deep_scan_profile(len(ips), min(FINGERPRINT_TOP_PORTS, 50))
+    progress_message = (
+        f"Adaptive fingerprinting selected {len(ips)}/{len(devices)} live hosts "
+        f"({len(udp_ips)} targeted UDP); {profile['tcp_top_ports']} TCP ports, "
+        f"{profile['tcp_timeout']}s process budget and "
+        f"{profile['tcp_host_timeout']}s per-host cap."
+    )
     if progress_callback:
         progress_callback("Nmap TCP/OS and service fingerprint", 15,
                           progress_message + " Nmap does not expose reliable live percentage progress.")
@@ -8127,7 +8447,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
             if r.returncode != 0 or not r.stdout.strip():
                 detail = _clean(r.stderr or first_error or "No XML output from bounded Nmap passes.", 300)
                 raise RuntimeError("Nmap deep fingerprinting failed: " + detail)
-            for dev in devices:
+            for dev in target_devices:
                 dev["collection_notes"].append(
                     "Used reduced bounded TCP service fallback; full OS/script pass "
                     + (first_error or "was unavailable.")
@@ -8137,11 +8457,11 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
             DB_MANAGER.write(lambda conn: [conn.execute(
                 "INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail) VALUES(?,?,?,?,?,?,?)",
                 (ts, d["ip"], d.get("device_id", ""), 0, "", "nmap",
-                 "Nmap returned no XML output")) for d in devices])
+                 "Nmap returned no XML output")) for d in target_devices])
             return False
 
         root = ET.fromstring(r.stdout)
-        by_ip = {d["ip"]: d for d in devices}
+        by_ip = {d["ip"]: d for d in target_devices}
 
         def collect_scripts(host, dev):
             for script in host.findall(".//script"):
@@ -8215,12 +8535,14 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
             "--host-timeout", f"{profile['udp_host_timeout']}s",
             "-p", "137,161,1900,3702,5353",
             "--script", "upnp-info,dns-service-discovery",
-            "--script-timeout", "8s", "-oX", "-"
+            "--script-timeout", "6s", "-oX", "-"
         ]
         try:
+            if not udp_ips:
+                raise RuntimeError("No UDP targets selected by the adaptive scheduler.")
             with measure_phase(profiler, "fingerprint.nmap_targeted_udp"):
                 udp_result = subprocess.run(
-                    udp_command + ips, capture_output=True, text=True,
+                    udp_command + udp_ips, capture_output=True, text=True,
                     encoding="utf-8", errors="replace",
                     timeout=profile["udp_timeout"]
                 )
@@ -8257,14 +8579,14 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
                         })
             else:
                 detail = _clean(udp_result.stderr or "No UDP XML results.", 220)
-                for dev in devices:
+                for dev in target_devices:
                     dev["collection_notes"].append("Targeted UDP identification: " + detail)
         except Exception as udp_error:
             detail = _clean(udp_error, 220)
-            for dev in devices:
+            for dev in target_devices:
                 dev["collection_notes"].append("Targeted UDP identification unavailable: " + detail)
 
-        for dev in devices:
+        for dev in target_devices:
             dev["port_numbers"] = sorted(set(dev.get("port_numbers", [])))
             dev["udp_port_numbers"] = sorted(set(dev.get("udp_port_numbers", [])))
             dev["open_ports"] = ", ".join(map(str, dev["port_numbers"])) if dev["_port_scan_complete"] else ""
@@ -8276,7 +8598,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
                               "Saving discovered ports, services and safe-script observations.")
         ts = now_text()
         def _save(conn):
-            for dev in devices:
+            for dev in target_devices:
                 did = dev.get("device_id", "")
                 if not did:
                     match = conn.execute(
@@ -8303,10 +8625,26 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
         if progress_callback:
             progress_callback("Nmap fingerprint complete", 70,
                               "Nmap TCP/OS, service and targeted UDP passes have returned.")
-        return all(d.get("_port_scan_complete") for d in devices)
+        return all(d.get("_port_scan_complete") for d in target_devices)
     except Exception as error:
+        detail = _clean(error, 300)
+        # Persist failed attempts as incomplete observations so the adaptive
+        # scheduler applies the same cooldown to timeouts and malformed output.
+        try:
+            failed_at = now_text()
+            def _record_failed_attempts(conn):
+                for dev in target_devices:
+                    conn.execute(
+                        "INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail) "
+                        "VALUES(?,?,?,?,?,?,?)",
+                        (failed_at, dev.get("ip", ""), dev.get("device_id", ""),
+                         0, "", "nmap", "Adaptive Nmap attempt failed: " + detail),
+                    )
+            DB_MANAGER.write(_record_failed_attempts)
+        except Exception:
+            pass
         NMAP_LOG.write_text(
-            f"[{now_text()}] Deep fingerprint: {_clean(error, 500)}",
+            f"[{now_text()}] Deep fingerprint: {detail}",
             encoding="utf-8"
         )
         return False

@@ -1,4 +1,35 @@
-# NetworkRadar 13.7.0
+# NetworkRadar 14.2.0
+
+## Evidence intelligence and identity reconciliation (14.2.0)
+
+- Separates the latest scan assessment from the accepted inventory identity. A zero-evidence or low-confidence current pass no longer downgrades a previously supported device category.
+- Adds a deterministic reconciliation policy: new categories must meet the minimum confidence threshold and exceed a conflicting retained classification by a configurable margin before replacement. Same-category evidence can refresh confidence without category churn.
+- Records the reconciliation action and explanation in the recognition payload and identity assessment event, including no-new-evidence, weaker-assessment, same-category refresh and stronger-conflict outcomes.
+- Adds freshness-aware evidence aggregation. Undated evidence is not treated as fresh; observations older than the configured maximum age contribute no current score; duplicate observations from the same protocol family are capped.
+- Keeps competing values visible rather than turning missing observations into negative evidence. Confidence remains a heuristic evidence score, not a probability.
+- Upgrades Unknown Device Hunter guidance so DHCP collection failures and previous unsuccessful attempts do not trigger the same high-priority recommendation indefinitely. A passive DHCP observation is not forced by renewing a lease.
+- Adds a read-only investigation planner that distinguishes already-observed methods, cooldowns, offline waiting, missing authorisation and unavailable collectors. Planning never sends packets.
+- Adds regression tests for evidence expiry, duplicate-source caps, independent evidence, identity retention/replacement, offline deferral, DHCP collector failure and authorisation gates.
+- No destructive migration, credential guessing, automatic device merging, quarantine or firewall changes are introduced.
+
+## Adaptive fingerprint scheduling (14.0.0)
+
+- Adds a pure, testable scheduler that prioritises never-fingerprinted devices, then weak identities after a 15-minute retry cooldown, medium-confidence identities after 6 hours, and established identities after 24 hours.
+- Uses the latest Nmap attempt timestamp, including incomplete attempts, so filtered or slow devices are not immediately hammered again.
+- Hydrates confidence from the persistent inventory and freshness from port-scan history; it does not confuse the frequently refreshed `last_identified` field with an actual Nmap run.
+- Caps a main deep-fingerprint pass at 8 selected private IPv4 hosts and targeted UDP discovery at the 3 highest-priority selected hosts.
+- Leaves deferred devices in the inventory and preserves their existing port/service observations; the low-priority identity subscan remains responsible for one-host follow-up work.
+- Tightens TCP/OS, fallback and UDP process/per-host budgets. The existing authorisation gate and safe Nmap script allow-list remain unchanged.
+- Adds regression tests for priority ordering, cooldowns, refresh intervals, private-address filtering, deduplication and hard target limits.
+- No database migration or new network protocol is introduced.
+
+## Embedded OS identity recognition (13.8.0)
+
+- Recognises embedded RTOS fingerprints including VxWorks, QNX, eCos, ThreadX, FreeRTOS and Zephyr.
+- Adds a broad "Embedded / appliance device" hypothesis when Nmap OS or safe script evidence supports that family.
+- Reports the OS family as "Embedded / appliance OS" without guessing a physical manufacturer, exact product role or hardware model.
+- Keeps the NIC/OUI registrant separate from the device manufacturer.
+- Adds regression coverage for the observed VxWorks case. No database migration or new network probes are introduced.
 
 ## Dashboard consistency and accessibility (13.7.0)
 
@@ -47,7 +78,9 @@
 
 ## Current release
 
-NetworkRadar 13.7.0 adds an additive dashboard consistency and accessibility layer on top of the 13.6.1 identity subscan coordination release. The discovery engine, identity evidence model, database schema and network-authorisation boundaries are unchanged. Live Windows/Nmap/Npcap and browser validation remain required.
+NetworkRadar 14.2.0 adds freshness-aware evidence diagnostics, conservative identity reconciliation and attempt-aware unknown-device investigation on top of the 14.1 full-port and DNS intelligence foundation. Main Nmap work is limited to the highest-priority live private IPv4 targets, recent attempts are cooled down, and TCP/UDP process budgets are tightened. Existing inventory and deferred targets are retained; explicit authorisation and conservative identity claims remain unchanged. Windows/Nmap live validation is required.
+
+NetworkRadar 13.8.0 adds evidence-backed recognition for embedded real-time operating-system fingerprints, including VxWorks, QNX, eCos, ThreadX, FreeRTOS and Zephyr. It can classify a device broadly as an embedded/appliance device when an Nmap OS or script fingerprint supports that family; it does not infer the device manufacturer, product role or exact model. The release preserves existing database records and network-authorisation boundaries. Windows/Nmap live validation remains required.
 
 ## Windows dashboard startup reliability (13.1.1)
 
@@ -197,6 +230,16 @@ The core application uses the Python standard library. Paramiko is optional and 
 
 The dashboard opens at **http://127.0.0.1:8766** by default.
 
+
+## NetworkRadar 14.1.0 — Full-port and domain intelligence
+
+- **Full TCP Port Intelligence** is an explicit single-device action for an ONLINE host on the currently authorised private IPv4 subnet. It tests all 65,535 TCP ports with bounded rate/time limits and lightweight service detection. It is not a subnet-wide full scan and does not run exploit scripts or credential attempts. Discovered service fingerprints are fed into the existing device identity profiler and evidence history.
+- **Domain & Search-Provider Intelligence** groups observed DNS queries by device, domain, category and known provider over seven days. It can show that a device queried a search-provider domain; it cannot show the search phrase typed into HTTPS search, page paths or page contents.
+- **Identity assessment timeline** now distinguishes the latest assessment from the retained inventory identity when weaker evidence is deliberately not allowed to overwrite a stronger prior classification.
+- Reverse-DNS and NetBIOS lookups use a short-lived, network-scoped cache; full-port scans share the normal scan reservation gate and cannot overlap a main or identity scan.
+- **Investigation queue metrics** distinguish targets attempted from targets resolved or retry-exhausted.
+
+All active full-port scans require explicit current network authorisation, an online inventory target, subnet membership and a second confirmation. DNS reporting is metadata-only; it does not decrypt or intercept HTTPS.
 
 ## Strong network anchor detection fix (12.4.0)
 

@@ -52,12 +52,26 @@ async function openDevice(ip){
   identity+='<div class="quality-meta"><span>'+esc(iq.evidence_count??ev.length)+' evidence records</span><span>'+esc(iq.independent_families??0)+' source families</span><span>'+esc((iq.source_families||[]).join(' · ')||'No source families yet')+'</span></div>';
   if(iq.limitations?.length)identity+='<div class="hint quality-limit">'+iq.limitations.map(esc).join(' ')+'</div>';
   identity+='</section>';
+  const reconciliation=rec.reconciliation||d.identity_reconciliation||{};
+  if(reconciliation.accepted){
+   identity+='<section class="identity-quality"><div class="identity-quality-head"><div><span class="label">IDENTITY RECONCILIATION · 14.2</span><h3>Current assessment vs accepted identity</h3><p>The latest scan is not automatically allowed to replace a stronger retained classification.</p></div><div class="quality-score"><strong>'+esc(reconciliation.action||"UNKNOWN")+'</strong><span>decision</span></div></div>';
+   identity+=deviceProfileCards([["CURRENT ASSESSMENT",reconciliation.current?.device_type||"Unknown"],["CURRENT CONFIDENCE",(reconciliation.current?.confidence??0)+"%"],["ACCEPTED INVENTORY",reconciliation.accepted?.device_type||d.device_type||"Unknown"],["ACCEPTED CONFIDENCE",(reconciliation.accepted?.confidence??d.identification_confidence??0)+"%"],["PREVIOUS IDENTITY",reconciliation.previous?.device_type||"None"],["REPLACEMENT MARGIN",reconciliation.replacement_margin??8]]);
+   identity+='<div class="notice">'+esc(reconciliation.explanation||"No reconciliation explanation available.")+'</div></section>';
+  }
+  const evidenceIntel=rec.evidence_intelligence||{};
+  const evidenceAttributes=evidenceIntel.attributes||{};
+  const evidenceRows=Object.keys(evidenceAttributes).map(k=>({attribute:k,value:evidenceAttributes[k].value,confidence:evidenceAttributes[k].confidence,independent_sources:evidenceAttributes[k].independent_sources,sources:(evidenceAttributes[k].sources||[]).join(" · "),conflict:evidenceAttributes[k].conflict?"CONFLICT":"—"}));
+  if(evidenceRows.length){
+   identity+='<h3>FRESHNESS-AWARE EVIDENCE INTELLIGENCE</h3><div class="hint">Repeated observations from one protocol family are capped. Old or undated evidence does not receive a fresh score; competing values remain visible.</div>';
+   identity+=deviceRows(evidenceRows,[["ATTRIBUTE","attribute"],["VALUE","value"],["SCORE","confidence"],["INDEPENDENT FAMILIES","independent_sources"],["SOURCES","sources"],["CONFLICT","conflict"]]);
+   identity+='<div class="hint">Historical evidence considered: '+esc(evidenceIntel.evidence_count??0)+' · ignored placeholders: '+esc(evidenceIntel.ignored_count??0)+'</div>';
+  }
   identity+='<h3>WHY NETWORKRADAR THINKS THIS IS THIS DEVICE</h3>';
   identity+=deviceRows(ass,[['ATTRIBUTE','attribute'],['ASSESSED VALUE','value'],['CONFIDENCE','confidence'],['STATUS','status'],['EVIDENCE COUNT','evidence_count'],['INDEPENDENT SOURCES','independent_sources'],['RATIONALE','rationale']],'No persisted attribute assessments yet.');
   identity+='<h3>RAW IDENTITY EVIDENCE</h3>'+deviceRows(ev,[['TIME','timestamp'],['SOURCE','source'],['ATTRIBUTE','attribute'],['OBSERVED VALUE','value'],['CONFIDENCE','confidence'],['CLASS','class']]);
   if(rec.category){identity+=`<div class="notice"><b>${esc(rec.category)}</b> · ${esc(rec.confidence||0)}% · ${esc(rec.status||'UNKNOWN')}</div>`;identity+=deviceRows(rec.matches||[],[['MATCH','matched'],['CLASSIFICATION','category'],['SOURCE FAMILY','source_family'],['WEIGHT','weight']],'No signature matches.');}
   const osProfile=rec.operating_system||{};
-  identity+='<section class="identity-quality"><div class="identity-quality-head"><div><span class="label">NETWORKRADAR IDENTITY ENGINE 13.0</span><h3>Evidence-fused device profile</h3><p>Independent protocol families are scored separately. Repeated observations from one family cannot manufacture extra confidence.</p></div><div class="quality-score"><strong>'+esc(rec.confidence??0)+'</strong><span>evidence score</span></div></div>';
+  identity+='<section class="identity-quality"><div class="identity-quality-head"><div><span class="label">NETWORKRADAR IDENTITY ENGINE 14.2</span><h3>Evidence-fused device profile</h3><p>Independent protocol families are scored separately. Repeated observations from one family cannot manufacture extra confidence.</p></div><div class="quality-score"><strong>'+esc(rec.confidence??0)+'</strong><span>evidence score</span></div></div>';
   identity+=deviceProfileCards([["SELECTED CATEGORY",rec.selected_category||rec.category||"Unclassified"],["PROFILE STATUS",rec.status||"UNKNOWN"],["INDEPENDENT SOURCE FAMILIES",(rec.source_families||[]).length],["OS FAMILY",osProfile.family||"Not resolved"],["REPORTED MODEL",rec.model||"Not reported"],["REPORTED MANUFACTURER",rec.manufacturer||"Not reported"],["TCP PORTS",(rec.tcp_ports||[]).join(", ")||"Not observed"],["UDP PORTS",(rec.udp_ports||[]).join(", ")||"Not observed"],["NMAP SAFE SCRIPTS",(rec.nmap_scripts||[]).join(", ")||"Not collected"]]);
   identity+='<div class="quality-meta"><span>Evidence families: '+esc((rec.source_families||[]).join(" · ")||"None")+'</span></div>';
   if(osProfile.candidates?.length)identity+='<h3>OPERATING SYSTEM EVIDENCE</h3>'+deviceRows(osProfile.candidates,[["SOURCE","source"],["OBSERVED OS","value"],["RELIABILITY","reliability"]]);
@@ -347,10 +361,46 @@ function renderScanMonitor(job){
  }else if(list){list.innerHTML='<li>Waiting for scan activity.</li>';}
 }
 
+function renderIdentityTimeline(events){
+ const rows=(Array.isArray(events)?events:[]).filter(item=>item.event_type==="DEVICE_IDENTITY_ASSESSED").slice(0,40);
+ $("identityTimelineRows").innerHTML=rows.map(item=>'<tr><td>'+esc(item.timestamp||"—")+'</td><td class="mono">'+esc(item.ip||"—")+'</td><td>'+esc(item.details||"—")+'</td></tr>').join("")||'<tr><td colspan="3">No identity assessment events yet. Run a scan to populate this timeline.</td></tr>';
+}
+
+function renderDomainIntelligence(payload){
+ const activity=Array.isArray(payload.activity)?payload.activity:[];
+ const providers=Array.isArray(payload.search_providers)?payload.search_providers:[];
+ $("domainIntelTotal").textContent=(Number(payload.observed_query_count)||0).toLocaleString();
+ $("domainIntelPairs").textContent=(Number(payload.unique_device_domain_pairs)||0).toLocaleString();
+ $("domainIntelSearch").textContent=providers.reduce((sum,item)=>sum+(Number(item.query_count)||0),0).toLocaleString();
+ $("domainIntelRows").innerHTML=activity.map(item=>'<tr><td class="mono">'+esc(item.client_ip)+'</td><td>'+esc(item.domain)+'</td><td>'+esc(item.category)+'</td><td>'+esc(item.provider||"—")+'</td><td>'+Number(item.query_count||0)+'</td><td>'+esc(item.last_seen||"—")+'</td></tr>').join("")||'<tr><td colspan="6">No DNS domain observations in the last 7 days.</td></tr>';
+ $("domainIntelLimits").textContent=(payload.limitations||[]).join(" · ");
+}
+function renderFullPortHistory(rows){
+ $("fullPortRows").innerHTML=rows.map(item=>{
+  const detail=item.detail||{},ports=Array.isArray(detail.open_ports)?detail.open_ports:(item.open_ports||[]);
+  const names=Array.isArray(detail.services)?detail.services.map(s=>s.port+"/"+s.protocol+" "+[s.name,s.product,s.version].filter(Boolean).join(" ")):ports.map(p=>String(p)+"/tcp");
+  return '<tr><td>'+esc(item.timestamp||"—")+'</td><td class="mono">'+esc(item.ip)+'</td><td>'+(item.completed?"COMPLETE":"INCOMPLETE")+'</td><td>'+ports.length+'</td><td title="'+esc(names.join(" · "))+'">'+esc(names.slice(0,8).join(" · ")||"No open ports observed")+(names.length>8?" · +"+(names.length-8)+" more":"")+'</td></tr>';
+ }).join("")||'<tr><td colspan="5">No full-port results yet.</td></tr>';
+}
+async function runFullPortScan(){
+ const input=$("fullPortTarget"),button=$("fullPortScanButton"),status=$("fullPortStatus"),ip=(input.value||"").trim();
+ if(!ip){toast("Enter an online device IPv4 address.");input.focus();return;}
+ if(!confirm("Run a full TCP scan of all 65,535 ports on "+ip+"? This is an active scan and may take several minutes. Continue only if you administer this network and have authority to scan this device."))return;
+ button.disabled=true;status.textContent="Running bounded full TCP scan against "+ip+"…";
+ try{
+  const response=await fetch("/api/port-intelligence/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ip:ip,confirm:true})});
+  const payload=await response.json();if(!response.ok)throw new Error(payload.error||("HTTP "+response.status));
+  const result=payload.result||{};status.textContent="Completed "+result.ports_tested+" TCP ports in "+result.duration_seconds+"s. "+result.open_count+" open ports found: "+(result.open_ports||[]).join(", ");
+  await refreshAll();
+ }catch(error){status.textContent="Full scan did not complete: "+String(error.message||error);}
+ finally{button.disabled=false;}
+}
+
 async function refreshAll(){
  if(refreshInFlight)return;refreshInFlight=true;
  const specs=[
   ["status","/api/status"],["devices","/api/devices"],["domains","/api/domains"],
+  ["domainIntel","/api/domain-intelligence"],["fullPorts","/api/port-intelligence"],
   ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],["topology","/api/topology"],
   ["progress","/api/progress"],["investigations","/api/investigations"],
   ["network","/api/network"],["diagnostics","/api/diagnostics"],
@@ -381,8 +431,11 @@ async function refreshAll(){
   $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";const quality=diag.scan_quality||{},coverage=quality.identity_coverage||{},identityCoverage=coverage.available===false?"—":((coverage.coverage_percent??"—")+"%");$("scanQuality").textContent=(quality.score??"—")+"/100 · "+(quality.band||"—")+" · Identity "+identityCoverage;
   if(data.devices){deviceCache=d;filterDevices();}else{$("deviceRows").innerHTML='<tr><td colspan="7">Device API unavailable. Check server log and /api/devices.</td></tr>';}
   $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||'<tr><td colspan="3">—</td></tr>';
+  renderDomainIntelligence(data.domainIntel||{});
+  renderFullPortHistory(Array.isArray(data.fullPorts)?data.fullPorts:[]);
   $("alertRows").innerHTML=a.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.client_ip)}</td><td>${esc(x.rule_id)}</td><td class="${x.severity==="HIGH"?"red":"amber"}">${esc(x.severity)}</td></tr>`).join("")||'<tr><td colspan="4">—</td></tr>';
   $("eventRows").innerHTML=e.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.category)}</td><td>${esc(x.event_type)}</td><td>${esc(x.details)}</td></tr>`).join("")||'<tr><td colspan="5">—</td></tr>';
+  renderIdentityTimeline(e);
   renderNightwatch(s,n,d,dnsRows,a,e,topology);
   renderFirewall(fw);
   const perfSummary=$("scanPerformanceSummary"),perfRows=$("scanPhaseRows");
@@ -545,8 +598,8 @@ if("IntersectionObserver" in window){
 async function loadPhantomPanels(){
  try{
   const [u,v,x,sub]=await Promise.all([fetch('/api/unknown-hunter').then(r=>r.json()),fetch('/api/ipv6').then(r=>r.json()),fetch('/api/exposure').then(r=>r.json()),fetch('/api/identity/subscan').then(r=>r.json())]);
-  $('unknownRows').innerHTML=u.map(d=>'<tr><td class="mono">'+esc(d.ip)+'</td><td>'+esc(d.name)+'</td><td>'+esc(d.device_type)+'</td><td>'+esc(d.os_guess)+'</td><td>'+d.confidence+'%</td><td>'+d.evidence_count+' / '+d.independent_sources+' sources</td><td title="'+esc((d.next_steps||[]).join(" | "))+'">'+esc((d.next_steps||[])[0]||"Collect more evidence")+'</td><td>'+esc(d.status)+'</td></tr>').join('')||'<tr><td colspan="8">No low-confidence devices in current inventory.</td></tr>';
-  const counts=sub.counts||{};$('subscanQueued').textContent=counts.queued??0;$('subscanRunning').textContent=counts.running??0;$('subscanResolved').textContent=counts.resolved??0;$('subscanExhausted').textContent=counts.exhausted??0;
+  $('unknownRows').innerHTML=u.map(d=>{const plan=d.identity_guidance?.investigation_plan||{};const next=plan.planned?.[0];const deferred=plan.deferred?.find(x=>["COOLDOWN","RUNNING","EXHAUSTED","COLLECTOR_UNAVAILABLE","AUTHORIZATION_REQUIRED","WAITING_FOR_ONLINE"].includes(x.state))||plan.deferred?.[0];const method=next?(next.label+" · "+next.mode):(deferred?(deferred.method+" · "+deferred.state):"No eligible method");return '<tr><td class="mono">'+esc(d.ip)+'</td><td>'+esc(d.name)+'</td><td>'+esc(d.device_type)+'</td><td>'+esc(d.os_guess)+'</td><td>'+d.confidence+'%</td><td>'+d.evidence_count+' / '+d.independent_sources+' sources</td><td title="'+esc((d.next_steps||[]).join(" | "))+'">'+esc((d.next_steps||[])[0]||"Collect more evidence")+'</td><td>'+esc(method)+'</td><td>'+esc(d.status)+'</td></tr>'}).join('')||'<tr><td colspan="9">No low-confidence devices in current inventory.</td></tr>';
+  const counts=sub.counts||{};$('subscanQueued').textContent=counts.queued??0;$('subscanRunning').textContent=counts.running??0;$('subscanResolved').textContent=counts.resolved??0;$('subscanExhausted').textContent=counts.exhausted??0;$('subscanAttempted').textContent=sub.attempted_targets??0;
   pill($('subscanWorkerState'),sub.worker_alive?'WORKER ONLINE':(sub.paused?'PAUSED':'WORKER OFFLINE'),sub.worker_alive?'ok':'warn');
   $('subscanPolicy').textContent='Maximum '+(sub.max_attempts_per_target||3)+' attempts per target · exponential backoff · next due in '+(sub.next_due_in_seconds==null?'—':Math.ceil(sub.next_due_in_seconds)+'s')+'. Active probing only on the explicitly authorised current private subnet.';
   const sp=sub.progress||{};const currentPct=Math.max(0,Math.min(100,Number(sp.percent)||0));const running=sp.state==='RUNNING';const completed=sp.state==='COMPLETED';

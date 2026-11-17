@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
+from .evidence_intelligence import plan_investigation_methods
+
 
 def _present(value: Any) -> bool:
     text = str(value or "").strip().casefold()
@@ -52,11 +54,26 @@ def build_identity_next_steps(
         actions.append({"priority": priority, "action": action, "reason": reason})
 
     if not has_dhcp:
-        add(
-            "HIGH",
-            "Collect DHCP identity evidence during normal lease acquisition or renewal.",
-            "No DHCP client fingerprint is currently associated with this device. Passive capture may miss leases on switched or isolated Wi-Fi networks; do not force a lease renewal.",
-        )
+        dhcp_state = str(device.get("dhcp_capture_status") or "").upper()
+        dhcp_attempted = bool(device.get("dhcp_investigation_attempted"))
+        if dhcp_state in {"UNAVAILABLE", "ERROR", "STOPPED", "NO_INTERFACE", "FAILED", "DEGRADED"}:
+            add(
+                "LOW",
+                "DHCP collection is unavailable; wait for a supported capture interface or use another evidence source.",
+                f"DHCP collector state is {dhcp_state}. Repeating the same DHCP recommendation is unlikely to add evidence.",
+            )
+        elif dhcp_attempted:
+            add(
+                "LOW",
+                "Wait for naturally occurring DHCP lease or renewal traffic; do not force a renewal.",
+                "A DHCP collection attempt has already been made without an observation. Retry only after the capture path or network conditions change.",
+            )
+        else:
+            add(
+                "HIGH",
+                "Observe DHCP identity evidence during normal lease acquisition or renewal.",
+                "No DHCP client fingerprint is currently associated with this device. Passive capture may miss leases on switched or isolated Wi-Fi networks; do not force a lease renewal.",
+            )
     if authorised and not has_mdns:
         add(
             "MEDIUM",
@@ -140,6 +157,11 @@ def build_identity_next_steps(
         "evidence_source_count": len(sources),
         "authorised_active_discovery": bool(authorised),
         "next_actions": actions[:8],
+        "investigation_plan": plan_investigation_methods(
+            device, sources,
+            device.get("investigation_attempts") if isinstance(device.get("investigation_attempts"), Mapping) else {},
+            authorised=authorised,
+        ),
         "limitations": [
             "Recommendations are guidance only; this function does not send network traffic.",
             "A MAC address-block registrant is not necessarily the physical device manufacturer.",
