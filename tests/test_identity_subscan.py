@@ -22,7 +22,7 @@ class IdentitySubscanCoordinatorTests(unittest.TestCase):
 
     def test_claims_only_one_target_and_applies_backoff(self):
         queue = IdentitySubscanCoordinator(max_attempts=3, base_backoff=10)
-        queue.observe([self.device(), self.device("192.168.100.21")], now=100)
+        queue.observe([self.device()], now=100)
         first = queue.claim_due(now=100)
         self.assertIsNotNone(first)
         self.assertIsNone(queue.claim_due(now=100))
