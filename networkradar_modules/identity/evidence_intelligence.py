@@ -37,6 +37,11 @@ def _confidence(value: Any) -> int:
 def _parse_time(value: Any, now: datetime) -> datetime | None:
     if isinstance(value, datetime):
         parsed = value
+    elif isinstance(value, (int, float)):
+        try:
+            parsed = datetime.fromtimestamp(float(value), tz=now.tzinfo or timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
     else:
         raw = _text(value, 80)
         if not raw:
@@ -282,6 +287,10 @@ def plan_investigation_methods(device: Mapping[str, Any] | None,
         if str(attempt.get("state") or "").upper() in {"EXHAUSTED", "UNAVAILABLE"} or attempt_count >= max_attempts:
             deferred.append({"method": key, "state": "EXHAUSTED",
                              "reason": "The configured attempt budget is exhausted; wait for new evidence or a capability change."})
+            continue
+        if str(attempt.get("state") or "").upper() == "RUNNING":
+            deferred.append({"method": key, "state": "RUNNING",
+                             "reason": "An investigation for this target is already in progress."})
             continue
         if attempt_count > 0 and next_at and now < next_at:
             deferred.append({"method": key, "state": "COOLDOWN",
