@@ -78,13 +78,17 @@ class IdentitySubscanCoordinator:
                     continue
                 if not address.is_private or address.is_multicast or address.is_unspecified:
                     continue
-                if not self.is_unidentified(device):
-                    continue
                 key = self._key(device)
                 if key in {"mac:", "ip:"}:
                     continue
                 signature = self._signature(device)
                 existing = self._items.get(key)
+                if not self.is_unidentified(device):
+                    if existing and existing["state"] in {"QUEUED", "EXHAUSTED"}:
+                        existing.update({"device": device, "signature": signature,
+                                         "state": "RESOLVED", "next_attempt_at": None,
+                                         "cooldown_until": None, "last_error": ""})
+                    continue
                 if existing:
                     existing["device"] = device
                     existing["last_observed"] = now
