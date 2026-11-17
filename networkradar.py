@@ -3359,10 +3359,13 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                  dev.get("open_ports", ""), dev.get("open_ports", ""),
                  dev.get("service_summary", ""), dev.get("service_summary", ""),
                  ts, ip))
-            conn.execute("""UPDATE devices SET oui_manufacturer=?,reported_manufacturer=?,
+            conn.execute("""UPDATE devices SET
+                oui_manufacturer=CASE WHEN ?='' THEN oui_manufacturer ELSE ? END,
+                reported_manufacturer=CASE WHEN ?='' THEN reported_manufacturer ELSE ? END,
                 identity_conflicts=?,identity_category_confidence=CASE WHEN ?>=58 THEN ? ELSE identity_category_confidence END,
                 identity_last_assessed=?,recognition_json=? WHERE ip=?""",
-                (dev.get("oui_manufacturer", ""), dev.get("reported_manufacturer", ""),
+                (dev.get("oui_manufacturer", ""), dev.get("oui_manufacturer", ""),
+                 dev.get("reported_manufacturer", ""), dev.get("reported_manufacturer", ""),
                  json.dumps(dev.get("identity_conflicts", [])),
                  accepted_confidence, accepted_confidence, ts,
                  json.dumps(dev.get("recognition", {}), ensure_ascii=False), ip))
