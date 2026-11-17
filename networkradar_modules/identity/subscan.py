@@ -188,7 +188,7 @@ class IdentitySubscanCoordinator:
             return {
                 "enabled": not self._paused,
                 "paused": self._paused,
-                "worker_alive": False,
+                "worker_alive": bool(getattr(self, "_worker_alive", False)),
                 "active_key": self._active_key,
                 "counts": dict(self._counts),
                 "total_targets": len(items),
