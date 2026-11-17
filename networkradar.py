@@ -7969,7 +7969,7 @@ class Handler(BaseHTTPRequestHandler):
                         device["device_id"] = device_id
                         for evidence in device.get("identity_evidence",[]):
                             if isinstance(evidence,(list,tuple)) and len(evidence)>=5:
-                                _add_identity_evidence(conn,device,*evidence[:5],APP_VERSION)
+                                _add_identity_evidence(conn,device,evidence[0],evidence[1],evidence[2],evidence[3],evidence[4],APP_VERSION)
                         persist_identity_assessments(conn,device,identity_assessments,ts)
                         for service in result["services"]:
                             observation = f"{service['port']}/tcp {service['name']} {service['product']} {service['version']}".strip()
