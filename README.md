@@ -47,7 +47,7 @@
 
 ## Current release
 
-NetworkRadar 13.5.0 builds on 13.4.0 and the 13.3.x authorisation, firewall-timeout and Windows network-context fixes below. Live Windows/Nmap/Npcap validation is still required to confirm scan duration on the local network.
+NetworkRadar 13.7.0 adds an additive dashboard consistency and accessibility layer on top of the 13.6.1 identity subscan coordination release. The discovery engine, identity evidence model, database schema and network-authorisation boundaries are unchanged. Live Windows/Nmap/Npcap and browser validation remain required.
 
 ## Windows dashboard startup reliability (13.1.1)
 
