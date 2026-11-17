@@ -347,6 +347,11 @@ function renderScanMonitor(job){
  }else if(list){list.innerHTML='<li>Waiting for scan activity.</li>';}
 }
 
+function renderIdentityTimeline(events){
+ const rows=(Array.isArray(events)?events:[]).filter(item=>item.event_type==="DEVICE_IDENTITY_ASSESSED").slice(0,40);
+ $("identityTimelineRows").innerHTML=rows.map(item=>'<tr><td>'+esc(item.timestamp||"—")+'</td><td class="mono">'+esc(item.ip||"—")+'</td><td>'+esc(item.details||"—")+'</td></tr>').join("")||'<tr><td colspan="3">No identity assessment events yet. Run a scan to populate this timeline.</td></tr>';
+}
+
 function renderDomainIntelligence(payload){
  const activity=Array.isArray(payload.activity)?payload.activity:[];
  const providers=Array.isArray(payload.search_providers)?payload.search_providers:[];
@@ -416,6 +421,7 @@ async function refreshAll(){
   renderFullPortHistory(Array.isArray(data.fullPorts)?data.fullPorts:[]);
   $("alertRows").innerHTML=a.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.client_ip)}</td><td>${esc(x.rule_id)}</td><td class="${x.severity==="HIGH"?"red":"amber"}">${esc(x.severity)}</td></tr>`).join("")||'<tr><td colspan="4">—</td></tr>';
   $("eventRows").innerHTML=e.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.category)}</td><td>${esc(x.event_type)}</td><td>${esc(x.details)}</td></tr>`).join("")||'<tr><td colspan="5">—</td></tr>';
+  renderIdentityTimeline(e);
   renderNightwatch(s,n,d,dnsRows,a,e,topology);
   renderFirewall(fw);
   const perfSummary=$("scanPerformanceSummary"),perfRows=$("scanPhaseRows");
