@@ -124,6 +124,57 @@ def build_identity_next_steps(
         device.get("reported_manufacturer") or profile.get("manufacturer") or ""
     ).strip()
 
+    # Category-specific recommendations are evidence-gap guidance only. They
+    # do not initiate probes and never promote an OS/OUI/port clue into a model.
+    identity_text = " ".join(str(device.get(key) or "") for key in (
+        "device_type", "device_name", "manual_name", "hostname", "manufacturer",
+        "reported_manufacturer", "os_guess",
+    )).casefold()
+    category_action = None
+    if any(token in identity_text for token in ("printer", "scanner")):
+        if not any(token in source_text for token in ("ipp", "jetdirect", "lpd", "printer service")):
+            category_action = (
+                "MEDIUM",
+                "For a likely printer, correlate already observed IPP, JetDirect/RAW, LPD and mDNS printer-service evidence.",
+                "Printer protocols and service advertisements can support a printer-family classification; an exact model still needs an explicit device-reported field or authenticated endpoint inventory.",
+            )
+    elif any(token in identity_text for token in ("windows", "thinkpad", "laptop", "desktop", "computer")):
+        if not any(token in source_text for token in ("netbios", "smb", "ws-discovery", "llmnr")):
+            category_action = (
+                "MEDIUM",
+                "For a likely Windows endpoint, correlate passive NetBIOS, SMB, WS-Discovery and LLMNR naming evidence.",
+                "These signals can corroborate a Windows host and hostname, but they do not establish the laptop's exact hardware model.",
+            )
+    elif any(token in identity_text for token in ("smart tv", "webos", "tizen", "media receiver", "streamer", "streaming")):
+        if not (has_mdns and has_ssdp):
+            category_action = (
+                "MEDIUM",
+                "For a likely TV or media device, correlate mDNS/DNS-SD and SSDP/UPnP service descriptors and retain advertised model strings as unverified claims.",
+                "TV platforms advertise different optional services; absence of an advertisement is not proof that a device lacks that capability.",
+            )
+    elif any(token in identity_text for token in ("router", "firewall", "access point", "network service host", "tp-link", "tenda", "huawei")):
+        if not (has_snmp and has_l2):
+            category_action = (
+                "LOW",
+                "For likely network infrastructure, correlate read-only SNMPv3 identity fields with LLDP/CDP observations where an authorised managed switch exposes them.",
+                "The OUI registrant may be an adapter/OEM supplier; do not infer the finished product model from the vendor label.",
+            )
+    elif "vxworks" in identity_text or "embedded" in identity_text:
+        category_action = (
+            "MEDIUM",
+            "For a possible embedded/VxWorks endpoint, treat the OS fingerprint as an OS-family hypothesis and correlate existing service banners and passive vendor announcements.",
+            "An Nmap OS match percentage is not device-model confidence and does not identify the finished product.",
+        )
+    elif any(token in identity_text for token in ("android", "iphone", "ipad", "ios", "mobile device")):
+        category_action = (
+            "LOW",
+            "For a likely mobile device, retain DHCP/hostname observations and keep locally administered or randomised MAC sightings IP-scoped.",
+            "Private MAC randomisation is common; similar vendor labels or hostnames alone are not sufficient to merge devices.",
+        )
+    if category_action:
+        priority, action, reason = category_action
+        actions.insert(0, {"priority": priority, "action": action, "reason": reason})
+
     return {
         "ip": str(device.get("ip") or ""),
         "category": category,
