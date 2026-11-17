@@ -1,4 +1,4 @@
-# NetworkRadar 14.1.0 — Network Intelligence, Full-Port Assessment & Identity Observability
+# NetworkRadar 14.2.0 — Evidence Intelligence & Identity Reconciliation
 
 ## Full TCP Port Intelligence
 - Adds an explicit, opt-in full TCP scan for one currently ONLINE device at a time, covering ports 1–65,535.
