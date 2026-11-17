@@ -8203,7 +8203,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
                 })
 
         if progress_callback:
-            progress_callback("Targeted UDP identification", 68,
+            progress_callback("Targeted UDP identification", 48,
                               "TCP/OS pass returned; running bounded printer, UPnP, DNS-SD and SNMP-related discovery probes.")
         # Targeted UDP probes often reveal printer, discovery, UPnP and
         # management capabilities missed by a TCP-only inventory. This is a
@@ -8271,7 +8271,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
             dev["nmap_script_intel"] = dev.get("nmap_script_intel", [])[:64]
 
         if progress_callback:
-            progress_callback("Persisting Nmap fingerprint evidence", 94,
+            progress_callback("Persisting Nmap fingerprint evidence", 62,
                               "Saving discovered ports, services and safe-script observations.")
         ts = now_text()
         def _save(conn):
@@ -8300,7 +8300,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
                     )
         DB_MANAGER.write(_save)
         if progress_callback:
-            progress_callback("Nmap fingerprint complete", 96,
+            progress_callback("Nmap fingerprint complete", 70,
                               "Nmap TCP/OS, service and targeted UDP passes have returned.")
         return all(d.get("_port_scan_complete") for d in devices)
     except Exception as error:
