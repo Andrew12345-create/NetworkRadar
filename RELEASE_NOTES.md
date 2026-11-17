@@ -1,3 +1,37 @@
+# NetworkRadar 14.1.0 — Network Intelligence, Full-Port Assessment & Identity Observability
+
+## Full TCP Port Intelligence
+- Adds an explicit, opt-in full TCP scan for one currently ONLINE device at a time, covering ports 1–65,535.
+- Requires current explicit network authorisation, a private IPv4 target inside the current authorised subnet, an ONLINE inventory record and an additional user confirmation.
+- Uses TCP connect scanning, lightweight service detection, bounded retries, a 190-second process budget, a 180-second Nmap host timeout and a 200-packet-per-second cap.
+- Persists append-only complete/incomplete scan observations and service metadata without silently replacing the routine inventory's bounded scan results.
+- Does not run a subnet-wide full-port sweep, UDP full-range scan, credential attempts, exploit scripts, stealth options or service changes.
+- Adds a dashboard history view for full-port results. Open ports and service banners are evidence, not proof of device identity or vulnerability.
+
+## Domain & Search-Provider Intelligence
+- Adds a seven-day per-device DNS activity view with domain category, known provider, query count and last-observed time.
+- Classifies known search, video/streaming, social, gaming, education and productivity domains; unknown domains remain OTHER.
+- Clearly distinguishes search-provider domain activity from actual search phrases. DNS cannot reveal HTTPS search terms, page paths or typed queries.
+- Does not intercept TLS, bypass encryption, collect browser history or attempt to reconstruct private search content.
+- Encrypted DNS, VPNs, resolver caching, client isolation and missing DNS visibility remain explicit limitations.
+
+## Identity and investigation observability
+- Adds separate attempted-target and total-attempt queue metrics; queue completion remains based only on resolved or retry-exhausted targets.
+- Adds a current-assessment versus persisted-inventory distinction to identity assessment events, explaining when a weaker observation is retained as historical best-known identity.
+- Keeps the legacy fingerprint event for existing presence/history consumers while adding the more precise DEVICE_IDENTITY_ASSESSED event.
+
+## Earlier 14.1 roadmap work retained
+- Preserves the 14.0 adaptive fingerprint planner and its strict target, cooldown and authorised-subnet bounds.
+- Keeps optional UDP enrichment fail-soft: UDP timeout/failure must not discard successful TCP identity evidence.
+- Retains historical identity continuity and avoids treating a randomized/local MAC as a stable device identity.
+- Maintains one-at-a-time unknown-device investigations, bounded retries and backoff.
+
+## Validation and limitations
+- Adds deterministic unit tests for full-port target scope, Nmap XML parsing, full-range invocation, timeout handling, domain categorisation, per-device aggregation and investigation-attempt metrics.
+- A full TCP scan is deliberately user-triggered and may take several minutes. Runtime behaviour and scan duration must be validated on the local Windows/Nmap installation.
+- Domain classifications are heuristic labels based on queried domain names, not evidence of a specific person or exact activity.
+- No destructive database migration or historical record deletion is introduced.
+
 # NetworkRadar 14.0.0 — Adaptive Fingerprint Scheduling
 
 ## Performance and identity investigation
