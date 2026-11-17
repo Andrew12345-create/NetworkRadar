@@ -310,7 +310,7 @@ def plan_investigation_methods(device: Mapping[str, Any] | None,
                              "reason": "SNMPv3 requires explicitly configured read-only credentials; no credentials are guessed."})
             continue
         if mode == "PASSIVE" and str(device.get("dhcp_capture_status", "")).upper() in {
-            "UNAVAILABLE", "ERROR", "STOPPED", "NO_INTERFACE"
+            "UNAVAILABLE", "ERROR", "STOPPED", "NO_INTERFACE", "FAILED", "DEGRADED"
         }:
             deferred.append({"method": key, "state": "COLLECTOR_UNAVAILABLE",
                              "reason": "DHCP capture is unavailable; wait for a supported capture path instead of repeating an ineffective recommendation."})
