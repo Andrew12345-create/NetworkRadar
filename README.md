@@ -1,4 +1,13 @@
-# NetworkRadar 13.6.0
+# NetworkRadar 13.6.1
+
+## Separate identity subscan progress (13.6.1)
+
+- Adds an independent active-device progress bar with the current IP, investigation stage and status message; the main network scan monitor is no longer overwritten by targeted subscans.
+- Adds a separate queue-completion bar counting devices that have reached a terminal resolved or retry-exhausted state.
+- Uses stage-based progress because Nmap does not expose a dependable percentage for its in-flight subprocess; the active bar animates while that stage runs.
+- Adds atomic scan/subscan slot reservation so a full network scan and targeted identity subscan cannot start at the same time.
+- Keeps the existing one-host-at-a-time queue, retry limits, exponential backoff and authorisation boundaries.
+
 
 ## Continuous identity investigation (13.6.0)
 

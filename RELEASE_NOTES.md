@@ -1,3 +1,18 @@
+# NetworkRadar 13.6.1 — Independent Subscan Progress & Scan Isolation
+
+## Identity subscan progress
+- Adds a dedicated active-device progress bar showing the current IP, current investigation stage, stage-based percentage and live status text.
+- Adds a second queue progress bar showing the share of targets that have reached a terminal resolved or retry-exhausted state. Queued and backoff-waiting devices remain outstanding.
+- The active bar animates while Nmap is running. Nmap does not expose a reliable live percentage for this subprocess, so the percentage advances by completed investigation stages rather than pretending to measure Nmap's internal work.
+- Routes targeted subscan progress to its own coordinator state; it no longer writes the main scan progress endpoint or hijacks the main scan monitor.
+
+## Scan coordination
+- Adds an atomic reservation gate between the main discovery loop and identity worker. A full scan and a one-host identity subscan cannot claim the scanning slot at the same time.
+- Preserves one-target-at-a-time scheduling, explicit network authorisation, authorised private-subnet checks, bounded retries and exponential backoff.
+
+## Validation
+- Adds tests for independent progress state and queue completion metrics. Full Python 3.10–3.13 CI and local Windows/Nmap validation are required before release use.
+
 # NetworkRadar 13.6.0 — Continuous Identity Investigation & Scan Performance
 
 ## Continuous unknown-device subscans

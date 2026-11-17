@@ -549,6 +549,14 @@ async function loadPhantomPanels(){
   const counts=sub.counts||{};$('subscanQueued').textContent=counts.queued??0;$('subscanRunning').textContent=counts.running??0;$('subscanResolved').textContent=counts.resolved??0;$('subscanExhausted').textContent=counts.exhausted??0;
   pill($('subscanWorkerState'),sub.worker_alive?'WORKER ONLINE':(sub.paused?'PAUSED':'WORKER OFFLINE'),sub.worker_alive?'ok':'warn');
   $('subscanPolicy').textContent='Maximum '+(sub.max_attempts_per_target||3)+' attempts per target · exponential backoff · next due in '+(sub.next_due_in_seconds==null?'—':Math.ceil(sub.next_due_in_seconds)+'s')+'. Active probing only on the explicitly authorised current private subnet.';
+  const sp=sub.progress||{};const currentPct=Math.max(0,Math.min(100,Number(sp.percent)||0));const running=sp.state==='RUNNING';const completed=sp.state==='COMPLETED';
+  $('subscanCurrentBar').style.width=(running||completed||sp.state==='QUEUED'||sp.state==='EXHAUSTED')?currentPct+'%':'0%';
+  $('subscanCurrentBar').classList.toggle('is-running',running);
+  $('subscanCurrentPercent').textContent=(running||completed||sp.state==='QUEUED'||sp.state==='EXHAUSTED')?currentPct+'%':'0%';
+  $('subscanCurrentTarget').textContent=sp.ip?(running?'INVESTIGATING '+sp.ip:(completed?'LAST COMPLETED · '+sp.ip:'LAST ATTEMPT · '+sp.ip)):'No device currently being investigated';
+  $('subscanCurrentDetail').textContent=(sp.phase||'Waiting for an unidentified device')+(sp.message?' · '+sp.message:'');
+  const queuePct=Math.max(0,Math.min(100,Number(sub.queue_progress_percent)||0));$('subscanQueueBar').style.width=queuePct+'%';$('subscanQueuePercent').textContent=queuePct+'%';
+  $('subscanQueueDetail').textContent=(sub.processed_targets||0)+' of '+(sub.total_targets||0)+' targets processed · '+(counts.queued||0)+' queued · '+(counts.running||0)+' running';
   $('subscanRows').innerHTML=(sub.targets||[]).map(t=>'<tr><td class="mono">'+esc(t.ip)+'</td><td>'+esc(t.state)+'</td><td>'+esc(t.attempts)+'</td><td>'+esc(t.next_attempt_at?new Date(t.next_attempt_at*1000).toLocaleTimeString():'—')+'</td><td>'+esc(t.last_error||'—')+'</td></tr>').join('')||'<tr><td colspan="5">No devices currently queued for follow-up.</td></tr>';
   $('ipv6Rows').innerHTML=v.map(d=>`<tr><td class="mono">${esc(d.ipv6)}</td><td class="mono">${esc(d.mac||'—')}</td><td>${esc(d.interface_alias||'—')}</td><td>${esc(d.state)}</td><td>${esc(d.timestamp)}</td><td>${esc(d.linked_device_id||'Uncorrelated')}</td></tr>`).join('')||'<tr><td colspan="6">No IPv6 neighbour observations recorded.</td></tr>';
   $('exposureRows').innerHTML=x.map(d=>`<tr><td class="mono">${esc(d.ip)}</td><td>${esc(d.title)}</td><td class="${d.severity==='HIGH'?'red':'amber'}">${esc(d.severity)}</td><td>${esc(d.observed_ports)}</td><td>${esc(d.recommendation)}</td><td>${esc(d.last_seen)}</td><td>${esc(d.status)}</td></tr>`).join('')||'<tr><td colspan="7">No current or stale exposure observations.</td></tr>';
