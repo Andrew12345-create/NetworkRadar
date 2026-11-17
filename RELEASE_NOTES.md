@@ -1,3 +1,21 @@
+# NetworkRadar 13.5.0 — Scan Observability and Evidence-Led Device Investigation
+
+## Scan performance observability
+- Adds bounded, thread-safe wall-clock measurement for scan phases, including host discovery, TCP reachability, Nmap TCP/OS/service detection, reduced fallback, targeted UDP, passive TCP, LLDP/CDP, parallel TLS/SNMP/service probes, inventory persistence and post-scan analytics.
+- Exposes the latest scan profile through `GET /api/scan_performance` and a dashboard phase table.
+- Records call counts, cumulative/last/max duration and error type without storing packet contents, credentials or raw exception text.
+- Failed scans retain partial timing data to make bottlenecks diagnosable.
+
+## Unknown-device investigation guidance
+- Adds evidence-aware next actions based on which identity sources are actually present.
+- Distinguishes DHCP, mDNS/DNS-SD, SSDP/UPnP, Nmap, SNMPv3, LLDP/CDP and enrolled endpoint inventory gaps.
+- Active collection suggestions are shown only when the current network is authorised; guidance never triggers probes.
+- Exact hardware model remains explicitly unestablished unless endpoint/service-reported evidence supports it.
+
+## Validation
+- Adds unit tests for profiler accumulation, error handling and unknown-device guidance.
+- No destructive database migration, credential guessing, DHCP lease changes or automatic active probes are introduced.
+
 # NetworkRadar 13.4.0 — Bounded Discovery and Faster Identity Enrichment
 
 ## Scan performance and reliability
