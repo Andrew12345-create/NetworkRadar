@@ -1,4 +1,13 @@
-# NetworkRadar 13.5.0
+# NetworkRadar 13.6.0
+
+## Continuous identity investigation (13.6.0)
+
+- Adds a dedicated low-priority identity subscan worker that queues currently observed, unidentified private IPv4 devices and investigates one host at a time.
+- The worker remains available while NetworkRadar is running, but it does not probe continuously: each target has a three-attempt limit, exponential backoff, a six-hour exhausted-target cooldown, and evidence-change reopening.
+- Targeted scans run only when the current network is explicitly authorised, only for addresses inside the authorised private subnet, and never overlap a full scan.
+- Adds a dashboard queue with queued/running/resolved/exhausted counts, per-device attempt history and next-attempt timing.
+- The queue is rebuilt from the live inventory after application restart; no historical inventory is deleted.
+- Adds tests for deduplication, retry limits, backoff, evidence-change reopening and private-address scoping.
 
 ## Scan observability and unknown-device investigation (13.5.0)
 
