@@ -428,7 +428,7 @@ function syncNavigationButton(){
  ];
  const groups=Object.fromEntries(definitions.map(x=>[x.id,[]]));
  const overviewIds=new Set(['top','topology','activity','cmd']);
- const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','ipv6']);
+ const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','identitySubscan','ipv6']);
  const networkIds=new Set(['networkWorkspaces','profiles','dns','dhcp','arp','behaviour','changes']);
  const securityIds=new Set(['firewall','investigations','alerts','config','hunt','exposure']);
  const managementIds=new Set(['phantomAccess','commandCenter']);
