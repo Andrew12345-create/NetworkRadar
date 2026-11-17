@@ -7892,11 +7892,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json({"error": str(exc)}, 400)
                 with DB_MANAGER.read() as conn:
                     device_row = conn.execute(
-                        "SELECT device_id,status FROM devices WHERE ip=? LIMIT 1",
+                        "SELECT * FROM devices WHERE ip=? LIMIT 1",
                         (target,)).fetchone()
-                if not device_row or device_row[1] != "ONLINE":
+                if not device_row or device_row["status"] != "ONLINE":
                     return self.send_json({"error": "Target must be an ONLINE device in the current inventory."}, 409)
-                device_id = str(device_row[0] or "")
+                device = dict(device_row)
+                device_id = str(device.get("device_id") or "")
                 # Share the atomic scan slot with normal discovery and the identity worker.
                 with SCAN_SUBSCAN_GATE:
                     with JOB_LOCK:
@@ -7921,18 +7922,78 @@ class Handler(BaseHTTPRequestHandler):
                                 detail,category="discovery",severity="INFO",device_id=device_id)
                         ))
                         return self.send_json({"error": detail, "completed": False}, 504 if isinstance(exc, TimeoutError) else 502)
+                    # Feed the full-range service evidence into the same identity
+                    # profiler used by routine Nmap enrichment; preserve stronger
+                    # persisted identity when this assessment remains low-confidence.
+                    device["ip"] = target
+                    device["port_numbers"] = list(result["open_ports"])
+                    device["open_ports"] = ", ".join(str(port) for port in result["open_ports"])
+                    device["nmap_service_intel"] = list(result["services"])
+                    device["services_found"] = [
+                        f"{item['port']}/tcp/{' '.join(x for x in (item['name'], item['product'], item['version'], item['extrainfo']) if x)}"
+                        for item in result["services"]
+                    ]
+                    device["service_summary"] = "; ".join(device["services_found"])[:700]
+                    device["identity_evidence"] = list(device.get("identity_evidence") or [])
+                    advanced_device_recognition(device)
+                    identity_assessments = assess_identity_evidence(
+                        device, device.get("identity_evidence", [])
+                    )
+                    current_type = str(device.get("device_type") or "Unclassified network device")
+                    current_confidence = int(device.get("identification_confidence") or 0)
                     detail_json = json.dumps(result, ensure_ascii=False)
                     ports_csv = ",".join(str(port) for port in result["open_ports"])
-                    DB_MANAGER.write(lambda conn: (
+                    def _save_full_port_intelligence(conn):
+                        ts = now_text()
                         conn.execute("""INSERT INTO port_scan_observations(
                             timestamp,ip,device_id,completed,open_ports,scan_method,detail)
                             VALUES(?,?,?,?,?,'nmap-full-tcp',?)""",
-                            (now_text(),target,device_id,1,ports_csv,detail_json)),
-                        record_event(conn,target,"FULL_TCP_PORT_SCAN_COMPLETED",
-                            f"Completed all TCP ports; {result['open_count']} open; {result['duration_seconds']}s.",
+                            (ts,target,device_id,1,ports_csv,detail_json))
+                        conn.execute("""UPDATE devices SET
+                            open_ports=?,service_summary=?,
+                            identification_methods=CASE WHEN ?='' THEN identification_methods ELSE ? END,
+                            device_type=CASE WHEN ?>=58 THEN ? ELSE device_type END,
+                            identification_confidence=CASE WHEN ?>=58 THEN ? ELSE identification_confidence END,
+                            identity_category_confidence=CASE WHEN ?>=58 THEN ? ELSE identity_category_confidence END,
+                            recognition_json=CASE WHEN ?>=58 OR identity_category_confidence<58 THEN ? ELSE recognition_json END,
+                            reported_manufacturer=CASE WHEN ?='' THEN reported_manufacturer ELSE ? END,
+                            model=CASE WHEN ?='' THEN model ELSE ? END,
+                            identity_last_assessed=?,last_identified=? WHERE ip=?""",
+                            (device["open_ports"],device["service_summary"],
+                             device.get("identification_methods",""),device.get("identification_methods",""),
+                             current_confidence,current_type,current_confidence,current_confidence,
+                             current_confidence,current_confidence,
+                             current_confidence,json.dumps(device.get("recognition",{}),ensure_ascii=False),
+                             device.get("reported_manufacturer",""),device.get("reported_manufacturer",""),
+                             device.get("model",""),device.get("model",""),ts,ts,target))
+                        device["device_id"] = device_id
+                        for evidence in device.get("identity_evidence",[]):
+                            if isinstance(evidence,(list,tuple)) and len(evidence)>=5:
+                                _add_identity_evidence(conn,device,*evidence[:5],APP_VERSION)
+                        persist_identity_assessments(conn,device,identity_assessments,ts)
+                        for service in result["services"]:
+                            observation = f"{service['port']}/tcp {service['name']} {service['product']} {service['version']}".strip()
+                            conn.execute("""INSERT INTO device_observations(
+                                timestamp,ip,method,observation,confidence) VALUES(?,?,?,?,?)""",
+                                (ts,target,"Nmap full TCP service",observation,
+                                 78 if service.get("product") else 58))
+                        retained = conn.execute(
+                            "SELECT device_type,identification_confidence FROM devices WHERE ip=?",
+                            (target,)).fetchone()
+                        retained_type, retained_confidence = (
+                            retained[0],int(retained[1] or 0)) if retained else ("",0)
+                        record_event(conn,target,"DEVICE_IDENTITY_ASSESSED",
+                            f"Full-port evidence assessment: {current_type} ({current_confidence}%). "
+                            f"Persisted inventory: {retained_type} ({retained_confidence}%).",
                             category="discovery",severity="INFO",device_id=device_id)
-                    ))
-                    return self.send_json({"ok": True, "result": result}, 200)
+                        record_event(conn,target,"FULL_TCP_PORT_SCAN_COMPLETED",
+                            f"Completed all TCP ports; {result['open_count']} open; "
+                            f"{result['duration_seconds']}s; identity evidence refreshed.",
+                            category="discovery",severity="INFO",device_id=device_id)
+                    DB_MANAGER.write(_save_full_port_intelligence)
+                    return self.send_json({"ok": True, "result": result,
+                        "identity_assessment": {"device_type": current_type,
+                            "confidence": current_confidence}}, 200)
                 finally:
                     SUBSCAN_ACTIVE_EVENT.clear()
             if self.path in ("/api/phantom-access/ssh/hostkey", "/api/phantom-access/ssh/trust", "/api/phantom-access/ssh/connect", "/api/phantom-access/ssh/close"):
