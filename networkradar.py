@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 13.5.0 — Scan performance observability and evidence-led device investigation.
+NetworkRadar 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
   - Exposes the latest scan's measured phase durations in the local dashboard and API.
