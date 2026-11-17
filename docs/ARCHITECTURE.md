@@ -1,4 +1,4 @@
-# NetworkRadar architecture — repository snapshot 13.5.0
+# NetworkRadar architecture — repository snapshot 13.7.0
 
 ## 13.5.0 scan observability and unknown-device guidance
 
@@ -136,3 +136,8 @@ Active discovery now also requires a strong fingerprint anchor: a gateway MAC or
 Authorisation authority now lives in network_workspace_authorizations, keyed by network_id plus fingerprint. A new workspace fingerprint starts unapproved. Existing legacy approval flags are not imported into this table because they may have been inherited by a different network sharing the same subnet; users must reapprove each network once after this migration. The legacy network_profiles table remains subnet-keyed for compatibility and is no longer authoritative for active-discovery permission. Its upsert now resets approved and last_authorized whenever the fingerprint changes. This is fail-closed and prevents approval transfer between different networks that reuse the same CIDR. The dashboard workspace selector is a historical read-only browser; it does not change the active scan target or authorisation context.
 
 Legacy devices remains IP-keyed, and many historical event/telemetry queries are not yet workspace-scoped. New sightings are recorded separately to provide a safe foundation for the later full data-scope migration. Do not interpret this milestone as complete multi-network concurrent scanning.
+
+
+## 13.7.0 dashboard presentation layer
+
+The dashboard continues to use the standalone `index.html`, `networkradar.css` and `dashboard.js` assets. Version 13.7.0 adds an additive CSS consistency layer for visible keyboard focus, constrained grid children, horizontally scrollable data tables, touch interaction and broad reduced-motion handling. It does not alter dashboard APIs, scan scheduling, network authorisation, identity scoring or database storage.
