@@ -68,7 +68,7 @@ def evidence_freshness(observed_at: Any, *, now: datetime | None = None,
                        half_life_days: float = 14.0,
                        max_age_days: float = 90.0) -> dict[str, Any]:
     """Return a bounded freshness factor; unknown timestamps are not fresh."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now().astimezone()
     parsed = _parse_time(observed_at, now)
     if parsed is None:
         return {"factor": 0.0, "age_days": None, "state": "UNDATED"}
@@ -129,7 +129,7 @@ def rank_evidence(evidence: Iterable[Any], *, now: datetime | None = None,
     Repeated observations from one family contribute only their strongest
     freshness-adjusted score. Different values remain visible as conflicts.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now().astimezone()
     grouped: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
     ignored = 0
     for raw in evidence or []:
@@ -257,7 +257,7 @@ def plan_investigation_methods(device: Mapping[str, Any] | None,
     This is a planner only. It never initiates network activity.
     """
     device, attempts = device or {}, attempts or {}
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now().astimezone()
     sources = " ".join(str(x).casefold() for x in (evidence_sources or []))
     online = str(device.get("status") or "ONLINE").upper() == "ONLINE"
     methods = [
