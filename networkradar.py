@@ -8063,6 +8063,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
     # refreshes it even when Nmap has not run.
     all_ips = [str(d.get("ip") or "").strip() for d in devices if d.get("ip")]
     last_fingerprint_at = {}
+    confidence_by_ip = {}
     if all_ips:
         try:
             marks = ",".join("?" for _ in all_ips)
