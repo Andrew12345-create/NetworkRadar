@@ -17,7 +17,9 @@
 
 ## Identity and investigation observability
 - Adds separate attempted-target and total-attempt queue metrics; queue completion remains based only on resolved or retry-exhausted targets.
-- Adds a current-assessment versus persisted-inventory distinction to identity assessment events, explaining when a weaker observation is retained as historical best-known identity.
+- Adds a bounded TTL cache for positive and negative reverse-DNS/NetBIOS lookups, scoped to the current network to avoid carrying names across network changes.
+- Serializes opt-in full-port scans against normal discovery and the identity worker through the existing atomic scan reservation gate.
+- Adds a visible identity assessment timeline that contrasts the current assessment with the persisted best-known inventory identity, explaining when weaker evidence is retained.
 - Keeps the legacy fingerprint event for existing presence/history consumers while adding the more precise DEVICE_IDENTITY_ASSESSED event.
 
 ## Earlier 14.1 roadmap work retained
