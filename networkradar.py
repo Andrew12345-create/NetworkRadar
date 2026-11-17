@@ -3330,6 +3330,7 @@ def identity_subscan_worker():
             task = IDENTITY_SUBSCAN.claim_due()
             if not task:
                 continue
+            SUBSCAN_ACTIVE_EVENT.set()
             ip = str(task.get("ip") or "")
             try:
                 with NET_LOCK:
@@ -3364,7 +3365,6 @@ def identity_subscan_worker():
                                                        str(device.get("open_ports") or ""))
                     if 1 <= int(value) <= 65535
                 ]
-                SUBSCAN_ACTIVE_EVENT.set()
                 update_job(phase="Identity subscan",
                            message=f"Investigating previously unidentified device {ip} in a bounded one-host subscan.")
                 result = enrich_devices([device], deep=True, mdns_rows=[])
