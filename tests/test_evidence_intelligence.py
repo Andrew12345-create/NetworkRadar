@@ -94,6 +94,14 @@ class EvidenceIntelligenceTests(unittest.TestCase):
         self.assertIn("AUTHORIZATION_REQUIRED",
                       [row["state"] for row in result["deferred"]])
 
+    def test_snmp_requires_configured_credentials_and_authorisation(self):
+        result = plan_investigation_methods(
+            {"ip": "192.168.1.22", "status": "ONLINE",
+             "snmpv3_configured": False}, [], {}, authorised=True,
+        )
+        self.assertIn("CONFIGURATION_REQUIRED",
+                      [row["state"] for row in result["deferred"]])
+
     def test_unknown_device_guidance_does_not_repeat_unavailable_dhcp(self):
         result = build_identity_next_steps(
             {"ip": "192.168.1.22", "status": "ONLINE",
