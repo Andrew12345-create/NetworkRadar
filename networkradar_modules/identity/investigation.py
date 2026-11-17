@@ -56,7 +56,7 @@ def build_identity_next_steps(
     if not has_dhcp:
         dhcp_state = str(device.get("dhcp_capture_status") or "").upper()
         dhcp_attempted = bool(device.get("dhcp_investigation_attempted"))
-        if dhcp_state in {"UNAVAILABLE", "ERROR", "STOPPED", "NO_INTERFACE"}:
+        if dhcp_state in {"UNAVAILABLE", "ERROR", "STOPPED", "NO_INTERFACE", "FAILED", "DEGRADED"}:
             add(
                 "LOW",
                 "DHCP collection is unavailable; wait for a supported capture interface or use another evidence source.",
