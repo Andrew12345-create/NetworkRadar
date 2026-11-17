@@ -1,3 +1,16 @@
+# NetworkRadar 13.8.0 — Embedded OS Identity Recognition
+
+## Device classification
+- Adds a conservative "Embedded / appliance device" category for supported embedded real-time OS fingerprints from Nmap OS or safe script evidence.
+- Recognises VxWorks, QNX, eCos, ThreadX, FreeRTOS and Zephyr as embedded OS-family indicators.
+- Extends the OS-family dossier to report "Embedded / appliance OS" for these fingerprints.
+- Does not infer a device manufacturer, exact product role, hardware model or serial number from an OS fingerprint or NIC/OUI registrant.
+- No new network probes, database migrations, or authorisation changes are introduced.
+
+## Validation
+- Adds a regression test using the observed VxWorks fingerprint pattern from the current network inventory.
+- GitHub Actions Windows/Python matrix and local Windows/Nmap verification are required before treating the release as fully validated.
+
 # NetworkRadar 13.7.0 — Dashboard Consistency & Accessibility
 
 ## Frontend refinements
