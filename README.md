@@ -1,4 +1,12 @@
-# NetworkRadar 13.4.0
+# NetworkRadar 13.5.0
+
+## Scan observability and unknown-device investigation (13.5.0)
+
+- Measures wall-clock time for discovery, Nmap TCP/OS, fallback, UDP, service enrichment, identity fusion and post-scan analytics.
+- Adds a local Scan Performance panel and `/api/scan_performance` endpoint; timings are measured, not estimated.
+- Adds evidence-specific next actions to Unknown Device Hunter. Suggestions never launch probes automatically and active actions remain conditional on network authorisation.
+- Exact model/manufacturer claims remain limited to authenticated endpoint inventory or explicit device/service-reported fields.
+- Adds regression tests for scan profiling and evidence-gap guidance. No database migration is required.
 
 ## Bounded deep discovery and identity diagnostics (13.4.0)
 
@@ -12,7 +20,7 @@
 
 ## Current release
 
-NetworkRadar 13.4.0 builds on the 13.3.x authorisation, firewall-timeout and Windows network-context fixes below. Live Windows/Nmap/Npcap validation is still required to confirm scan duration on the local network.
+NetworkRadar 13.5.0 builds on 13.4.0 and the 13.3.x authorisation, firewall-timeout and Windows network-context fixes below. Live Windows/Nmap/Npcap validation is still required to confirm scan duration on the local network.
 
 ## Windows dashboard startup reliability (13.1.1)
 
