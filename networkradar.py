@@ -5936,6 +5936,7 @@ def unknown_device_hunter(conn, limit=100):
         LIMIT ?""", (max(1,min(int(limit),250)),)).fetchall()
     results=[]
     active_authorised = is_authorized()
+    dhcp_capture_status = str(DHCP_STATE.get("status", "UNKNOWN")).upper()
     queue_by_ip = {}
     try:
         queue_snapshot = IDENTITY_SUBSCAN.snapshot()
@@ -5967,6 +5968,7 @@ def unknown_device_hunter(conn, limit=100):
             "os_guess": r[6] or "Unknown", "model": r[7] or "",
             "identification_confidence": int(r[8] or 0),
             "open_ports": r[13] or "",
+            "dhcp_capture_status": dhcp_capture_status,
             "investigation_attempts": queue_attempts,
         }
         guidance = build_identity_next_steps(
