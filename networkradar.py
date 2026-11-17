@@ -8103,7 +8103,8 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
         for dev in devices
     ]
     plan = build_fingerprint_plan(
-        planner_devices, last_fingerprint_at, max_targets=8, max_udp_targets=3
+        planner_devices, last_fingerprint_at, max_targets=8, max_udp_targets=3,
+        allowed_network=current_network(),
     )
     selected_ips = set(plan["targets"])
     target_devices = [dev for dev in devices if str(dev.get("ip") or "") in selected_ips]
