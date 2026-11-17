@@ -3187,7 +3187,10 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                     tuple(scan_ips),
                 ).fetchall()
             for row in history_rows:
-                history_by_ip[str(row[0])].append({
+                ip_key = str(row[0])
+                if len(history_by_ip[ip_key]) >= 160:
+                    continue
+                history_by_ip[ip_key].append({
                     "source": row[1], "attribute": row[2], "value": row[3],
                     "confidence": row[4], "evidence_class": row[5],
                     "last_seen": row[6],
