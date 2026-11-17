@@ -5713,7 +5713,7 @@ def unknown_device_hunter(conn, limit=100):
     """Return low-confidence devices with evidence-specific, non-invasive next steps."""
     rows = conn.execute("""SELECT d.ip,d.device_id,d.mac,d.hostname,d.device_name,
         d.device_type,d.os_guess,d.model,d.identification_confidence,d.status,
-        d.last_seen,COUNT(e.id),COUNT(DISTINCT e.source)
+        d.last_seen,COUNT(e.id),COUNT(DISTINCT e.source),d.open_ports
         FROM devices d LEFT JOIN device_identity_evidence e ON e.ip=d.ip
         WHERE d.status IN ('ONLINE','SUSPECTED_OFFLINE') AND
         (COALESCE(d.identification_confidence,0)<60 OR
@@ -5737,7 +5737,7 @@ def unknown_device_hunter(conn, limit=100):
             "ip": ip, "device_type": r[5] or "Unclassified network device",
             "os_guess": r[6] or "Unknown", "model": r[7] or "",
             "identification_confidence": int(r[8] or 0),
-            "port_numbers": r[7] or "",
+            "open_ports": r[13] or "",
         }
         guidance = build_identity_next_steps(
             profile, sources, dhcp_observed=dhcp_seen,
