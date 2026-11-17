@@ -102,6 +102,27 @@ class EvidenceIntelligenceTests(unittest.TestCase):
         self.assertIn("CONFIGURATION_REQUIRED",
                       [row["state"] for row in result["deferred"]])
 
+    def test_running_investigation_is_not_scheduled_twice(self):
+        result = plan_investigation_methods(
+            {"ip": "192.168.1.22", "status": "ONLINE"}, [],
+            {"nmap": {"attempts": 1, "state": "RUNNING"}},
+            authorised=True,
+        )
+        self.assertNotIn("nmap", [row["method"] for row in result["planned"]])
+        self.assertIn("RUNNING", [row["state"] for row in result["deferred"]])
+
+    def test_queue_epoch_timestamp_is_respected_as_cooldown(self):
+        now = datetime(2026, 11, 17, tzinfo=timezone.utc)
+        next_at = (now + timedelta(minutes=20)).timestamp()
+        result = plan_investigation_methods(
+            {"ip": "192.168.1.22", "status": "ONLINE"}, [],
+            {"nmap": {"attempts": 1, "state": "QUEUED",
+                      "next_eligible_at": next_at}},
+            authorised=True, now=now,
+        )
+        self.assertNotIn("nmap", [row["method"] for row in result["planned"]])
+        self.assertIn("COOLDOWN", [row["state"] for row in result["deferred"]])
+
     def test_unknown_device_guidance_does_not_repeat_unavailable_dhcp(self):
         result = build_identity_next_steps(
             {"ip": "192.168.1.22", "status": "ONLINE",
