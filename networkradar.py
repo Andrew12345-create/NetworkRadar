@@ -3116,7 +3116,7 @@ def attach_enrolled_endpoint_inventory(devices):
     return attached
 
 
-def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
+def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=False):
     attach_enrolled_endpoint_inventory(devices)
     arp = read_arp_cache()
     local = local_identity()
@@ -3129,11 +3129,12 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
             dev["mac"] = arp[dev["ip"]]
             dev.setdefault("_extra", []).append(("ARP cache", dev["mac"], 70))
     ssdp = {}
-    try:
-        with measure_phase(profiler, "identity.ssdp_discovery"):
-            ssdp = ssdp_scan(timeout=2.0)
-    except Exception:
-        pass
+    if not targeted:
+        try:
+            with measure_phase(profiler, "identity.ssdp_discovery"):
+                ssdp = ssdp_scan(timeout=2.0)
+        except Exception:
+            pass
     mdns_by_ip = defaultdict(list)
     for item in (mdns_rows or []):
         if item.get("ip") and item.get("records"):
@@ -3142,7 +3143,7 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
         with measure_phase(profiler, "identity.deep_fingerprint_total"):
             deep_fingerprint(devices, profiler=profiler)
     passive_tcp = {"status": "NOT_RUN", "devices": {}, "detail": "Deep discovery not requested."}
-    if deep and is_authorized():
+    if deep and is_authorized() and not targeted:
         with measure_phase(profiler, "identity.passive_tcp_snapshot"):
             passive_tcp = passive_tcp_fingerprint_snapshot(duration=4)
     for dev in devices:
@@ -3150,7 +3151,7 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
             dev["passive_tcp"] = passive_tcp["devices"][dev["ip"]]
     l2_by_mac = {}
     try:
-        if deep:
+        if deep and not targeted:
             with measure_phase(profiler, "identity.lldp_cdp_collection"):
                 for item in collect_lldp_cdp(duration=2):
                     lm = _normalise_mac(item.get("mac", ""))
@@ -3367,13 +3368,13 @@ def identity_subscan_worker():
                 device.setdefault("identification_confidence", 0)
                 device["vendor"] = device.get("manufacturer") or device.get("oui_manufacturer") or ""
                 device["port_numbers"] = [
-                    int(value) for value in re.findall(r"(?<!\\d)(\\d{1,5})(?!\\d)",
+                    int(value) for value in re.findall(r"(?<!\d)(\d{1,5})(?!\d)",
                                                        str(device.get("open_ports") or ""))
                     if 1 <= int(value) <= 65535
                 ]
                 update_job(phase="Identity subscan",
                            message=f"Investigating previously unidentified device {ip} in a bounded one-host subscan.")
-                result = enrich_devices([device], deep=True, mdns_rows=[])
+                result = enrich_devices([device], deep=True, mdns_rows=[], targeted=True)
                 enriched = result[0] if result else device
                 recognised = not IdentitySubscanCoordinator.is_unidentified(enriched)
                 outcome = IDENTITY_SUBSCAN.complete(
