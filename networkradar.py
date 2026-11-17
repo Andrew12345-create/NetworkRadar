@@ -4575,7 +4575,7 @@ def evaluate_presence_for_device(conn, device_id, prior_state=None):
     obs_rows = conn.execute(
         "SELECT timestamp FROM network_events WHERE device_id=? "
         "AND event_type IN ('DEVICE_FINGERPRINTED','NEW_DEVICE','DEVICE_RETURNED') "
-        "AND timestamp >= datetime('now','-7 days') "
+        "AND timestamp >= datetime('now','localtime','-7 days') "
         "ORDER BY timestamp DESC LIMIT 500", (device_id,)).fetchall()
     scan_rows = conn.execute(
         "SELECT timestamp FROM scans WHERE timestamp >= datetime('now','-7 days') "
