@@ -2,7 +2,7 @@
 
 This planner is deliberately pure: it performs no network I/O and makes no
 authorisation decision. The caller must enforce current network authorisation
-before invoking Nmap. A completed fingerprint is cooled down so repeated full
+before invoking Nmap. A recent fingerprint attempt is cooled down so repeated full
 scans do not spend most of their time re-probing unchanged, well-understood
 hosts. New and weakly identified hosts receive priority.
 """
@@ -58,13 +58,13 @@ def build_fingerprint_plan(
     """Select the most useful private IPv4 targets without re-scanning all hosts.
 
     Priority order:
-      1. No completed fingerprint exists for this IP.
+      1. No prior Nmap fingerprint attempt is recorded for this IP.
       2. Low-confidence identity whose last fingerprint is at least 15 minutes old.
       3. Medium-confidence identity whose fingerprint is at least 6 hours old.
       4. Higher-confidence identity whose fingerprint is at least 24 hours old.
 
-    The timestamp is taken from completed port-scan observations, not
-    last_identified (which is refreshed by ordinary evidence fusion).
+    The timestamp is taken from port-scan observations (including incomplete
+    attempts), not last_identified (which is refreshed by ordinary evidence fusion).
     """
     now = time.time() if now is None else float(now)
     history = last_fingerprint_at or {}
@@ -92,7 +92,7 @@ def build_fingerprint_plan(
         age = None if last is None else max(0.0, now - last)
         confidence = _confidence(raw)
         if last is None:
-            priority, reason = 100, "No completed Nmap fingerprint exists"
+            priority, reason = 100, "No prior Nmap fingerprint attempt is recorded"
         elif confidence < 58 and age >= max(60, int(unknown_retry_seconds)):
             priority, reason = 90, "Low-confidence identity is due for another bounded investigation"
         elif confidence < 58:
