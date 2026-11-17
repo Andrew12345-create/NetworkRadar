@@ -401,6 +401,8 @@ DB.parent.mkdir(parents=True, exist_ok=True)
 STOP_EVENT = threading.Event()
 SCAN_NOW_EVENT = threading.Event()
 SUBSCAN_ACTIVE_EVENT = threading.Event()
+MAIN_SCAN_RESERVED_EVENT = threading.Event()
+SCAN_SUBSCAN_GATE = threading.Lock()
 IDENTITY_SUBSCAN = IdentitySubscanCoordinator(max_attempts=3, base_backoff=90,
                                                 max_backoff=3600,
                                                 exhausted_cooldown=21600)
@@ -3116,7 +3118,11 @@ def attach_enrolled_endpoint_inventory(devices):
     return attached
 
 
-def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=False):
+def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=False,
+                   progress_callback=None):
+    if progress_callback:
+        progress_callback("Preparing identity evidence", 5,
+                          "Loading enrolled endpoint inventory and local neighbour evidence.")
     attach_enrolled_endpoint_inventory(devices)
     arp = read_arp_cache()
     local = local_identity()
@@ -3141,7 +3147,11 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
             mdns_by_ip[item["ip"]].append(item["records"])
     if deep:
         with measure_phase(profiler, "identity.deep_fingerprint_total"):
-            deep_fingerprint(devices, profiler=profiler)
+            deep_fingerprint(devices, profiler=profiler,
+                             progress_callback=progress_callback)
+    if progress_callback:
+        progress_callback("Host identity and hostname resolution", 76,
+                          "Correlating hostnames, vendor hints and device-specific identity evidence.")
     passive_tcp = {"status": "NOT_RUN", "devices": {}, "detail": "Deep discovery not requested."}
     if deep and is_authorized() and not targeted:
         with measure_phase(profiler, "identity.passive_tcp_snapshot"):
@@ -3174,6 +3184,9 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                     obs_by_ip[dev["ip"]] = fut.result()
                 except Exception as e:
                     obs_by_ip[dev["ip"]] = [("Error", _clean(e, 160), 0)]
+    if progress_callback:
+        progress_callback("Parallel service intelligence", 83,
+                          "Checking available TLS certificates, SNMPv3 responses and service banners.")
     # Network probes are independent across hosts. Run the bounded read-only
     # enrichments concurrently so one slow endpoint cannot serialize the scan.
     def _collect_probe_bundle(dev):
@@ -3201,6 +3214,9 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                         "Parallel identity enrichment: " + _clean(exc, 140)
                     )
 
+    if progress_callback:
+        progress_callback("Evidence fusion and device classification", 91,
+                          "Combining Nmap, service, hostname, vendor and endpoint evidence.")
     for dev in devices:
         try:
             tls_rows, snmp_rows, service_rows = probe_results.get(
@@ -3225,6 +3241,9 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
     for dev in devices:
         dev["identity_assessments"] = assess_identity_evidence(dev, dev.get("identity_evidence", []))
 
+    if progress_callback:
+        progress_callback("Saving identity findings", 97,
+                          "Writing updated device identity, observations and evidence history.")
     def _w(conn):
         ts = now_text()
         for dev in devices:
@@ -3314,6 +3333,9 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
         persist_identity_evidence(devices)
     except Exception:
         pass
+    if progress_callback:
+        progress_callback("Identity assessment complete", 99,
+                          "The targeted device investigation has finished; final result is being recorded.")
     return devices
 
 
@@ -8015,7 +8037,7 @@ def start_web():
         pass
     return server
 
-def deep_fingerprint(devices, profiler=None):
+def deep_fingerprint(devices, profiler=None, progress_callback=None):
     """Run authorised TCP, OS, safe-script and targeted UDP identification."""
     if not devices or not is_authorized():
         return False
@@ -8032,12 +8054,15 @@ def deep_fingerprint(devices, profiler=None):
         return False
 
     profile = deep_scan_profile(len(ips), FINGERPRINT_TOP_PORTS)
-    update_job(
-        phase="Deep identity fingerprinting", percent=48,
-        message=(f"Bounded Nmap enrichment: {profile['tcp_top_ports']} TCP ports "
-                 f"across {len(ips)} hosts; per-host cap "
-                 f"{profile['tcp_host_timeout']}s.")
-    )
+    progress_message = (f"Bounded Nmap enrichment: {profile['tcp_top_ports']} TCP ports "
+                         f"across {len(ips)} hosts; per-host cap "
+                         f"{profile['tcp_host_timeout']}s.")
+    if progress_callback:
+        progress_callback("Nmap TCP/OS and service fingerprint", 15,
+                          progress_message + " Nmap does not expose reliable live percentage progress.")
+    else:
+        update_job(phase="Deep identity fingerprinting", percent=48,
+                   message=progress_message)
 
     # Use only explicitly selected safe discovery scripts. Per-host and
     # whole-process budgets prevent filtered devices from holding the scan
@@ -8162,6 +8187,9 @@ def deep_fingerprint(devices, profiler=None):
                     "method": _clean(service.get("method", "") if service is not None else "", 40),
                 })
 
+        if progress_callback:
+            progress_callback("Targeted UDP identification", 68,
+                              "TCP/OS pass returned; running bounded printer, UPnP, DNS-SD and SNMP-related discovery probes.")
         # Targeted UDP probes often reveal printer, discovery, UPnP and
         # management capabilities missed by a TCP-only inventory. This is a
         # bounded optional pass; failure never discards the TCP results.
@@ -8227,6 +8255,9 @@ def deep_fingerprint(devices, profiler=None):
             dev["service_summary"] = "; ".join(dev.get("services_found", []))[:700]
             dev["nmap_script_intel"] = dev.get("nmap_script_intel", [])[:64]
 
+        if progress_callback:
+            progress_callback("Persisting Nmap fingerprint evidence", 94,
+                              "Saving discovered ports, services and safe-script observations.")
         ts = now_text()
         def _save(conn):
             for dev in devices:
@@ -8253,6 +8284,9 @@ def deep_fingerprint(devices, profiler=None):
                          "No complete per-host TCP port result; findings retained")
                     )
         DB_MANAGER.write(_save)
+        if progress_callback:
+            progress_callback("Nmap fingerprint complete", 96,
+                              "Nmap TCP/OS, service and targeted UDP passes have returned.")
         return all(d.get("_port_scan_complete") for d in devices)
     except Exception as error:
         NMAP_LOG.write_text(
