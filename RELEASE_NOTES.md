@@ -1,3 +1,22 @@
+# NetworkRadar 13.6.0 — Continuous Identity Investigation & Scan Performance
+
+## Continuous unknown-device subscans
+- Adds a long-lived, low-priority identity subscan worker. Newly observed unidentified private IPv4 hosts are queued for separate one-host follow-up fingerprinting rather than forcing every host through the same deep scan in the main discovery cycle.
+- The worker remains available for the lifetime of NetworkRadar, processes one device at a time, and yields to full network scans.
+- Active follow-up requires explicit authorisation and verifies that each target remains inside the currently authorised private subnet.
+- Each target receives at most three attempts per evidence signature, with exponential backoff (90 seconds, then 180 seconds) and a six-hour cooldown after exhaustion. New identity evidence can reopen an exhausted/resolved target.
+- Adds a dashboard view for queue state, attempts, next retry and last error/result. The queue is rebuilt from current inventory after restart; device history remains in the database.
+- This is persistent investigation scheduling, not an endless rapid scan loop. It avoids repeatedly hammering filtered/offline devices and preserves normal network availability.
+
+## Main-scan performance and identity quality
+- Retains the 13.5.0 phase profiler and evidence-aware identity next-step guidance.
+- Separates quick network discovery from targeted deeper investigations of unresolved devices.
+- Exact hardware model and serial number remain unclaimed unless explicit device-reported or authenticated endpoint evidence supports them.
+
+## Validation
+- Adds unit tests for deduplication, one-at-a-time claims, exponential backoff, retry exhaustion, evidence-change reopening and private IPv4 scoping.
+- Full Windows/Nmap/Npcap live validation is still required to measure subscan duration and verify device-specific identity improvements.
+
 # NetworkRadar 13.5.0 — Scan Observability and Evidence-Led Device Investigation
 
 ## Scan performance observability

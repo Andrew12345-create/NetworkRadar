@@ -306,6 +306,7 @@ from networkradar_modules.core.startup import (
 from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.diagnostics.scan_profiler import ScanProfiler, measure_phase
 from networkradar_modules.identity.investigation import build_identity_next_steps
+from networkradar_modules.identity.subscan import IdentitySubscanCoordinator
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
 from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
 from networkradar_modules.discovery.tcp_sweep import sweep_tcp_hosts
@@ -399,6 +400,10 @@ DB.parent.mkdir(parents=True, exist_ok=True)
 
 STOP_EVENT = threading.Event()
 SCAN_NOW_EVENT = threading.Event()
+SUBSCAN_ACTIVE_EVENT = threading.Event()
+IDENTITY_SUBSCAN = IdentitySubscanCoordinator(max_attempts=3, base_backoff=90,
+                                                max_backoff=3600,
+                                                exhausted_cooldown=21600)
 
 JOB_LOCK = threading.Lock()
 JOB_STATE = {"state": "IDLE", "phase": "Waiting", "percent": 0,
@@ -3111,7 +3116,7 @@ def attach_enrolled_endpoint_inventory(devices):
     return attached
 
 
-def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
+def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=False):
     attach_enrolled_endpoint_inventory(devices)
     arp = read_arp_cache()
     local = local_identity()
@@ -3124,11 +3129,12 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
             dev["mac"] = arp[dev["ip"]]
             dev.setdefault("_extra", []).append(("ARP cache", dev["mac"], 70))
     ssdp = {}
-    try:
-        with measure_phase(profiler, "identity.ssdp_discovery"):
-            ssdp = ssdp_scan(timeout=2.0)
-    except Exception:
-        pass
+    if not targeted:
+        try:
+            with measure_phase(profiler, "identity.ssdp_discovery"):
+                ssdp = ssdp_scan(timeout=2.0)
+        except Exception:
+            pass
     mdns_by_ip = defaultdict(list)
     for item in (mdns_rows or []):
         if item.get("ip") and item.get("records"):
@@ -3137,7 +3143,7 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
         with measure_phase(profiler, "identity.deep_fingerprint_total"):
             deep_fingerprint(devices, profiler=profiler)
     passive_tcp = {"status": "NOT_RUN", "devices": {}, "detail": "Deep discovery not requested."}
-    if deep and is_authorized():
+    if deep and is_authorized() and not targeted:
         with measure_phase(profiler, "identity.passive_tcp_snapshot"):
             passive_tcp = passive_tcp_fingerprint_snapshot(duration=4)
     for dev in devices:
@@ -3145,7 +3151,7 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
             dev["passive_tcp"] = passive_tcp["devices"][dev["ip"]]
     l2_by_mac = {}
     try:
-        if deep:
+        if deep and not targeted:
             with measure_phase(profiler, "identity.lldp_cdp_collection"):
                 for item in collect_lldp_cdp(duration=2):
                     lm = _normalise_mac(item.get("mac", ""))
@@ -3309,6 +3315,91 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
     except Exception:
         pass
     return devices
+
+
+def identity_subscan_worker():
+    """Continuously investigate unknown devices one at a time with strict bounds."""
+    IDENTITY_SUBSCAN.set_worker_alive(True)
+    try:
+        while not STOP_EVENT.wait(3):
+            if not is_authorized():
+                continue
+            with JOB_LOCK:
+                main_scan_running = JOB_STATE.get("state") == "RUNNING"
+            if main_scan_running or SUBSCAN_ACTIVE_EVENT.is_set():
+                continue
+            task = IDENTITY_SUBSCAN.claim_due()
+            if not task:
+                continue
+            SUBSCAN_ACTIVE_EVENT.set()
+            with JOB_LOCK:
+                main_scan_started = JOB_STATE.get("state") == "RUNNING"
+            if main_scan_started:
+                IDENTITY_SUBSCAN.defer_active("Deferred because a full network scan started.")
+                SUBSCAN_ACTIVE_EVENT.clear()
+                continue
+            ip = str(task.get("ip") or "")
+            try:
+                with NET_LOCK:
+                    network_text = str(NET_CTX.get("network") or "")
+                network = ipaddress.ip_network(network_text, strict=False)
+                address = ipaddress.ip_address(ip)
+                if address not in network or not address.is_private:
+                    IDENTITY_SUBSCAN.complete(task["key"], recognised=False,
+                                              error="Target is outside the currently authorised private subnet.")
+                    continue
+                with DB_MANAGER.read() as conn:
+                    row = conn.execute(
+                        "SELECT * FROM devices WHERE ip=? AND status='ONLINE' LIMIT 1",
+                        (ip,)
+                    ).fetchone()
+                if not row:
+                    IDENTITY_SUBSCAN.complete(task["key"], recognised=False,
+                                              error="Device is no longer online; awaiting a fresh observation.")
+                    continue
+                device = dict(row)
+                device.setdefault("ip", ip)
+                device.setdefault("mac", "")
+                device.setdefault("hostname", "")
+                device.setdefault("device_name", "Unidentified device")
+                device.setdefault("device_type", "Unclassified network device")
+                device.setdefault("os_guess", "Unknown")
+                device.setdefault("model", "")
+                device.setdefault("identification_confidence", 0)
+                device["vendor"] = device.get("manufacturer") or device.get("oui_manufacturer") or ""
+                device["port_numbers"] = [
+                    int(value) for value in re.findall(r"(?<!\d)(\d{1,5})(?!\d)",
+                                                       str(device.get("open_ports") or ""))
+                    if 1 <= int(value) <= 65535
+                ]
+                result = enrich_devices([device], deep=True, mdns_rows=[], targeted=True)
+                enriched = result[0] if result else device
+                recognised = not IdentitySubscanCoordinator.is_unidentified(enriched)
+                outcome = IDENTITY_SUBSCAN.complete(
+                    task["key"], recognised=recognised,
+                    error="" if recognised else "No new conclusive identity evidence; retry scheduled with backoff."
+                )
+                def _event(conn):
+                    record_event(
+                        conn, ip, "IDENTITY_SUBSCAN_COMPLETED",
+                        f"Targeted identity subscan {outcome.get('state','UNKNOWN')}; "
+                        f"confidence={int(enriched.get('identification_confidence') or 0)}%; "
+                        f"attempt={task.get('attempts', 0)}.",
+                        category="discovery"
+                    )
+                DB_MANAGER.write(_event)
+            except Exception as exc:
+                IDENTITY_SUBSCAN.complete(
+                    task["key"], recognised=False,
+                    error=_clean(exc, 220)
+                )
+            finally:
+                SUBSCAN_ACTIVE_EVENT.clear()
+                # Leave capacity for normal discovery and telemetry work.
+                STOP_EVENT.wait(15)
+    finally:
+        IDENTITY_SUBSCAN.set_worker_alive(False)
+
 
 def update_network_sighting_presence(devices):
     """Update only the active workspace; empty/failed scans never mark sightings offline."""
@@ -7125,6 +7216,9 @@ class Handler(BaseHTTPRequestHandler):
                 if p.path == "/api/unknown-hunter":
                     return self.send_json(unknown_device_hunter(conn))
 
+                if p.path == "/api/identity/subscan":
+                    return self.send_json(IDENTITY_SUBSCAN.snapshot())
+
                 if p.path == "/api/ipv6":
                     rows = conn.execute("""SELECT e.ipv6,e.mac,e.interface_index,e.interface_alias,e.state,e.timestamp,e.linked_device_id
                         FROM ipv6_observation_events e ORDER BY e.id DESC LIMIT 500""").fetchall()
@@ -8309,6 +8403,10 @@ def _main_inner():
     dns.start()
     dhcp.start()
     arp.start()
+    subscan_thread = threading.Thread(
+        target=identity_subscan_worker, name="NR-IdentitySubscan", daemon=True
+    )
+    subscan_thread.start()
 
     scan_n = 0
     last_dash = last_scan = last_health = last_corr = last_risk = last_audit = 0
@@ -8375,6 +8473,11 @@ def _main_inner():
                 SCAN_NOW_EVENT.clear()
 
             if manual or now - last_scan >= SCAN_INTERVAL:
+                if SUBSCAN_ACTIVE_EVENT.is_set():
+                    if manual:
+                        SCAN_NOW_EVENT.set()
+                    STOP_EVENT.wait(1)
+                    continue
                 try:
                     changed, approved = refresh_network_context()
                     if changed:
@@ -8458,6 +8561,9 @@ def _main_inner():
                         devices = enrich_devices(
                             devices, deep=deep, mdns_rows=mdns_rows, profiler=profiler
                         )
+                    # Queue every still-unidentified live host for a separate,
+                    # low-priority one-host investigation cycle.
+                    IDENTITY_SUBSCAN.observe(devices)
                     update_job(phase="Identity evidence", percent=58,
                                message=f"Enrichment complete for {len(devices)} responding hosts; retaining unknowns where evidence is insufficient.")
                     # Update only this workspace; a non-empty completed scan is required.
@@ -8569,6 +8675,7 @@ def _main_inner():
         dns.join(timeout=5)
         dhcp.join(timeout=5)
         arp.join(timeout=5)
+        subscan_thread.join(timeout=5)
         print("Flushing database...")
         DB_MANAGER.flush(timeout=10)
         DB_MANAGER.stop(timeout=10)
