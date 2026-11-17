@@ -8069,11 +8069,19 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
             with DB_MANAGER.read() as conn:
                 rows = conn.execute(
                     "SELECT ip, MAX(timestamp) FROM port_scan_observations "
-                    f"WHERE completed=1 AND ip IN ({marks}) GROUP BY ip",
+                    f"WHERE ip IN ({marks}) GROUP BY ip",
                     all_ips,
                 ).fetchall()
             last_fingerprint_at = {
                 str(row[0]): row[1] for row in rows if row and row[0]
+            }
+            confidence_rows = conn.execute(
+                "SELECT ip, COALESCE(identification_confidence, 0) "
+                f"FROM devices WHERE ip IN ({marks})",
+                all_ips,
+            ).fetchall()
+            confidence_by_ip = {
+                str(row[0]): row[1] for row in confidence_rows if row and row[0]
             }
         except Exception as history_error:
             # Fail open for coverage: if history cannot be read, treat targets
@@ -8084,8 +8092,17 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
                     + _clean(history_error, 140)
                 )
 
+    planner_devices = [
+        {
+            **dev,
+            "identification_confidence": confidence_by_ip.get(
+                str(dev.get("ip") or ""), dev.get("identification_confidence", 0)
+            ),
+        }
+        for dev in devices
+    ]
     plan = build_fingerprint_plan(
-        devices, last_fingerprint_at, max_targets=8, max_udp_targets=3
+        planner_devices, last_fingerprint_at, max_targets=8, max_udp_targets=3
     )
     selected_ips = set(plan["targets"])
     target_devices = [dev for dev in devices if str(dev.get("ip") or "") in selected_ips]
@@ -8180,7 +8197,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
             DB_MANAGER.write(lambda conn: [conn.execute(
                 "INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail) VALUES(?,?,?,?,?,?,?)",
                 (ts, d["ip"], d.get("device_id", ""), 0, "", "nmap",
-                 "Nmap returned no XML output")) for d in devices])
+                 "Nmap returned no XML output")) for d in target_devices])
             return False
 
         root = ET.fromstring(r.stdout)
