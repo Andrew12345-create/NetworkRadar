@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 13.8.0 — Embedded OS fingerprint recognition and identity refinement.
+NetworkRadar 14.0.0 — Adaptive fingerprint scheduling, bounded scan budgets and evidence-aware identity intelligence.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
@@ -312,6 +312,7 @@ from networkradar_modules.database.manager import DatabaseManager, NestedWriteEr
 from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
 from networkradar_modules.discovery.tcp_sweep import sweep_tcp_hosts
 from networkradar_modules.discovery.scan_budget import deep_scan_profile
+from networkradar_modules.discovery.adaptive_fingerprint import build_fingerprint_plan
 from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
 from networkradar_modules.discovery.neighbors import (
     collect_windows_neighbor_cache, merge_reachable_neighbors,
@@ -8057,22 +8058,64 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
     """Run authorised TCP, OS, safe-script and targeted UDP identification."""
     if not devices or not is_authorized():
         return False
-    for dev in devices:
+    # Use completed port-scan observations as the fingerprint freshness clock.
+    # last_identified is intentionally unsuitable: passive evidence fusion
+    # refreshes it even when Nmap has not run.
+    all_ips = [str(d.get("ip") or "").strip() for d in devices if d.get("ip")]
+    last_fingerprint_at = {}
+    if all_ips:
+        try:
+            marks = ",".join("?" for _ in all_ips)
+            with DB_MANAGER.read() as conn:
+                rows = conn.execute(
+                    "SELECT ip, MAX(timestamp) FROM port_scan_observations "
+                    f"WHERE completed=1 AND ip IN ({marks}) GROUP BY ip",
+                    all_ips,
+                ).fetchall()
+            last_fingerprint_at = {
+                str(row[0]): row[1] for row in rows if row and row[0]
+            }
+        except Exception as history_error:
+            # Fail open for coverage: if history cannot be read, treat targets
+            # as new rather than silently suppressing their first fingerprint.
+            for dev in devices:
+                dev.setdefault("collection_notes", []).append(
+                    "Adaptive fingerprint history unavailable; using new-device priority: "
+                    + _clean(history_error, 140)
+                )
+
+    plan = build_fingerprint_plan(
+        devices, last_fingerprint_at, max_targets=8, max_udp_targets=3
+    )
+    selected_ips = set(plan["targets"])
+    target_devices = [dev for dev in devices if str(dev.get("ip") or "") in selected_ips]
+    ips = [dev["ip"] for dev in target_devices if dev.get("ip")]
+    udp_ips = list(plan["udp_targets"])
+    if not ips:
+        note = (
+            "Adaptive fingerprint scheduler deferred Nmap: all live devices have "
+            "recent evidence or are inside the retry cooldown."
+        )
+        for dev in devices:
+            dev.setdefault("collection_notes", []).append(note)
+        return False
+
+    for dev in target_devices:
         dev["_port_scan_complete"] = False
         dev["port_numbers"] = []
         dev["udp_port_numbers"] = []
         dev["services_found"] = []
         dev["nmap_service_intel"] = []
         dev["nmap_script_intel"] = []
-        dev["collection_notes"] = []
-    ips = [d["ip"] for d in devices if d.get("ip")]
-    if not ips:
-        return False
+        dev["collection_notes"] = list(dev.get("collection_notes") or [])
 
-    profile = deep_scan_profile(len(ips), FINGERPRINT_TOP_PORTS)
-    progress_message = (f"Bounded Nmap enrichment: {profile['tcp_top_ports']} TCP ports "
-                         f"across {len(ips)} hosts; per-host cap "
-                         f"{profile['tcp_host_timeout']}s.")
+    profile = deep_scan_profile(len(ips), min(FINGERPRINT_TOP_PORTS, 50))
+    progress_message = (
+        f"Adaptive fingerprinting selected {len(ips)}/{len(devices)} live hosts "
+        f"({len(udp_ips)} targeted UDP); {profile['tcp_top_ports']} TCP ports, "
+        f"{profile['tcp_timeout']}s process budget and "
+        f"{profile['tcp_host_timeout']}s per-host cap."
+    )
     if progress_callback:
         progress_callback("Nmap TCP/OS and service fingerprint", 15,
                           progress_message + " Nmap does not expose reliable live percentage progress.")
@@ -8127,7 +8170,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
             if r.returncode != 0 or not r.stdout.strip():
                 detail = _clean(r.stderr or first_error or "No XML output from bounded Nmap passes.", 300)
                 raise RuntimeError("Nmap deep fingerprinting failed: " + detail)
-            for dev in devices:
+            for dev in target_devices:
                 dev["collection_notes"].append(
                     "Used reduced bounded TCP service fallback; full OS/script pass "
                     + (first_error or "was unavailable.")
@@ -8141,7 +8184,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
             return False
 
         root = ET.fromstring(r.stdout)
-        by_ip = {d["ip"]: d for d in devices}
+        by_ip = {d["ip"]: d for d in target_devices}
 
         def collect_scripts(host, dev):
             for script in host.findall(".//script"):
@@ -8215,12 +8258,14 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
             "--host-timeout", f"{profile['udp_host_timeout']}s",
             "-p", "137,161,1900,3702,5353",
             "--script", "upnp-info,dns-service-discovery",
-            "--script-timeout", "8s", "-oX", "-"
+            "--script-timeout", "6s", "-oX", "-"
         ]
         try:
+            if not udp_ips:
+                raise RuntimeError("No UDP targets selected by the adaptive scheduler.")
             with measure_phase(profiler, "fingerprint.nmap_targeted_udp"):
                 udp_result = subprocess.run(
-                    udp_command + ips, capture_output=True, text=True,
+                    udp_command + udp_ips, capture_output=True, text=True,
                     encoding="utf-8", errors="replace",
                     timeout=profile["udp_timeout"]
                 )
@@ -8257,14 +8302,14 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
                         })
             else:
                 detail = _clean(udp_result.stderr or "No UDP XML results.", 220)
-                for dev in devices:
+                for dev in target_devices:
                     dev["collection_notes"].append("Targeted UDP identification: " + detail)
         except Exception as udp_error:
             detail = _clean(udp_error, 220)
-            for dev in devices:
+            for dev in target_devices:
                 dev["collection_notes"].append("Targeted UDP identification unavailable: " + detail)
 
-        for dev in devices:
+        for dev in target_devices:
             dev["port_numbers"] = sorted(set(dev.get("port_numbers", [])))
             dev["udp_port_numbers"] = sorted(set(dev.get("udp_port_numbers", [])))
             dev["open_ports"] = ", ".join(map(str, dev["port_numbers"])) if dev["_port_scan_complete"] else ""
@@ -8276,7 +8321,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
                               "Saving discovered ports, services and safe-script observations.")
         ts = now_text()
         def _save(conn):
-            for dev in devices:
+            for dev in target_devices:
                 did = dev.get("device_id", "")
                 if not did:
                     match = conn.execute(
@@ -8303,7 +8348,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
         if progress_callback:
             progress_callback("Nmap fingerprint complete", 70,
                               "Nmap TCP/OS, service and targeted UDP passes have returned.")
-        return all(d.get("_port_scan_complete") for d in devices)
+        return all(d.get("_port_scan_complete") for d in target_devices)
     except Exception as error:
         NMAP_LOG.write_text(
             f"[{now_text()}] Deep fingerprint: {_clean(error, 500)}",
