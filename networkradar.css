@@ -2228,3 +2228,74 @@ th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hov
  .brand h1{font-size:15px;letter-spacing:1px}
  .brand .sub{display:none}
 }
+
+
+/* ================================================================
+   NETWORKRADAR 13.7.0 — DASHBOARD CONSISTENCY & ACCESSIBILITY LAYER
+   Additive visual refinements; existing workspace layouts and
+   application behaviour remain unchanged.
+   ================================================================ */
+:root {
+  --nr-focus-ring:0 0 0 3px #55aaff35;
+  --nr-surface-border:#284762;
+  --nr-panel-radius:16px;
+}
+:where(main,header,nav,.card,.nightwatch-panel,.modal,.modalbox,
+       .section,.profileitem,.workspace-heading,.workspace-tables) {
+  min-width:0;
+}
+:where(.grid,.split,.nightwatch-metrics,.fw-metrics,.fw-profiles,
+       .nr-workspace-switcher,.subscan-progress-grid) > * {
+  min-width:0;
+}
+:where(button,a,input,select,textarea,[tabindex]):focus-visible {
+  outline:2px solid var(--cyan,#5ce4dc);
+  outline-offset:3px;
+  box-shadow:var(--nr-focus-ring);
+}
+:where(button,a) {
+  -webkit-tap-highlight-color:transparent;
+}
+.scroll {
+  max-width:100%;
+  overscroll-behavior-x:contain;
+  scrollbar-width:thin;
+  scrollbar-color:#315675 #091827;
+}
+.scroll table {
+  min-width:640px;
+}
+table th,table td {
+  overflow-wrap:anywhere;
+}
+.card,.nightwatch-panel {
+  border-radius:var(--nr-panel-radius);
+}
+button {
+  touch-action:manipulation;
+}
+@media(max-width:600px) {
+  .scroll {
+    border-radius:9px;
+  }
+  .card {
+    padding:14px;
+  }
+  .section {
+    min-width:0;
+  }
+  .modalbox {
+    width:100%;
+  }
+}
+@media(prefers-reduced-motion:reduce) {
+  html {
+    scroll-behavior:auto;
+  }
+  *,*::before,*::after {
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.01ms!important;
+    scroll-behavior:auto!important;
+  }
+}
