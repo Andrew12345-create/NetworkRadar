@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 14.0.0 — Adaptive fingerprint scheduling, bounded scan budgets and evidence-aware identity intelligence.
+NetworkRadar 14.1.0 — Full-port service intelligence, DNS domain activity and adaptive identity observability.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
