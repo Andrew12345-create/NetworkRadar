@@ -347,10 +347,41 @@ function renderScanMonitor(job){
  }else if(list){list.innerHTML='<li>Waiting for scan activity.</li>';}
 }
 
+function renderDomainIntelligence(payload){
+ const activity=Array.isArray(payload.activity)?payload.activity:[];
+ const providers=Array.isArray(payload.search_providers)?payload.search_providers:[];
+ $("domainIntelTotal").textContent=(Number(payload.observed_query_count)||0).toLocaleString();
+ $("domainIntelPairs").textContent=(Number(payload.unique_device_domain_pairs)||0).toLocaleString();
+ $("domainIntelSearch").textContent=providers.reduce((sum,item)=>sum+(Number(item.query_count)||0),0).toLocaleString();
+ $("domainIntelRows").innerHTML=activity.map(item=>'<tr><td class="mono">'+esc(item.client_ip)+'</td><td>'+esc(item.domain)+'</td><td>'+esc(item.category)+'</td><td>'+esc(item.provider||"—")+'</td><td>'+Number(item.query_count||0)+'</td><td>'+esc(item.last_seen||"—")+'</td></tr>').join("")||'<tr><td colspan="6">No DNS domain observations in the last 7 days.</td></tr>';
+ $("domainIntelLimits").textContent=(payload.limitations||[]).join(" · ");
+}
+function renderFullPortHistory(rows){
+ $("fullPortRows").innerHTML=rows.map(item=>{
+  const detail=item.detail||{},ports=Array.isArray(detail.open_ports)?detail.open_ports:(item.open_ports||[]);
+  const names=Array.isArray(detail.services)?detail.services.map(s=>s.port+"/"+s.protocol+" "+[s.name,s.product,s.version].filter(Boolean).join(" ")):ports.map(p=>String(p)+"/tcp");
+  return '<tr><td>'+esc(item.timestamp||"—")+'</td><td class="mono">'+esc(item.ip)+'</td><td>'+(item.completed?"COMPLETE":"INCOMPLETE")+'</td><td>'+ports.length+'</td><td title="'+esc(names.join(" · "))+'">'+esc(names.slice(0,8).join(" · ")||"No open ports observed")+(names.length>8?" · +"+(names.length-8)+" more":"")+'</td></tr>';
+ }).join("")||'<tr><td colspan="5">No full-port results yet.</td></tr>';
+}
+async function runFullPortScan(){
+ const input=$("fullPortTarget"),button=$("fullPortScanButton"),status=$("fullPortStatus"),ip=(input.value||"").trim();
+ if(!ip){toast("Enter an online device IPv4 address.");input.focus();return;}
+ if(!confirm("Run a full TCP scan of all 65,535 ports on "+ip+"? This is an active scan and may take several minutes. Continue only if you administer this network and have authority to scan this device."))return;
+ button.disabled=true;status.textContent="Running bounded full TCP scan against "+ip+"…";
+ try{
+  const response=await fetch("/api/port-intelligence/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ip:ip,confirm:true})});
+  const payload=await response.json();if(!response.ok)throw new Error(payload.error||("HTTP "+response.status));
+  const result=payload.result||{};status.textContent="Completed "+result.ports_tested+" TCP ports in "+result.duration_seconds+"s. "+result.open_count+" open ports found: "+(result.open_ports||[]).join(", ");
+  await refreshAll();
+ }catch(error){status.textContent="Full scan did not complete: "+String(error.message||error);}
+ finally{button.disabled=false;}
+}
+
 async function refreshAll(){
  if(refreshInFlight)return;refreshInFlight=true;
  const specs=[
   ["status","/api/status"],["devices","/api/devices"],["domains","/api/domains"],
+  ["domainIntel","/api/domain-intelligence"],["fullPorts","/api/port-intelligence"],
   ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],["topology","/api/topology"],
   ["progress","/api/progress"],["investigations","/api/investigations"],
   ["network","/api/network"],["diagnostics","/api/diagnostics"],
@@ -381,6 +412,8 @@ async function refreshAll(){
   $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";const quality=diag.scan_quality||{},coverage=quality.identity_coverage||{},identityCoverage=coverage.available===false?"—":((coverage.coverage_percent??"—")+"%");$("scanQuality").textContent=(quality.score??"—")+"/100 · "+(quality.band||"—")+" · Identity "+identityCoverage;
   if(data.devices){deviceCache=d;filterDevices();}else{$("deviceRows").innerHTML='<tr><td colspan="7">Device API unavailable. Check server log and /api/devices.</td></tr>';}
   $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||'<tr><td colspan="3">—</td></tr>';
+  renderDomainIntelligence(data.domainIntel||{});
+  renderFullPortHistory(Array.isArray(data.fullPorts)?data.fullPorts:[]);
   $("alertRows").innerHTML=a.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.client_ip)}</td><td>${esc(x.rule_id)}</td><td class="${x.severity==="HIGH"?"red":"amber"}">${esc(x.severity)}</td></tr>`).join("")||'<tr><td colspan="4">—</td></tr>';
   $("eventRows").innerHTML=e.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.category)}</td><td>${esc(x.event_type)}</td><td>${esc(x.details)}</td></tr>`).join("")||'<tr><td colspan="5">—</td></tr>';
   renderNightwatch(s,n,d,dnsRows,a,e,topology);
