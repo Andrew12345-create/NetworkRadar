@@ -7897,31 +7897,44 @@ class Handler(BaseHTTPRequestHandler):
                 if not device_row or device_row[1] != "ONLINE":
                     return self.send_json({"error": "Target must be an ONLINE device in the current inventory."}, 409)
                 device_id = str(device_row[0] or "")
+                # Share the atomic scan slot with normal discovery and the identity worker.
+                with SCAN_SUBSCAN_GATE:
+                    with JOB_LOCK:
+                        main_scan_running = JOB_STATE.get("state") == "RUNNING"
+                    scan_busy = (MAIN_SCAN_RESERVED_EVENT.is_set() or main_scan_running
+                                 or SUBSCAN_ACTIVE_EVENT.is_set())
+                    if not scan_busy:
+                        SUBSCAN_ACTIVE_EVENT.set()
+                if scan_busy:
+                    return self.send_json({"error": "Another NetworkRadar scan is active. Retry when it finishes."}, 409)
                 try:
-                    result = run_full_tcp_scan(target, network_text, str(NMAP), timeout=190)
-                except Exception as exc:
-                    detail = _clean(exc, 400)
+                    try:
+                        result = run_full_tcp_scan(target, network_text, str(NMAP), timeout=190)
+                    except Exception as exc:
+                        detail = _clean(exc, 400)
+                        DB_MANAGER.write(lambda conn: (
+                            conn.execute("""INSERT INTO port_scan_observations(
+                                timestamp,ip,device_id,completed,open_ports,scan_method,detail)
+                                VALUES(?,?,?,0,'','nmap-full-tcp',?)""",
+                                (now_text(),target,device_id,detail)),
+                            record_event(conn,target,"FULL_TCP_PORT_SCAN_INCOMPLETE",
+                                detail,category="discovery",severity="INFO",device_id=device_id)
+                        ))
+                        return self.send_json({"error": detail, "completed": False}, 504 if isinstance(exc, TimeoutError) else 502)
+                    detail_json = json.dumps(result, ensure_ascii=False)
+                    ports_csv = ",".join(str(port) for port in result["open_ports"])
                     DB_MANAGER.write(lambda conn: (
                         conn.execute("""INSERT INTO port_scan_observations(
                             timestamp,ip,device_id,completed,open_ports,scan_method,detail)
-                            VALUES(?,?,?,0,'','nmap-full-tcp',?)""",
-                            (now_text(),target,device_id,detail)),
-                        record_event(conn,target,"FULL_TCP_PORT_SCAN_INCOMPLETE",
-                            detail,category="discovery",severity="INFO",device_id=device_id)
+                            VALUES(?,?,?,?,?,'nmap-full-tcp',?)""",
+                            (now_text(),target,device_id,1,ports_csv,detail_json)),
+                        record_event(conn,target,"FULL_TCP_PORT_SCAN_COMPLETED",
+                            f"Completed all TCP ports; {result['open_count']} open; {result['duration_seconds']}s.",
+                            category="discovery",severity="INFO",device_id=device_id)
                     ))
-                    return self.send_json({"error": detail, "completed": False}, 504 if isinstance(exc, TimeoutError) else 502)
-                detail_json = json.dumps(result, ensure_ascii=False)
-                ports_csv = ",".join(str(port) for port in result["open_ports"])
-                DB_MANAGER.write(lambda conn: (
-                    conn.execute("""INSERT INTO port_scan_observations(
-                        timestamp,ip,device_id,completed,open_ports,scan_method,detail)
-                        VALUES(?,?,?,?,?,'nmap-full-tcp',?)""",
-                        (now_text(),target,device_id,1,ports_csv,detail_json)),
-                    record_event(conn,target,"FULL_TCP_PORT_SCAN_COMPLETED",
-                        f"Completed all TCP ports; {result['open_count']} open; {result['duration_seconds']}s.",
-                        category="discovery",severity="INFO",device_id=device_id)
-                ))
-                return self.send_json({"ok": True, "result": result}, 200)
+                    return self.send_json({"ok": True, "result": result}, 200)
+                finally:
+                    SUBSCAN_ACTIVE_EVENT.clear()
             if self.path in ("/api/phantom-access/ssh/hostkey", "/api/phantom-access/ssh/trust", "/api/phantom-access/ssh/connect", "/api/phantom-access/ssh/close"):
                 length = int(self.headers.get("Content-Length", "0"))
                 if length <= 0 or length > 16384:
