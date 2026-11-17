@@ -198,8 +198,11 @@ def reconcile_identity_assessment(current: Mapping[str, Any] | None,
     current_conf = _confidence(current.get("confidence")
                                or current.get("identification_confidence"))
     retained_type = _text(retained.get("device_type") or retained.get("category"))
-    retained_conf = _confidence(retained.get("identification_confidence")
-                                or retained.get("confidence"))
+    retained_conf = max(
+        _confidence(retained.get("identification_confidence")),
+        _confidence(retained.get("identity_category_confidence")),
+        _confidence(retained.get("confidence")),
+    )
     current_valid = _is_classified(current_type) and current_conf >= minimum_confidence
     retained_valid = _is_classified(retained_type) and retained_conf > 0
 
