@@ -219,6 +219,15 @@ The core application uses the Python standard library. Paramiko is optional and 
 The dashboard opens at **http://127.0.0.1:8766** by default.
 
 
+## NetworkRadar 14.1.0 — Full-port and domain intelligence
+
+- **Full TCP Port Intelligence** is an explicit single-device action for an ONLINE host on the currently authorised private IPv4 subnet. It tests all 65,535 TCP ports with bounded rate/time limits and lightweight service detection. It is not a subnet-wide full scan and does not run exploit scripts or credential attempts.
+- **Domain & Search-Provider Intelligence** groups observed DNS queries by device, domain, category and known provider over seven days. It can show that a device queried a search-provider domain; it cannot show the search phrase typed into HTTPS search, page paths or page contents.
+- **Identity assessment events** now distinguish the latest assessment from the retained inventory identity when weaker evidence is deliberately not allowed to overwrite a stronger prior classification.
+- **Investigation queue metrics** distinguish targets attempted from targets resolved or retry-exhausted.
+
+All active full-port scans require explicit current network authorisation, an online inventory target, subnet membership and a second confirmation. DNS reporting is metadata-only; it does not decrypt or intercept HTTPS.
+
 ## Strong network anchor detection fix (12.4.0)
 
 NetworkRadar 12.4.0 fixes two Windows evidence-collection defects that could prevent a correctly connected laptop from being recognised as being on a specific network:
