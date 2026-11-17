@@ -1,4 +1,16 @@
-# NetworkRadar 14.0.0
+# NetworkRadar 14.2.0
+
+## Evidence intelligence and identity reconciliation (14.2.0)
+
+- Separates the latest scan assessment from the accepted inventory identity. A zero-evidence or low-confidence current pass no longer downgrades a previously supported device category.
+- Adds a deterministic reconciliation policy: new categories must meet the minimum confidence threshold and exceed a conflicting retained classification by a configurable margin before replacement. Same-category evidence can refresh confidence without category churn.
+- Records the reconciliation action and explanation in the recognition payload and identity assessment event, including no-new-evidence, weaker-assessment, same-category refresh and stronger-conflict outcomes.
+- Adds freshness-aware evidence aggregation. Undated evidence is not treated as fresh; observations older than the configured maximum age contribute no current score; duplicate observations from the same protocol family are capped.
+- Keeps competing values visible rather than turning missing observations into negative evidence. Confidence remains a heuristic evidence score, not a probability.
+- Upgrades Unknown Device Hunter guidance so DHCP collection failures and previous unsuccessful attempts do not trigger the same high-priority recommendation indefinitely. A passive DHCP observation is not forced by renewing a lease.
+- Adds a read-only investigation planner that distinguishes already-observed methods, cooldowns, offline waiting, missing authorisation and unavailable collectors. Planning never sends packets.
+- Adds regression tests for evidence expiry, duplicate-source caps, independent evidence, identity retention/replacement, offline deferral, DHCP collector failure and authorisation gates.
+- No destructive migration, credential guessing, automatic device merging, quarantine or firewall changes are introduced.
 
 ## Adaptive fingerprint scheduling (14.0.0)
 
