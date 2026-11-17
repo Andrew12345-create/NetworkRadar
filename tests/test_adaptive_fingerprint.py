@@ -13,8 +13,8 @@ class AdaptiveFingerprintPlanTests(unittest.TestCase):
         self.assertEqual(plan["candidate_count"], 11)
         self.assertEqual(len(plan["udp_targets"]), 2)
         self.assertEqual(plan["targets"], [
-            "192.168.10.1", "192.168.10.10", "192.168.10.11",
-            "192.168.10.2", "192.168.10.3",
+            "192.168.10.1", "192.168.10.2", "192.168.10.3",
+            "192.168.10.4", "192.168.10.5",
         ])
 
     def test_recent_unknown_is_cooled_down_but_stale_unknown_is_selected(self):
@@ -78,6 +78,10 @@ class AdaptiveFingerprintPlanTests(unittest.TestCase):
         )
         self.assertEqual(plan["targets"], ["192.168.100.20"])
         self.assertEqual(plan["scope"], "192.168.100.0/24")
+        self.assertIn("Outside the current authorised subnet", next(
+            row["reason"] for row in plan["deferred"]
+            if row["ip"] == "192.168.101.20"
+        ))
 
     def test_invalid_authorised_subnet_fails_closed(self):
         plan = build_fingerprint_plan(
