@@ -272,8 +272,17 @@ def plan_investigation_methods(device: Mapping[str, Any] | None,
                              "reason": "Evidence from this method is already associated with the device."})
             continue
         attempt = attempts.get(key, {}) if isinstance(attempts.get(key, {}), Mapping) else {}
+        try:
+            attempt_count = max(0, int(attempt.get("attempts", 0) or 0))
+        except (TypeError, ValueError):
+            attempt_count = 0
+        max_attempts = max(1, _confidence(attempt.get("max_attempts") or 3))
         next_at = _parse_time(attempt.get("next_eligible_at"), now)
-        if int(attempt.get("attempts", 0) or 0) > 0 and next_at and now < next_at:
+        if str(attempt.get("state") or "").upper() in {"EXHAUSTED", "UNAVAILABLE"} or attempt_count >= max_attempts:
+            deferred.append({"method": key, "state": "EXHAUSTED",
+                             "reason": "The configured attempt budget is exhausted; wait for new evidence or a capability change."})
+            continue
+        if attempt_count > 0 and next_at and now < next_at:
             deferred.append({"method": key, "state": "COOLDOWN",
                              "next_eligible_at": next_at.isoformat(),
                              "reason": "A prior attempt is still in its retry cooldown."})
