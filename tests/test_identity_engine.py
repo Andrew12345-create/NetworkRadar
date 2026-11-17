@@ -200,5 +200,19 @@ class AdvancedDeviceProfileTests(unittest.TestCase):
         self.assertEqual(result["confidence"], 98)
 
 
+    def test_vxworks_fingerprint_identifies_embedded_family_without_guessing_vendor_or_model(self):
+        result = analyse_device_profile({
+            "ip": "192.168.100.84",
+            "vendor": "Tenda Technology",
+            "os_guess": "VxWorks (97% Nmap match accuracy)",
+        })
+        self.assertEqual(result["selected_category"], "Embedded / appliance device")
+        self.assertGreaterEqual(result["confidence"], 58)
+        self.assertEqual(result["operating_system"]["family"], "Embedded / appliance OS")
+        self.assertEqual(result["manufacturer"], "")
+        self.assertEqual(result["model"], "")
+        self.assertIn("nmap_os", result["source_families"])
+
+
 if __name__ == "__main__":
     unittest.main()
