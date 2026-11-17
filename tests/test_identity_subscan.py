@@ -53,6 +53,24 @@ class IdentitySubscanCoordinatorTests(unittest.TestCase):
         self.assertEqual(queue.observe([changed], now=102), 1)
         self.assertEqual(queue.snapshot(now=102)["counts"]["queued"], 1)
 
+    def test_progress_is_separate_and_queue_completion_is_reported(self):
+        queue = IdentitySubscanCoordinator(max_attempts=2, base_backoff=1)
+        queue.observe([self.device()], now=100)
+        task = queue.claim_due(now=100)
+        queue.update_progress(task["key"], "Nmap TCP/OS fingerprint", 45,
+                              "Nmap is running.", now=101)
+        snapshot = queue.snapshot(now=101)
+        self.assertEqual(snapshot["progress"]["ip"], "192.168.100.20")
+        self.assertEqual(snapshot["progress"]["phase"], "Nmap TCP/OS fingerprint")
+        self.assertEqual(snapshot["progress"]["percent"], 45)
+        self.assertEqual(snapshot["queue_progress_percent"], 0)
+        queue.complete(task["key"], recognised=True, now=102)
+        snapshot = queue.snapshot(now=102)
+        self.assertEqual(snapshot["progress"]["state"], "COMPLETED")
+        self.assertEqual(snapshot["progress"]["percent"], 100)
+        self.assertEqual(snapshot["processed_targets"], 1)
+        self.assertEqual(snapshot["queue_progress_percent"], 100)
+
     def test_pause_blocks_claiming(self):
         queue = IdentitySubscanCoordinator()
         queue.observe([self.device()], now=100)
