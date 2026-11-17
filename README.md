@@ -1,4 +1,13 @@
-# NetworkRadar 13.6.1
+# NetworkRadar 13.7.0
+
+## Dashboard consistency and accessibility (13.7.0)
+
+- Adds a final, additive dashboard styling layer for consistent focus visibility, keyboard navigation and touch interaction.
+- Prevents grid and workspace children from forcing horizontal page overflow.
+- Improves horizontal table scrolling on narrow screens while preserving readable table columns.
+- Extends reduced-motion support across all animated and transitioning components.
+- Keeps existing dashboard structure, scan orchestration, identity logic and database schema unchanged.
+
 
 ## Separate identity subscan progress (13.6.1)
 
