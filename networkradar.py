@@ -7913,195 +7913,196 @@ def deep_fingerprint(devices):
             "retrying with a smaller service set."
         )
 
-    if r is None or r.returncode != 0 or not r.stdout.strip():
-        # Fallback avoids OS detection and NSE, reduces port volume and has
-        # its own strict host/process timeouts. No credentials or exploit probes.
-        fallback = [
-            str(NMAP), "-sT", "-sV", "--version-light", "--reason",
-            "--max-retries", "1",
-            "--host-timeout", f"{profile['tcp_fallback_host_timeout']}s",
-            "--max-rate", "300",
-            "--top-ports", str(profile["tcp_fallback_top_ports"]), "-oX", "-"
-        ]
-        fallback_timeout = profile["tcp_fallback_timeout"]
-        try:
-            r = subprocess.run(fallback + ips, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace",
-                               timeout=fallback_timeout)
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"Bounded Nmap fallback exceeded {fallback_timeout} seconds."
-            ) from exc
-        if r.returncode != 0 or not r.stdout.strip():
-            detail = _clean(r.stderr or first_error or "No XML output from bounded Nmap passes.", 300)
-            raise RuntimeError("Nmap deep fingerprinting failed: " + detail)
-        for dev in devices:
-            dev["collection_notes"].append(
-                "Used reduced bounded TCP service fallback; full OS/script pass "
-                + (first_error or "was unavailable.")
-            )
-    if not r.stdout.strip():
-            ts = now_text()
-            DB_MANAGER.write(lambda conn: [conn.execute(
-                "INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail) VALUES(?,?,?,?,?,?,?)",
-                (ts, d["ip"], d.get("device_id", ""), 0, "", "nmap",
-                 "Nmap returned no XML output")) for d in devices])
-            return False
-
-        root = ET.fromstring(r.stdout)
-        by_ip = {d["ip"]: d for d in devices}
-
-        def collect_scripts(host, dev):
-            for script in host.findall(".//script"):
-                script_id = _clean(script.get("id", "unknown"), 80)
-                output = _clean(script.get("output", ""), 3000)
-                if not output:
-                    continue
-                item = {"id": script_id, "output": output}
-                dev.setdefault("nmap_script_intel", []).append(item)
-
-        for host in root.findall("host"):
-            addr = host.find("./address[@addrtype='ipv4']")
-            if addr is None:
-                continue
-            dev = by_ip.get(addr.get("addr"))
-            if not dev:
-                continue
-            ports_node = host.find("./ports")
-            if ports_node is not None:
-                dev["_port_scan_complete"] = True
-            os_fingerprint = best_os_match(host)
-            if os_fingerprint:
-                dev["nmap_os_fingerprint"] = os_fingerprint
-                name = _clean(os_fingerprint.get("name", ""))
-                accuracy = os_fingerprint.get("accuracy", 0)
-                if name:
-                    dev["os_guess"] = f"{name} ({accuracy}% Nmap match accuracy)"
-            collect_scripts(host, dev)
-            if ports_node is None:
-                continue
-            for port in ports_node.findall("./port"):
-                state = port.find("state")
-                if state is None or state.get("state") != "open":
-                    continue
-                try:
-                    port_number = int(port.get("portid", ""))
-                except ValueError:
-                    continue
-                protocol = port.get("protocol", "tcp")
-                service = port.find("service")
-                service_name = service.get("name", "unknown") if service is not None else "unknown"
-                product = service.get("product", "") if service is not None else ""
-                version = service.get("version", "") if service is not None else ""
-                extra = service.get("extrainfo", "") if service is not None else ""
-                if protocol == "udp":
-                    dev["udp_port_numbers"].append(port_number)
-                else:
-                    dev["port_numbers"].append(port_number)
-                dev["services_found"].append(
-                    f"{port_number}/{protocol}/{ ' '.join(x for x in (service_name, product, version, extra) if x)}"
+    try:
+        if r is None or r.returncode != 0 or not r.stdout.strip():
+            # Fallback avoids OS detection and NSE, reduces port volume and has
+            # its own strict host/process timeouts. No credentials or exploit probes.
+            fallback = [
+                str(NMAP), "-sT", "-sV", "--version-light", "--reason",
+                "--max-retries", "1",
+                "--host-timeout", f"{profile['tcp_fallback_host_timeout']}s",
+                "--max-rate", "300",
+                "--top-ports", str(profile["tcp_fallback_top_ports"]), "-oX", "-"
+            ]
+            fallback_timeout = profile["tcp_fallback_timeout"]
+            try:
+                r = subprocess.run(fallback + ips, capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace",
+                                   timeout=fallback_timeout)
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"Bounded Nmap fallback exceeded {fallback_timeout} seconds."
+                ) from exc
+            if r.returncode != 0 or not r.stdout.strip():
+                detail = _clean(r.stderr or first_error or "No XML output from bounded Nmap passes.", 300)
+                raise RuntimeError("Nmap deep fingerprinting failed: " + detail)
+            for dev in devices:
+                dev["collection_notes"].append(
+                    "Used reduced bounded TCP service fallback; full OS/script pass "
+                    + (first_error or "was unavailable.")
                 )
-                dev.setdefault("nmap_service_intel", []).append({
-                    "port": port_number, "protocol": protocol,
-                    "name": _clean(service_name, 100),
-                    "product": _clean(product, 160),
-                    "version": _clean(version, 100),
-                    "extrainfo": _clean(extra, 160),
-                    "tunnel": _clean(service.get("tunnel", "") if service is not None else "", 40),
-                    "method": _clean(service.get("method", "") if service is not None else "", 40),
-                })
+        if not r.stdout.strip():
+                ts = now_text()
+                DB_MANAGER.write(lambda conn: [conn.execute(
+                    "INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail) VALUES(?,?,?,?,?,?,?)",
+                    (ts, d["ip"], d.get("device_id", ""), 0, "", "nmap",
+                     "Nmap returned no XML output")) for d in devices])
+                return False
 
-        # Targeted UDP probes often reveal printer, discovery, UPnP and
-        # management capabilities missed by a TCP-only inventory. This is a
-        # bounded optional pass; failure never discards the TCP results.
-        udp_command = [
-            str(NMAP), "-sU", "-sV", "--version-light", "--reason",
-            "--max-retries", "0",
-            "--host-timeout", f"{profile['udp_host_timeout']}s",
-            "-p", "137,161,1900,3702,5353",
-            "--script", "upnp-info,dns-service-discovery",
-            "--script-timeout", "8s", "-oX", "-"
-        ]
-        try:
-            udp_result = subprocess.run(
-                udp_command + ips, capture_output=True, text=True,
-                encoding="utf-8", errors="replace",
-                timeout=profile["udp_timeout"]
-            )
-            if udp_result.returncode == 0 and udp_result.stdout.strip():
-                udp_root = ET.fromstring(udp_result.stdout)
-                for host in udp_root.findall("host"):
-                    addr = host.find("./address[@addrtype='ipv4']")
-                    if addr is None:
+            root = ET.fromstring(r.stdout)
+            by_ip = {d["ip"]: d for d in devices}
+
+            def collect_scripts(host, dev):
+                for script in host.findall(".//script"):
+                    script_id = _clean(script.get("id", "unknown"), 80)
+                    output = _clean(script.get("output", ""), 3000)
+                    if not output:
                         continue
-                    dev = by_ip.get(addr.get("addr"))
-                    if not dev:
+                    item = {"id": script_id, "output": output}
+                    dev.setdefault("nmap_script_intel", []).append(item)
+
+            for host in root.findall("host"):
+                addr = host.find("./address[@addrtype='ipv4']")
+                if addr is None:
+                    continue
+                dev = by_ip.get(addr.get("addr"))
+                if not dev:
+                    continue
+                ports_node = host.find("./ports")
+                if ports_node is not None:
+                    dev["_port_scan_complete"] = True
+                os_fingerprint = best_os_match(host)
+                if os_fingerprint:
+                    dev["nmap_os_fingerprint"] = os_fingerprint
+                    name = _clean(os_fingerprint.get("name", ""))
+                    accuracy = os_fingerprint.get("accuracy", 0)
+                    if name:
+                        dev["os_guess"] = f"{name} ({accuracy}% Nmap match accuracy)"
+                collect_scripts(host, dev)
+                if ports_node is None:
+                    continue
+                for port in ports_node.findall("./port"):
+                    state = port.find("state")
+                    if state is None or state.get("state") != "open":
                         continue
-                    collect_scripts(host, dev)
-                    ports_node = host.find("./ports")
-                    if ports_node is None:
+                    try:
+                        port_number = int(port.get("portid", ""))
+                    except ValueError:
                         continue
-                    for port in ports_node.findall("./port"):
-                        state = port.find("state")
-                        if state is None or state.get("state") != "open":
-                            continue
-                        try:
-                            port_number = int(port.get("portid", ""))
-                        except ValueError:
-                            continue
+                    protocol = port.get("protocol", "tcp")
+                    service = port.find("service")
+                    service_name = service.get("name", "unknown") if service is not None else "unknown"
+                    product = service.get("product", "") if service is not None else ""
+                    version = service.get("version", "") if service is not None else ""
+                    extra = service.get("extrainfo", "") if service is not None else ""
+                    if protocol == "udp":
                         dev["udp_port_numbers"].append(port_number)
-                        service = port.find("service")
-                        dev.setdefault("nmap_service_intel", []).append({
-                            "port": port_number, "protocol": "udp",
-                            "name": _clean(service.get("name", "unknown") if service is not None else "unknown", 100),
-                            "product": _clean(service.get("product", "") if service is not None else "", 160),
-                            "version": _clean(service.get("version", "") if service is not None else "", 100),
-                            "extrainfo": _clean(service.get("extrainfo", "") if service is not None else "", 160),
-                            "method": "targeted UDP identification",
-                        })
-            else:
-                detail = _clean(udp_result.stderr or "No UDP XML results.", 220)
-                for dev in devices:
-                    dev["collection_notes"].append("Targeted UDP identification: " + detail)
-        except Exception as udp_error:
-            detail = _clean(udp_error, 220)
-            for dev in devices:
-                dev["collection_notes"].append("Targeted UDP identification unavailable: " + detail)
-
-        for dev in devices:
-            dev["port_numbers"] = sorted(set(dev.get("port_numbers", [])))
-            dev["udp_port_numbers"] = sorted(set(dev.get("udp_port_numbers", [])))
-            dev["open_ports"] = ", ".join(map(str, dev["port_numbers"])) if dev["_port_scan_complete"] else ""
-            dev["service_summary"] = "; ".join(dev.get("services_found", []))[:700]
-            dev["nmap_script_intel"] = dev.get("nmap_script_intel", [])[:64]
-
-        ts = now_text()
-        def _save(conn):
-            for dev in devices:
-                did = dev.get("device_id", "")
-                if not did:
-                    match = conn.execute(
-                        "SELECT device_id FROM devices WHERE ip=?", (dev["ip"],)
-                    ).fetchone()
-                    did = (match[0] or "") if match else ""
-                detail = "TCP/OS scan plus targeted safe-script and UDP enrichment"
-                if dev.get("_port_scan_complete"):
-                    conn.execute(
-                        """INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail)
-                        VALUES(?,?,?,?,?,?,?)""",
-                        (ts, dev["ip"], did, 1,
-                         ",".join(map(str, dev.get("port_numbers", []))),
-                         "nmap", detail)
+                    else:
+                        dev["port_numbers"].append(port_number)
+                    dev["services_found"].append(
+                        f"{port_number}/{protocol}/{ ' '.join(x for x in (service_name, product, version, extra) if x)}"
                     )
+                    dev.setdefault("nmap_service_intel", []).append({
+                        "port": port_number, "protocol": protocol,
+                        "name": _clean(service_name, 100),
+                        "product": _clean(product, 160),
+                        "version": _clean(version, 100),
+                        "extrainfo": _clean(extra, 160),
+                        "tunnel": _clean(service.get("tunnel", "") if service is not None else "", 40),
+                        "method": _clean(service.get("method", "") if service is not None else "", 40),
+                    })
+
+            # Targeted UDP probes often reveal printer, discovery, UPnP and
+            # management capabilities missed by a TCP-only inventory. This is a
+            # bounded optional pass; failure never discards the TCP results.
+            udp_command = [
+                str(NMAP), "-sU", "-sV", "--version-light", "--reason",
+                "--max-retries", "0",
+                "--host-timeout", f"{profile['udp_host_timeout']}s",
+                "-p", "137,161,1900,3702,5353",
+                "--script", "upnp-info,dns-service-discovery",
+                "--script-timeout", "8s", "-oX", "-"
+            ]
+            try:
+                udp_result = subprocess.run(
+                    udp_command + ips, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
+                    timeout=profile["udp_timeout"]
+                )
+                if udp_result.returncode == 0 and udp_result.stdout.strip():
+                    udp_root = ET.fromstring(udp_result.stdout)
+                    for host in udp_root.findall("host"):
+                        addr = host.find("./address[@addrtype='ipv4']")
+                        if addr is None:
+                            continue
+                        dev = by_ip.get(addr.get("addr"))
+                        if not dev:
+                            continue
+                        collect_scripts(host, dev)
+                        ports_node = host.find("./ports")
+                        if ports_node is None:
+                            continue
+                        for port in ports_node.findall("./port"):
+                            state = port.find("state")
+                            if state is None or state.get("state") != "open":
+                                continue
+                            try:
+                                port_number = int(port.get("portid", ""))
+                            except ValueError:
+                                continue
+                            dev["udp_port_numbers"].append(port_number)
+                            service = port.find("service")
+                            dev.setdefault("nmap_service_intel", []).append({
+                                "port": port_number, "protocol": "udp",
+                                "name": _clean(service.get("name", "unknown") if service is not None else "unknown", 100),
+                                "product": _clean(service.get("product", "") if service is not None else "", 160),
+                                "version": _clean(service.get("version", "") if service is not None else "", 100),
+                                "extrainfo": _clean(service.get("extrainfo", "") if service is not None else "", 160),
+                                "method": "targeted UDP identification",
+                            })
                 else:
-                    conn.execute(
-                        """INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail)
-                        VALUES(?,?,?,?,?,?,?)""",
-                        (ts, dev["ip"], did, 0, "", "nmap",
-                         "No complete per-host TCP port result; findings retained")
-                    )
-        DB_MANAGER.write(_save)
-        return all(d.get("_port_scan_complete") for d in devices)
+                    detail = _clean(udp_result.stderr or "No UDP XML results.", 220)
+                    for dev in devices:
+                        dev["collection_notes"].append("Targeted UDP identification: " + detail)
+            except Exception as udp_error:
+                detail = _clean(udp_error, 220)
+                for dev in devices:
+                    dev["collection_notes"].append("Targeted UDP identification unavailable: " + detail)
+
+            for dev in devices:
+                dev["port_numbers"] = sorted(set(dev.get("port_numbers", [])))
+                dev["udp_port_numbers"] = sorted(set(dev.get("udp_port_numbers", [])))
+                dev["open_ports"] = ", ".join(map(str, dev["port_numbers"])) if dev["_port_scan_complete"] else ""
+                dev["service_summary"] = "; ".join(dev.get("services_found", []))[:700]
+                dev["nmap_script_intel"] = dev.get("nmap_script_intel", [])[:64]
+
+            ts = now_text()
+            def _save(conn):
+                for dev in devices:
+                    did = dev.get("device_id", "")
+                    if not did:
+                        match = conn.execute(
+                            "SELECT device_id FROM devices WHERE ip=?", (dev["ip"],)
+                        ).fetchone()
+                        did = (match[0] or "") if match else ""
+                    detail = "TCP/OS scan plus targeted safe-script and UDP enrichment"
+                    if dev.get("_port_scan_complete"):
+                        conn.execute(
+                            """INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail)
+                            VALUES(?,?,?,?,?,?,?)""",
+                            (ts, dev["ip"], did, 1,
+                             ",".join(map(str, dev.get("port_numbers", []))),
+                             "nmap", detail)
+                        )
+                    else:
+                        conn.execute(
+                            """INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail)
+                            VALUES(?,?,?,?,?,?,?)""",
+                            (ts, dev["ip"], did, 0, "", "nmap",
+                             "No complete per-host TCP port result; findings retained")
+                        )
+            DB_MANAGER.write(_save)
+            return all(d.get("_port_scan_complete") for d in devices)
     except Exception as error:
         NMAP_LOG.write_text(
             f"[{now_text()}] Deep fingerprint: {_clean(error, 500)}",
