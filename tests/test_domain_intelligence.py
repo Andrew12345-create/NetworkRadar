@@ -9,6 +9,7 @@ class DomainIntelligenceTests(unittest.TestCase):
     def test_search_engine_domain_is_classified_not_search_phrase(self):
         self.assertEqual(classify_domain("www.google.com")["provider"], "Google")
         self.assertEqual(classify_domain("www.google.com")["category"], "SEARCH")
+        self.assertEqual(classify_domain("www.google.co.ke")["provider"], "Google")
 
     def test_unknown_and_internal_domains_remain_conservative(self):
         self.assertEqual(classify_domain("printer.local")["category"], "IGNORED")
