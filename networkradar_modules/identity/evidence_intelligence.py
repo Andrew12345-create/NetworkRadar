@@ -284,13 +284,13 @@ def plan_investigation_methods(device: Mapping[str, Any] | None,
             attempt_count = 0
         max_attempts = max(1, _confidence(attempt.get("max_attempts") or 3))
         next_at = _parse_time(attempt.get("next_eligible_at"), now)
-        if str(attempt.get("state") or "").upper() in {"EXHAUSTED", "UNAVAILABLE"} or attempt_count >= max_attempts:
-            deferred.append({"method": key, "state": "EXHAUSTED",
-                             "reason": "The configured attempt budget is exhausted; wait for new evidence or a capability change."})
-            continue
         if str(attempt.get("state") or "").upper() == "RUNNING":
             deferred.append({"method": key, "state": "RUNNING",
                              "reason": "An investigation for this target is already in progress."})
+            continue
+        if str(attempt.get("state") or "").upper() in {"EXHAUSTED", "UNAVAILABLE"} or attempt_count >= max_attempts:
+            deferred.append({"method": key, "state": "EXHAUSTED",
+                             "reason": "The configured attempt budget is exhausted; wait for new evidence or a capability change."})
             continue
         if attempt_count > 0 and next_at and now < next_at:
             deferred.append({"method": key, "state": "COOLDOWN",
