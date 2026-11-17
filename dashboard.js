@@ -354,13 +354,14 @@ async function refreshAll(){
   ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],["topology","/api/topology"],
   ["progress","/api/progress"],["investigations","/api/investigations"],
   ["network","/api/network"],["diagnostics","/api/diagnostics"],
-  ["engine","/api/engine_diagnostics"],["firewall","/api/firewall"]
+  ["engine","/api/engine_diagnostics"],["firewall","/api/firewall"],
+  ["scanPerformance","/api/scan_performance"]
  ];
  try{
   const settled=await Promise.allSettled(specs.map(([name,path])=>getJSON(path,name==="firewall"?30000:10000)));
   const data={},failed=[];
   settled.forEach((r,i)=>{const name=specs[i][0];if(r.status==="fulfilled")data[name]=r.value;else{data[name]=null;failed.push(name+": "+String(r.reason?.message||r.reason||"request failed"));}});
-  const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{},fw=data.firewall||{};
+  const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{},fw=data.firewall||{},sp=data.scanPerformance||{};
   const statusOK=!!data.status;
   const partial=failed.length>0||!!s.status_degraded;
   pill($("connection"),!statusOK?"API DEGRADED":(partial?"CONNECTED · PARTIAL":"CONNECTED"),!statusOK?"bad":(partial?"warn":"ok"));
@@ -384,6 +385,15 @@ async function refreshAll(){
   $("eventRows").innerHTML=e.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.category)}</td><td>${esc(x.event_type)}</td><td>${esc(x.details)}</td></tr>`).join("")||'<tr><td colspan="5">—</td></tr>';
   renderNightwatch(s,n,d,dnsRows,a,e,topology);
   renderFirewall(fw);
+  const perfSummary=$("scanPerformanceSummary"),perfRows=$("scanPhaseRows");
+  if(perfSummary){
+   perfSummary.textContent=sp.available
+    ? "Scan #"+(sp.scan_number||"—")+" · "+(sp.total_duration_seconds||0)+"s · "+(sp.device_count??"—")+" hosts · "+(sp.completed?"completed":"partial")
+    : (sp.message||"No scan timing data yet.");
+  }
+  if(perfRows){
+   perfRows.innerHTML=(sp.phases||[]).map(function(x){return '<tr><td>'+esc(x.name)+'</td><td>'+esc(x.calls)+'</td><td>'+esc(x.duration_seconds)+'s</td><td>'+esc(x.last_duration_seconds)+'s</td><td>'+esc(x.errors)+(x.last_error_type?' · '+esc(x.last_error_type):'')+'</td></tr>';}).join('')||'<tr><td colspan="5">Run a scan to collect phase timings.</td></tr>';
+  }
   $("behaviourStatus").textContent=diag.behaviour?.message||"Behaviour diagnostics unavailable.";
   $("behaviourRows").innerHTML=((diag.behaviour?.baseline_devices||0)>0?'<tr><td colspan="5">See device detail for samples.</td></tr>':'<tr><td colspan="5">Collecting baselines.</td></tr>');
   $("investigationRows").innerHTML=inv.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.title)}</td><td>${esc(x.severity)}</td><td>${esc(x.status)}</td><td>${esc(x.evidence_count)}</td></tr>`).join("")||'<tr><td colspan="5">None.</td></tr>';
@@ -535,7 +545,7 @@ if("IntersectionObserver" in window){
 async function loadPhantomPanels(){
  try{
   const [u,v,x]=await Promise.all([fetch('/api/unknown-hunter').then(r=>r.json()),fetch('/api/ipv6').then(r=>r.json()),fetch('/api/exposure').then(r=>r.json())]);
-  $('unknownRows').innerHTML=u.map(d=>`<tr><td class="mono">${esc(d.ip)}</td><td>${esc(d.name)}</td><td>${esc(d.device_type)}</td><td>${esc(d.os_guess)}</td><td>${d.confidence}%</td><td>${d.evidence_count} / ${d.independent_sources} sources</td><td>${esc(d.status)}</td></tr>`).join('')||'<tr><td colspan="7">No low-confidence devices in current inventory.</td></tr>';
+  $('unknownRows').innerHTML=u.map(d=>'<tr><td class="mono">'+esc(d.ip)+'</td><td>'+esc(d.name)+'</td><td>'+esc(d.device_type)+'</td><td>'+esc(d.os_guess)+'</td><td>'+d.confidence+'%</td><td>'+d.evidence_count+' / '+d.independent_sources+' sources</td><td title="'+esc((d.next_steps||[]).join(" | "))+'">'+esc((d.next_steps||[])[0]||"Collect more evidence")+'</td><td>'+esc(d.status)+'</td></tr>').join('')||'<tr><td colspan="8">No low-confidence devices in current inventory.</td></tr>';
   $('ipv6Rows').innerHTML=v.map(d=>`<tr><td class="mono">${esc(d.ipv6)}</td><td class="mono">${esc(d.mac||'—')}</td><td>${esc(d.interface_alias||'—')}</td><td>${esc(d.state)}</td><td>${esc(d.timestamp)}</td><td>${esc(d.linked_device_id||'Uncorrelated')}</td></tr>`).join('')||'<tr><td colspan="6">No IPv6 neighbour observations recorded.</td></tr>';
   $('exposureRows').innerHTML=x.map(d=>`<tr><td class="mono">${esc(d.ip)}</td><td>${esc(d.title)}</td><td class="${d.severity==='HIGH'?'red':'amber'}">${esc(d.severity)}</td><td>${esc(d.observed_ports)}</td><td>${esc(d.recommendation)}</td><td>${esc(d.last_seen)}</td><td>${esc(d.status)}</td></tr>`).join('')||'<tr><td colspan="7">No current or stale exposure observations.</td></tr>';
  }catch(e){$('unknownRows').innerHTML='<tr><td colspan="7">Panel unavailable: '+esc(e.message)+'</td></tr>';}
