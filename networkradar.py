@@ -3331,6 +3331,12 @@ def identity_subscan_worker():
             if not task:
                 continue
             SUBSCAN_ACTIVE_EVENT.set()
+            with JOB_LOCK:
+                main_scan_started = JOB_STATE.get("state") == "RUNNING"
+            if main_scan_started:
+                IDENTITY_SUBSCAN.defer_active("Deferred because a full network scan started.")
+                SUBSCAN_ACTIVE_EVENT.clear()
+                continue
             ip = str(task.get("ip") or "")
             try:
                 with NET_LOCK:
