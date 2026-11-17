@@ -130,5 +130,18 @@ class IdentitySubscanCoordinatorTests(unittest.TestCase):
         self.assertEqual(IdentitySubscanCoordinator(max_workers="invalid").max_workers, 3)
 
 
+    def test_deferring_offline_target_does_not_consume_attempt(self):
+        queue = IdentitySubscanCoordinator(max_workers=2, base_backoff=10)
+        queue.observe([self.device()], now=100)
+        task = queue.claim_due(now=100)
+        queue.defer(task["key"], "Target is offline", delay_seconds=300, now=101)
+        target = queue.snapshot(now=101)["targets"][0]
+        self.assertEqual(target["state"], "QUEUED")
+        self.assertEqual(target["attempts"], 0)
+        self.assertEqual(target["next_attempt_at"], 401)
+        self.assertIsNone(queue.claim_due(now=400))
+        self.assertIsNotNone(queue.claim_due(now=401))
+
+
 if __name__ == "__main__":
     unittest.main()
