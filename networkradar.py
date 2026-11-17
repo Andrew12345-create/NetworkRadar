@@ -307,7 +307,9 @@ from networkradar_modules.core.startup import (
 from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.diagnostics.scan_profiler import ScanProfiler, measure_phase
 from networkradar_modules.identity.investigation import build_identity_next_steps
-from networkradar_modules.identity.evidence_intelligence import reconcile_identity_assessment
+from networkradar_modules.identity.evidence_intelligence import (
+    rank_evidence, reconcile_identity_assessment,
+)
 from networkradar_modules.identity.subscan import IdentitySubscanCoordinator
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
 from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
@@ -2297,6 +2299,18 @@ def advanced_device_recognition(device):
     now comes from evidence families rather than additive MAC/hostname bonuses.
     """
     profile = analyse_device_profile(device)
+    evidence_rows = []
+    for fact in profile.get("evidence", []):
+        evidence_rows.append({
+            "source": fact.get("source", fact.get("family", "Identity engine")),
+            "attribute": fact.get("family", "identity"),
+            "value": fact.get("value", ""),
+            "confidence": int(round(float(fact.get("reliability", 0) or 0) * 100)),
+            "evidence_class": fact.get("evidence_class", "OBSERVED"),
+            "last_seen": now_text(),
+        })
+    evidence_rows.extend(device.get("_historical_identity_evidence", []) or [])
+    profile["evidence_intelligence"] = rank_evidence(evidence_rows)
     if profile.get("model"):
         device["model"] = profile["model"]
     if profile.get("manufacturer"):
@@ -3157,6 +3171,31 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                 ssdp = ssdp_scan(timeout=2.0)
         except Exception:
             pass
+    # Load timestamped prior observations once per scan. Historical facts are
+    # shown with freshness/conflict metadata but do not masquerade as current
+    # probe results or independently force a new device classification.
+    history_by_ip = defaultdict(list)
+    try:
+        scan_ips = sorted({str(dev.get("ip") or "") for dev in devices if dev.get("ip")})
+        if scan_ips:
+            placeholders = ",".join("?" for _ in scan_ips)
+            with DB_MANAGER.read() as conn:
+                history_rows = conn.execute(
+                    "SELECT ip,source,attribute,observed_value,confidence,evidence_class,last_seen "
+                    f"FROM device_identity_evidence WHERE ip IN ({placeholders}) "
+                    "ORDER BY last_seen DESC",
+                    tuple(scan_ips),
+                ).fetchall()
+            for row in history_rows:
+                history_by_ip[str(row[0])].append({
+                    "source": row[1], "attribute": row[2], "value": row[3],
+                    "confidence": row[4], "evidence_class": row[5],
+                    "last_seen": row[6],
+                })
+    except Exception:
+        history_by_ip = defaultdict(list)
+    for dev in devices:
+        dev["_historical_identity_evidence"] = history_by_ip.get(str(dev.get("ip") or ""), [])
     mdns_by_ip = defaultdict(list)
     for item in (mdns_rows or []):
         if item.get("ip") and item.get("records"):
