@@ -214,7 +214,7 @@ class IdentitySubscanCoordinator:
             }
 
     def defer(self, key: str, reason: str = "Deferred by scheduler", *,
-              now: float | None = None) -> None:
+              delay_seconds: float | None = None, now: float | None = None) -> None:
         """Return a claimed target to the queue without consuming an attempt."""
         now = time.time() if now is None else float(now)
         with self._lock:
@@ -223,7 +223,8 @@ class IdentitySubscanCoordinator:
                 return
             item["state"] = "QUEUED"
             item["attempts"] = max(0, item["attempts"] - 1)
-            item["next_attempt_at"] = now + self.base_backoff
+            delay = self.base_backoff if delay_seconds is None else max(1.0, float(delay_seconds))
+            item["next_attempt_at"] = now + min(self.max_backoff, delay)
             item["last_error"] = str(reason)[:240]
             item["progress"] = {
                 "state": "QUEUED", "ip": item["ip"], "phase": "Waiting for worker capacity",
