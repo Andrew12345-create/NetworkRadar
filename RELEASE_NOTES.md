@@ -1,3 +1,28 @@
+# NetworkRadar 13.7.0 — Parallel Device Intelligence & NIGHTWATCH UI
+
+## Delivered
+- Adds a bounded parallel identity investigation coordinator with a default of three workers and a hard maximum of five.
+- Gives each active target independent progress and preserves a separate queue-completion measure.
+- Keeps full network scans mutually exclusive with all targeted subscans through the existing atomic scan/subscan gate.
+- Returns claimed but not started targets to the queue during shutdown without consuming an attempt.
+- Uses only globally administered unicast MAC addresses as cross-IP subscan queue anchors; locally administered/randomised MACs remain IP-scoped.
+- Redesigns Devices & Identity with live inventory metrics, category quick-filters, search, responsive device cards, grid/list modes, confidence bars, last-seen context and clearer online/offline states.
+- Adds individual worker cards for concurrent investigations, with stage-based progress and responsive/reduced-motion styling.
+- Preserves the existing SQLite inventory, identity evidence, continuity ledger, manual identity-candidate review and authorisation boundaries.
+
+## Configuration
+- `NETWORKRADAR_IDENTITY_WORKERS`: integer from 1 to 5; defaults to 3. Invalid values fall back to 3.
+- Parallel workers each investigate one currently observed private IPv4 host. The current network must remain explicitly authorised.
+- The main scan does not overlap targeted identity investigations.
+
+## Validation boundary
+- Automated CI must pass on Python 3.10–3.13.
+- A real Windows smoke test is still required to validate Nmap concurrency, adapter/capture behaviour, dashboard layout and the user's live network.
+- More workers increase simultaneous probe load; begin with the default of three and reduce to one if the laptop or access point becomes busy.
+- Network-derived model and manufacturer claims remain evidence-bound. OUI registrants, hostnames, open ports and OS fingerprints are not proof of exact hardware identity.
+
+---
+
 # NetworkRadar 13.6.1 — Independent Subscan Progress & Scan Isolation
 
 ## Identity subscan progress
