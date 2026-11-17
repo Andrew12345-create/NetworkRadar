@@ -3918,14 +3918,30 @@ class DHCPEngine(threading.Thread):
                     "reason": "capture engine is (re)starting"}
         if status in ("ONLINE", "RUNNING"):
             messages = int(s.get("messages", 0))
+            interface = str(s.get("interface") or "interface not identified")
             if messages == 0:
-                return {"state": "TRAFFIC_NOT_OBSERVED",
-                        "reason": ("Capture is running but zero DHCP packets have "
-                                   "been observed. Possible causes: wrong interface, "
-                                   "switched segment, static IPs, or no DHCP "
-                                   "activity in observation window.")}
-            return {"state": "OBSERVING",
-                    "reason": f"{messages} DHCP messages observed"}
+                return {
+                    "state": "TRAFFIC_NOT_OBSERVED",
+                    "interface": interface,
+                    "capture_filter": DHCP_CAPTURE_FILTER,
+                    "messages": 0,
+                    "reason": (
+                        "TShark is running on " + interface + " with filter "
+                        + DHCP_CAPTURE_FILTER + ", but no DHCP frames have been "
+                        "visible. This is not proof of capture failure: DHCP is "
+                        "normally visible during address acquisition/renewal, "
+                        "and Wi-Fi client isolation or switched-network forwarding "
+                        "can hide other clients. Verify the selected adapter and "
+                        "observe a device reconnect or renew its lease."
+                    ),
+                }
+            return {
+                "state": "OBSERVING",
+                "interface": interface,
+                "capture_filter": DHCP_CAPTURE_FILTER,
+                "messages": messages,
+                "reason": f"{messages} DHCP messages observed on {interface}",
+            }
         return {"state": "UNKNOWN", "reason": s.get("error") or "state unknown"}
 
     def stop(self):
@@ -4018,7 +4034,7 @@ class DHCPEngine(threading.Thread):
                     f"interface={self.iface}; exit_code={self.proc.returncode}; "
                     f"stderr={diagnostic}")
             self.state(status="ONLINE", error="", last_error="", failure_streak=0,
-                       last_started=now_text(),
+                       last_started=now_text(), capture_filter=DHCP_CAPTURE_FILTER,
                        capture_field_count=len(self.capture_field_map),
                        missing_optional_fields=self.missing_capture_fields[:])
             try:
@@ -4122,6 +4138,7 @@ class DHCPEngine(threading.Thread):
                 if rogue:
                     DHCP_STATE["rogue"] += 1
                 DHCP_STATE["last_event"] = f"{mtname} from {cmac}"
+                DHCP_STATE["last_packet_at"] = ts
         except Exception as e:
             self.state(error=f"DHCP parse: {e}")
 
