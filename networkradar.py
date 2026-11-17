@@ -5760,8 +5760,6 @@ def unknown_device_hunter(conn, limit=100):
 
 
 def investigate_unknown_devices(limit=50):
-
-def investigate_unknown_devices(limit=50):
     """Create/update low-severity identity-review investigations from local evidence only."""
     created=updated=0; results=[]
     def _w(conn):
