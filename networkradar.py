@@ -3372,8 +3372,6 @@ def identity_subscan_worker():
                                                        str(device.get("open_ports") or ""))
                     if 1 <= int(value) <= 65535
                 ]
-                update_job(phase="Identity subscan",
-                           message=f"Investigating previously unidentified device {ip} in a bounded one-host subscan.")
                 result = enrich_devices([device], deep=True, mdns_rows=[], targeted=True)
                 enriched = result[0] if result else device
                 recognised = not IdentitySubscanCoordinator.is_unidentified(enriched)
