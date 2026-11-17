@@ -548,7 +548,7 @@ async function loadPhantomPanels(){
   $('unknownRows').innerHTML=u.map(d=>'<tr><td class="mono">'+esc(d.ip)+'</td><td>'+esc(d.name)+'</td><td>'+esc(d.device_type)+'</td><td>'+esc(d.os_guess)+'</td><td>'+d.confidence+'%</td><td>'+d.evidence_count+' / '+d.independent_sources+' sources</td><td title="'+esc((d.next_steps||[]).join(" | "))+'">'+esc((d.next_steps||[])[0]||"Collect more evidence")+'</td><td>'+esc(d.status)+'</td></tr>').join('')||'<tr><td colspan="8">No low-confidence devices in current inventory.</td></tr>';
   $('ipv6Rows').innerHTML=v.map(d=>`<tr><td class="mono">${esc(d.ipv6)}</td><td class="mono">${esc(d.mac||'—')}</td><td>${esc(d.interface_alias||'—')}</td><td>${esc(d.state)}</td><td>${esc(d.timestamp)}</td><td>${esc(d.linked_device_id||'Uncorrelated')}</td></tr>`).join('')||'<tr><td colspan="6">No IPv6 neighbour observations recorded.</td></tr>';
   $('exposureRows').innerHTML=x.map(d=>`<tr><td class="mono">${esc(d.ip)}</td><td>${esc(d.title)}</td><td class="${d.severity==='HIGH'?'red':'amber'}">${esc(d.severity)}</td><td>${esc(d.observed_ports)}</td><td>${esc(d.recommendation)}</td><td>${esc(d.last_seen)}</td><td>${esc(d.status)}</td></tr>`).join('')||'<tr><td colspan="7">No current or stale exposure observations.</td></tr>';
- }catch(e){$('unknownRows').innerHTML='<tr><td colspan="7">Panel unavailable: '+esc(e.message)+'</td></tr>';}
+ }catch(e){$('unknownRows').innerHTML='<tr><td colspan="8">Panel unavailable: '+esc(e.message)+'</td></tr>';}
 }
 async function investigateUnknown(){
  const status=$("unknownInvestigationStatus");status.textContent="Reviewing local identity evidence…";
