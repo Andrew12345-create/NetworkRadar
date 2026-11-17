@@ -3278,6 +3278,8 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                 retained_identity,
             )
             dev["identity_reconciliation"] = identity_decision
+            if isinstance(dev.get("recognition"), dict):
+                dev["recognition"]["reconciliation"] = identity_decision
             accepted_type = identity_decision["accepted"]["device_type"]
             accepted_confidence = identity_decision["accepted"]["confidence"]
             conn.execute("""UPDATE devices SET
