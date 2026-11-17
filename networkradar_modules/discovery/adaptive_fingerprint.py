@@ -103,6 +103,11 @@ def build_fingerprint_plan(
         if address.version != 4 or not address.is_private or address.is_multicast or address.is_unspecified:
             continue
         if scope is not None and address not in scope:
+            deferred.append({
+                "ip": ip, "priority": 0, "confidence": _confidence(raw),
+                "age_seconds": None,
+                "reason": "Outside the current authorised subnet; active fingerprinting blocked.",
+            })
             continue
         if ip in seen:
             continue
@@ -141,7 +146,7 @@ def build_fingerprint_plan(
     candidates.sort(key=lambda item: (
         -item["priority"],
         -1 if item["age_seconds"] is None else -item["age_seconds"],
-        item["ip"],
+        int(ipaddress.ip_address(item["ip"])),
     ))
     selected = candidates[:limit]
     omitted = candidates[limit:]
