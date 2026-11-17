@@ -313,6 +313,8 @@ from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discover
 from networkradar_modules.discovery.tcp_sweep import sweep_tcp_hosts
 from networkradar_modules.discovery.scan_budget import deep_scan_profile
 from networkradar_modules.discovery.adaptive_fingerprint import build_fingerprint_plan
+from networkradar_modules.discovery.port_intelligence import run_full_tcp_scan, validate_target as validate_full_port_target
+from networkradar_modules.identity.domain_intelligence import build_domain_activity
 from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
 from networkradar_modules.discovery.neighbors import (
     collect_windows_neighbor_cache, merge_reachable_neighbors,
@@ -3325,9 +3327,26 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
             for src, attr, val, conf, cls in dev.get("identity_evidence", []):
                 _add_identity_evidence(conn, dev, src, attr, val, conf, cls, APP_VERSION)
             persist_identity_assessments(conn, dev, dev.get("identity_assessments", []), ts)
+            persisted = conn.execute(
+                "SELECT device_name,device_type,identification_confidence FROM devices WHERE ip=?",
+                (ip,)).fetchone()
+            retained_name, retained_type, retained_confidence = (
+                persisted if persisted else ("", "", 0))
+            current_name = str(dev.get("device_name") or "")
+            current_type = str(dev.get("device_type") or "")
+            current_confidence = int(dev.get("identification_confidence") or 0)
+            record_event(conn, ip, "DEVICE_IDENTITY_ASSESSED",
+                         f"Current assessment: {current_name} / {current_type} "
+                         f"({current_confidence}%). Persisted inventory: "
+                         f"{retained_name} / {retained_type} ({int(retained_confidence or 0)}%). "
+                         "A weaker current assessment does not overwrite a stronger retained identity.",
+                         category="discovery", severity="INFO",
+                         device_id=dev.get("device_id", ""))
+            # Preserve the legacy event for presence/history consumers, but make
+            # its payload explicit about current assessment versus retained state.
             record_event(conn, ip, "DEVICE_FINGERPRINTED",
-                         f"{dev.get('device_name')} | {dev.get('device_type')} | "
-                         f"{dev.get('identification_confidence')}%",
+                         f"Assessment {current_type} ({current_confidence}%); "
+                         f"inventory retains {retained_type} ({int(retained_confidence or 0)}%).",
                          category="discovery", severity="INFO",
                          device_id=dev.get("device_id", ""))
     DB_MANAGER.write(_w)
@@ -7607,6 +7626,34 @@ class Handler(BaseHTTPRequestHandler):
                         "domain": r[2], "query_type": r[3],
                         "response_code": r[4]} for r in rows])
 
+                if p.path == "/api/domain-intelligence":
+                    rows = conn.execute("""SELECT MAX(timestamp), client_ip, domain,
+                        query_type, COUNT(*) FROM dns_events
+                        WHERE is_response=0
+                          AND timestamp >= datetime('now','-7 days')
+                          AND COALESCE(client_ip,'') != ''
+                        GROUP BY client_ip, lower(domain)
+                        ORDER BY COUNT(*) DESC LIMIT 1200""").fetchall()
+                    return self.send_json(build_domain_activity(rows, limit=300))
+
+                if p.path == "/api/port-intelligence":
+                    rows = conn.execute("""SELECT timestamp,ip,device_id,completed,
+                        open_ports,detail FROM port_scan_observations
+                        WHERE scan_method='nmap-full-tcp'
+                        ORDER BY id DESC LIMIT 40""").fetchall()
+                    results = []
+                    for row in rows:
+                        try:
+                            detail = json.loads(row[5] or "{}")
+                        except (TypeError, ValueError):
+                            detail = {}
+                        results.append({"timestamp":row[0],"ip":row[1],
+                            "device_id":row[2],"completed":bool(row[3]),
+                            "open_ports":[int(x) for x in str(row[4] or "").split(",")
+                                if str(x).isdigit()],
+                            "detail":detail})
+                    return self.send_json(results)
+
                 if p.path == "/api/domains":
                     rows = conn.execute("""SELECT domain, query_count, risk_level
                         FROM domain_intel
@@ -7817,6 +7864,53 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local_request_allowed():
             return self.send_json({"error": "Local access only."}, 403)
         try:
+            if self.path == "/api/port-intelligence/scan":
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0 or length > 4096:
+                    return self.send_json({"error": "Invalid scan request body."}, 400)
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                if not isinstance(payload, dict) or payload.get("confirm") is not True:
+                    return self.send_json({"error": "Explicit confirmation is required for a full 65,535-port scan."}, 400)
+                if not is_authorized():
+                    return self.send_json({"error": "Full port intelligence is disabled until this network is explicitly authorised."}, 403)
+                with NET_LOCK:
+                    network_text = str(NET_CTX.get("network") or "")
+                try:
+                    target = validate_full_port_target(payload.get("ip", ""), network_text)
+                except ValueError as exc:
+                    return self.send_json({"error": str(exc)}, 400)
+                with DB_MANAGER.read() as conn:
+                    device_row = conn.execute(
+                        "SELECT device_id,status FROM devices WHERE ip=? LIMIT 1",
+                        (target,)).fetchone()
+                if not device_row or device_row[1] != "ONLINE":
+                    return self.send_json({"error": "Target must be an ONLINE device in the current inventory."}, 409)
+                device_id = str(device_row[0] or "")
+                try:
+                    result = run_full_tcp_scan(target, network_text, str(NMAP), timeout=190)
+                except Exception as exc:
+                    detail = _clean(exc, 400)
+                    DB_MANAGER.write(lambda conn: (
+                        conn.execute("""INSERT INTO port_scan_observations(
+                            timestamp,ip,device_id,completed,open_ports,scan_method,detail)
+                            VALUES(?,?,?,0,'','nmap-full-tcp',?)""",
+                            (now_text(),target,device_id,detail)),
+                        record_event(conn,target,"FULL_TCP_PORT_SCAN_INCOMPLETE",
+                            detail,category="discovery",severity="INFO",device_id=device_id)
+                    ))
+                    return self.send_json({"error": detail, "completed": False}, 504 if isinstance(exc, TimeoutError) else 502)
+                detail_json = json.dumps(result, ensure_ascii=False)
+                ports_csv = ",".join(str(port) for port in result["open_ports"])
+                DB_MANAGER.write(lambda conn: (
+                    conn.execute("""INSERT INTO port_scan_observations(
+                        timestamp,ip,device_id,completed,open_ports,scan_method,detail)
+                        VALUES(?,?,?,?,?,'nmap-full-tcp',?)""",
+                        (now_text(),target,device_id,1,ports_csv,detail_json)),
+                    record_event(conn,target,"FULL_TCP_PORT_SCAN_COMPLETED",
+                        f"Completed all TCP ports; {result['open_count']} open; {result['duration_seconds']}s.",
+                        category="discovery",severity="INFO",device_id=device_id)
+                ))
+                return self.send_json({"ok": True, "result": result}, 200)
             if self.path in ("/api/phantom-access/ssh/hostkey", "/api/phantom-access/ssh/trust", "/api/phantom-access/ssh/connect", "/api/phantom-access/ssh/close"):
                 length = int(self.headers.get("Content-Length", "0"))
                 if length <= 0 or length > 16384:
