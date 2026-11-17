@@ -2,6 +2,7 @@
 
 - Reworks Devices & Identity into a responsive inventory workspace with live totals, category filters, search, grid/list views, confidence bars, online/offline state and last-seen context.
 - Adds per-device active investigation cards and independent progress displays for up to three concurrent one-host investigations by default.
+- Extends Unknown Device Hunter with device-family-specific evidence guidance for Windows endpoints, printers, TVs/media devices, network infrastructure, embedded/VxWorks and mobile devices. Guidance is read-only and does not launch probes.
 - Configures concurrency with `NETWORKRADAR_IDENTITY_WORKERS` (1–5; default 3). The main network scan remains mutually exclusive with targeted identity work.
 - The scheduler uses globally administered unicast MAC addresses as cross-IP queue anchors. Locally administered/randomised MACs remain IP-scoped.
 - Preserves historical inventory records and existing first/last-seen information; offline devices are retained rather than deleted.
