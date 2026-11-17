@@ -8522,7 +8522,13 @@ def _main_inner():
                 SCAN_NOW_EVENT.clear()
 
             if manual or now - last_scan >= SCAN_INTERVAL:
-                if SUBSCAN_ACTIVE_EVENT.is_set():
+                # Reserve the full-scan slot atomically against the identity worker.
+                with SCAN_SUBSCAN_GATE:
+                    scan_busy = (SUBSCAN_ACTIVE_EVENT.is_set()
+                                 or MAIN_SCAN_RESERVED_EVENT.is_set())
+                    if not scan_busy:
+                        MAIN_SCAN_RESERVED_EVENT.set()
+                if scan_busy:
                     if manual:
                         SCAN_NOW_EVENT.set()
                     STOP_EVENT.wait(1)
@@ -8540,12 +8546,14 @@ def _main_inner():
                                    phase="Authorisation required",
                                    message=f"Passive only on {current_network()}.")
                         last_scan = time.monotonic()
+                        MAIN_SCAN_RESERVED_EVENT.clear()
                         STOP_EVENT.wait(2)
                         continue
                 except Exception as e:
                     update_job(state="ERROR", phase="Network detection",
                                message="Could not determine network.",
                                error=_clean(e, 400))
+                    MAIN_SCAN_RESERVED_EVENT.clear()
                     STOP_EVENT.wait(5)
                     continue
 
@@ -8711,6 +8719,9 @@ def _main_inner():
                         pass
                     print("SCAN ERROR:", msg)
                     last_scan = time.monotonic()
+
+                # The main scan has finished (successfully or with an error).
+                MAIN_SCAN_RESERVED_EVENT.clear()
 
             STOP_EVENT.wait(1)
 
