@@ -5,6 +5,7 @@
 - Requires current explicit network authorisation, a private IPv4 target inside the current authorised subnet, an ONLINE inventory record and an additional user confirmation.
 - Uses TCP connect scanning, lightweight service detection, bounded retries, a 190-second process budget, a 180-second Nmap host timeout and a 200-packet-per-second cap.
 - Persists append-only complete/incomplete scan observations and service metadata without silently replacing the routine inventory's bounded scan results.
+- Feeds the full-range service fingerprints into the existing identity profiler and evidence store; stronger retained classifications are preserved when the new assessment is weak.
 - Does not run a subnet-wide full-port sweep, UDP full-range scan, credential attempts, exploit scripts, stealth options or service changes.
 - Adds a dashboard history view for full-port results. Open ports and service banners are evidence, not proof of device identity or vulnerability.
 
