@@ -76,6 +76,29 @@ def evidence_freshness(observed_at: Any, *, now: datetime | None = None,
             "state": "FRESH" if age <= 2 else "AGING"}
 
 
+def _source_family(source: str) -> str:
+    key = _text(source, 100).casefold()
+    if key.startswith(("nmap", "tcp/ip", "passive tcp")):
+        return "nmap_tcpip"
+    if key.startswith(("dhcp", "bootp")):
+        return "dhcp"
+    if key.startswith(("mdns", "dns-sd")):
+        return "mdns"
+    if key.startswith(("ssdp", "upnp")):
+        return "upnp"
+    if key.startswith(("snmp",)):
+        return "snmp"
+    if key.startswith(("tls", "https certificate")):
+        return "tls_certificate"
+    if key.startswith(("ieee", "oui", "mac analysis")):
+        return "mac_registry"
+    if key.startswith(("endpoint", "authenticated endpoint")):
+        return "endpoint_inventory"
+    if key.startswith(("hostname", "reverse dns", "netbios")):
+        return "name_resolution"
+    return key.split(":", 1)[0] or "unknown"
+
+
 def _row_parts(row: Any) -> tuple[str, str, str, int, str, str]:
     if isinstance(row, Mapping):
         return (
@@ -109,7 +132,7 @@ def rank_evidence(evidence: Iterable[Any], *, now: datetime | None = None,
         if not attribute or not value or value.casefold() in _PLACEHOLDERS:
             ignored += 1
             continue
-        family = source.casefold().split(":", 1)[0] or "unknown"
+        family = _source_family(source)
         freshness = evidence_freshness(
             observed_at, now=now, half_life_days=half_life_days,
             max_age_days=max_age_days,
