@@ -1,5 +1,20 @@
 # NetworkRadar 14.2.0 — Evidence Intelligence & Identity Reconciliation
 
+## Evidence intelligence and identity reconciliation
+- Separates the latest device assessment from the accepted inventory identity.
+- Retains a previously supported category when a scan returns no usable evidence, falls below the acceptance threshold, or proposes a conflicting category without the required confidence margin.
+- Allows stronger new evidence to replace a retained category and records the decision plus a human-readable explanation in the recognition payload and identity assessment event.
+- Adds timestamp-aware evidence scoring with half-life decay and a maximum age. Undated observations are not silently treated as fresh.
+- Caps repeated observations from the same source family and keeps competing values visible for review.
+- Improves Unknown Device Hunter guidance: DHCP collector errors and unsuccessful attempts no longer produce the same high-priority instruction repeatedly.
+- Adds a planning-only investigation scheduler that distinguishes already-observed methods, cooldowns, exhausted attempts, offline waiting, authorisation requirements and unavailable collectors.
+- The planner does not send packets. Active methods remain bounded, read-only and explicitly authorised; DHCP lease renewals are never forced.
+- Adds regression coverage for evidence freshness, family deduplication, identity retention/replacement, retry cooldowns, offline deferral and authorisation.
+
+## Validation boundary
+- Automated tests are run by the repository's GitHub Actions matrix.
+- Local Windows/Nmap/TShark and existing SQLite database validation remains necessary before treating the release as live-verified.
+
 ## Full TCP Port Intelligence
 - Adds an explicit, opt-in full TCP scan for one currently ONLINE device at a time, covering ports 1–65,535.
 - Requires current explicit network authorisation, a private IPv4 target inside the current authorised subnet, an ONLINE inventory record and an additional user confirmation.
