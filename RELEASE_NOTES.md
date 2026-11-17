@@ -1,3 +1,20 @@
+# NetworkRadar 14.0.0 — Adaptive Fingerprint Scheduling
+
+## Performance and identity investigation
+- Adds a deterministic, unit-tested target planner that prioritises new devices, then low-confidence identities after a 15-minute retry cooldown, medium-confidence identities after 6 hours and established identities after 24 hours.
+- Uses the latest Nmap attempt timestamp, including incomplete attempts, so filtered devices are not immediately re-probed on every deep scan.
+- Reads identity confidence from the persistent device inventory rather than assuming transient discovery records contain it.
+- Caps each main deep-fingerprint pass at 8 selected private IPv4 targets and the targeted UDP pass at the 3 highest-priority targets.
+- Leaves deferred devices in the inventory and does not clear their prior port/service observations.
+- Tightens Nmap TCP/OS, reduced fallback and UDP process/per-host budgets; partial TCP results remain available if optional UDP enrichment times out.
+- Keeps explicit network authorisation, the existing safe NSE script allow-list, read-only behaviour and local-only API boundaries unchanged.
+
+## Validation
+- Adds tests for deterministic priority, target caps, cooldowns, confidence-specific refresh windows, invalid/public/IPv6/multicast address rejection and duplicate suppression.
+- Adds tests for all bounded scan-budget tiers.
+- No database migration or new active protocol is introduced.
+- A successful CI run and live Windows/Nmap verification are required before treating the release as production-validated.
+
 # NetworkRadar 13.8.0 — Embedded OS Identity Recognition
 
 ## Device classification
