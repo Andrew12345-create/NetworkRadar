@@ -223,7 +223,8 @@ The dashboard opens at **http://127.0.0.1:8766** by default.
 
 - **Full TCP Port Intelligence** is an explicit single-device action for an ONLINE host on the currently authorised private IPv4 subnet. It tests all 65,535 TCP ports with bounded rate/time limits and lightweight service detection. It is not a subnet-wide full scan and does not run exploit scripts or credential attempts.
 - **Domain & Search-Provider Intelligence** groups observed DNS queries by device, domain, category and known provider over seven days. It can show that a device queried a search-provider domain; it cannot show the search phrase typed into HTTPS search, page paths or page contents.
-- **Identity assessment events** now distinguish the latest assessment from the retained inventory identity when weaker evidence is deliberately not allowed to overwrite a stronger prior classification.
+- **Identity assessment timeline** now distinguishes the latest assessment from the retained inventory identity when weaker evidence is deliberately not allowed to overwrite a stronger prior classification.
+- Reverse-DNS and NetBIOS lookups use a short-lived, network-scoped cache; full-port scans share the normal scan reservation gate and cannot overlap a main or identity scan.
 - **Investigation queue metrics** distinguish targets attempted from targets resolved or retry-exhausted.
 
 All active full-port scans require explicit current network authorisation, an online inventory target, subnet membership and a second confirmation. DNS reporting is metadata-only; it does not decrypt or intercept HTTPS.
