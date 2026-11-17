@@ -54,6 +54,7 @@ def build_fingerprint_plan(
     unknown_retry_seconds: int = 900,
     medium_refresh_seconds: int = 6 * 60 * 60,
     known_refresh_seconds: int = 24 * 60 * 60,
+    allowed_network: str | None = None,
 ) -> dict[str, Any]:
     """Select the most useful private IPv4 targets without re-scanning all hosts.
 
@@ -73,6 +74,23 @@ def build_fingerprint_plan(
     candidates: list[dict[str, Any]] = []
     deferred: list[dict[str, Any]] = []
     seen: set[str] = set()
+    scope = None
+    if allowed_network is not None:
+        try:
+            scope = ipaddress.ip_network(str(allowed_network).strip(), strict=False)
+        except ValueError:
+            return {
+                "targets": [], "udp_targets": [], "selected": [],
+                "deferred": [{
+                    "ip": str(item.get("ip") or "") if isinstance(item, Mapping) else "",
+                    "priority": 0, "confidence": _confidence(item) if isinstance(item, Mapping) else 0,
+                    "age_seconds": None,
+                    "reason": "Current authorised subnet is missing or invalid; active fingerprinting fails closed.",
+                } for item in (devices or [])],
+                "candidate_count": 0, "deferred_count": len(devices or []),
+                "max_targets": limit, "max_udp_targets": udp_limit,
+                "policy": "scope validation failed; no active targets selected",
+            }
 
     for raw in devices or []:
         if not isinstance(raw, Mapping):
@@ -83,6 +101,8 @@ def build_fingerprint_plan(
         except ValueError:
             continue
         if address.version != 4 or not address.is_private or address.is_multicast or address.is_unspecified:
+            continue
+        if scope is not None and address not in scope:
             continue
         if ip in seen:
             continue
@@ -136,5 +156,6 @@ def build_fingerprint_plan(
         "deferred_count": len(deferred) + len(omitted),
         "max_targets": limit,
         "max_udp_targets": udp_limit,
+        "scope": str(scope) if scope is not None else "not supplied by caller",
         "policy": "new-first; weak-identity retry 15m; medium refresh 6h; known refresh 24h",
     }
