@@ -2299,3 +2299,10 @@ button {
     scroll-behavior:auto!important;
   }
 }
+
+/* NetworkRadar 14.1.0 intelligence panels */
+#domainIntelligence .grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+#fullPortTarget{max-width:380px}
+#fullPortScanButton:disabled{opacity:.55;cursor:wait}
+#domainIntelLimits{line-height:1.55;overflow-wrap:anywhere}
+@media(max-width:700px){#domainIntelligence .grid{grid-template-columns:1fr}#fullPortTarget{max-width:none;width:100%}}
