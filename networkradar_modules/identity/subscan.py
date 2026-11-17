@@ -76,7 +76,7 @@ class IdentitySubscanCoordinator:
                     address = ipaddress.ip_address(ip)
                 except ValueError:
                     continue
-                if not address.is_private or address.is_multicast or address.is_unspecified:
+                if address.version != 4 or not address.is_private or address.is_multicast or address.is_unspecified:
                     continue
                 key = self._key(device)
                 if key in {"mac:", "ip:"}:
