@@ -8370,8 +8370,24 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
                               "Nmap TCP/OS, service and targeted UDP passes have returned.")
         return all(d.get("_port_scan_complete") for d in target_devices)
     except Exception as error:
+        detail = _clean(error, 300)
+        # Persist failed attempts as incomplete observations so the adaptive
+        # scheduler applies the same cooldown to timeouts and malformed output.
+        try:
+            failed_at = now_text()
+            def _record_failed_attempts(conn):
+                for dev in target_devices:
+                    conn.execute(
+                        "INSERT INTO port_scan_observations(timestamp,ip,device_id,completed,open_ports,scan_method,detail) "
+                        "VALUES(?,?,?,?,?,?,?)",
+                        (failed_at, dev.get("ip", ""), dev.get("device_id", ""),
+                         0, "", "nmap", "Adaptive Nmap attempt failed: " + detail),
+                    )
+            DB_MANAGER.write(_record_failed_attempts)
+        except Exception:
+            pass
         NMAP_LOG.write_text(
-            f"[{now_text()}] Deep fingerprint: {_clean(error, 500)}",
+            f"[{now_text()}] Deep fingerprint: {detail}",
             encoding="utf-8"
         )
         return False
