@@ -5936,6 +5936,13 @@ def unknown_device_hunter(conn, limit=100):
         LIMIT ?""", (max(1,min(int(limit),250)),)).fetchall()
     results=[]
     active_authorised = is_authorized()
+    queue_by_ip = {}
+    try:
+        queue_snapshot = IDENTITY_SUBSCAN.snapshot()
+        for target in queue_snapshot.get("targets", []):
+            queue_by_ip[str(target.get("ip") or "")] = target
+    except Exception:
+        queue_by_ip = {}
     for r in rows:
         ip = r[0]
         sources = [x[0] for x in conn.execute(
@@ -5945,11 +5952,22 @@ def unknown_device_hunter(conn, limit=100):
         dhcp_seen = bool(conn.execute(
             "SELECT 1 FROM dhcp_events WHERE client_ip=? LIMIT 1", (ip,)
         ).fetchone())
+        queue_target = queue_by_ip.get(ip, {})
+        queue_attempts = {}
+        if queue_target:
+            queue_attempts["nmap"] = {
+                "attempts": queue_target.get("attempts", 0),
+                "max_attempts": 3,
+                "state": queue_target.get("state", ""),
+                "next_eligible_at": queue_target.get("next_attempt_at"),
+            }
         profile = {
-            "ip": ip, "device_type": r[5] or "Unclassified network device",
+            "ip": ip, "status": r[9],
+            "device_type": r[5] or "Unclassified network device",
             "os_guess": r[6] or "Unknown", "model": r[7] or "",
             "identification_confidence": int(r[8] or 0),
             "open_ports": r[13] or "",
+            "investigation_attempts": queue_attempts,
         }
         guidance = build_identity_next_steps(
             profile, sources, dhcp_observed=dhcp_seen,
