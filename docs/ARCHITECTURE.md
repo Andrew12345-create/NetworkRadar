@@ -1,4 +1,18 @@
-# NetworkRadar architecture — repository snapshot 13.4.0
+# NetworkRadar architecture — repository snapshot 13.5.0
+
+## 13.5.0 scan observability and unknown-device guidance
+
+The scan worker creates an in-memory `ScanProfiler` for each run. Named phases
+accumulate wall-clock duration, call count, maximum/last duration and error
+type. The latest completed or partial snapshot is available at
+`GET /api/scan_performance` and is rendered in the Command Centre. Profiling
+does not persist packet payloads, credentials or raw exception text.
+
+Unknown Device Hunter uses `build_identity_next_steps` to explain missing
+identity evidence and rank operator actions. This is advisory only: it never
+initiates a network probe. Active-discovery recommendations are conditioned
+on the current network's explicit authorisation state. Exact hardware model
+claims remain evidence-backed and are not inferred from OUI or port numbers.
 
 ## Runtime overview
 
