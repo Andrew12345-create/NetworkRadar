@@ -291,9 +291,13 @@ def plan_investigation_methods(device: Mapping[str, Any] | None,
             deferred.append({"method": key, "state": "WAITING_FOR_ONLINE",
                              "reason": "Device is not currently online; do not spend an investigation attempt."})
             continue
-        if mode == "ACTIVE" and not authorised:
+        if mode in {"ACTIVE", "CONFIGURED"} and not authorised:
             deferred.append({"method": key, "state": "AUTHORIZATION_REQUIRED",
                              "reason": "Current network authorisation is required before active discovery."})
+            continue
+        if mode == "CONFIGURED" and not device.get("snmpv3_configured"):
+            deferred.append({"method": key, "state": "CONFIGURATION_REQUIRED",
+                             "reason": "SNMPv3 requires explicitly configured read-only credentials; no credentials are guessed."})
             continue
         if mode == "PASSIVE" and str(device.get("dhcp_capture_status", "")).upper() in {
             "UNAVAILABLE", "ERROR", "STOPPED", "NO_INTERFACE"
