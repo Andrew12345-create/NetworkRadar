@@ -307,6 +307,7 @@ from networkradar_modules.core.startup import (
 from networkradar_modules.diagnostics.status import engine_record
 from networkradar_modules.diagnostics.scan_profiler import ScanProfiler, measure_phase
 from networkradar_modules.identity.investigation import build_identity_next_steps
+from networkradar_modules.identity.evidence_intelligence import reconcile_identity_assessment
 from networkradar_modules.identity.subscan import IdentitySubscanCoordinator
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
 from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
@@ -3264,8 +3265,21 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
         for dev in devices:
             ip = dev["ip"]
             prior = conn.execute(
-                "SELECT hostname,manufacturer,device_type,os_guess,model FROM devices WHERE ip=?",
+                "SELECT hostname,manufacturer,device_type,os_guess,model,"
+                "identification_confidence,identity_category_confidence FROM devices WHERE ip=?",
                 (ip,)).fetchone()
+            retained_identity = ({
+                "device_type": prior[2], "identification_confidence": prior[5],
+                "identity_category_confidence": prior[6],
+            } if prior else {})
+            identity_decision = reconcile_identity_assessment(
+                {"device_type": dev.get("device_type", ""),
+                 "confidence": dev.get("identification_confidence", 0)},
+                retained_identity,
+            )
+            dev["identity_reconciliation"] = identity_decision
+            accepted_type = identity_decision["accepted"]["device_type"]
+            accepted_confidence = identity_decision["accepted"]["confidence"]
             conn.execute("""UPDATE devices SET
                 mac=CASE WHEN ? IN ('','Unavailable') THEN mac ELSE ? END,
                 hostname=CASE WHEN ? IN ('','-','Unknown') THEN hostname ELSE ? END,
@@ -3291,11 +3305,11 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                  dev.get("device_name", f"Unidentified device at {ip}"),
                  dev.get("device_name", f"Unidentified device at {ip}"),
                  dev.get("friendly_name", ""), dev.get("friendly_name", ""),
-                 dev.get("device_type", ""), dev.get("device_type", ""),
+                 accepted_type, accepted_type,
                  dev.get("os_guess", ""), dev.get("os_guess", ""),
                  dev.get("model", ""), dev.get("model", ""),
-                 dev.get("identification_confidence", 0),
-                 dev.get("identification_confidence", 0),
+                 accepted_confidence,
+                 accepted_confidence,
                  dev.get("identification_methods", ""),
                  dev.get("identification_methods", ""),
                  dev.get("open_ports", ""), dev.get("open_ports", ""),
@@ -3303,18 +3317,14 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
                  ts, ip))
             conn.execute("""UPDATE devices SET oui_manufacturer=?,reported_manufacturer=?,
                 identity_conflicts=?,identity_category_confidence=CASE WHEN ?>=58 THEN ? ELSE identity_category_confidence END,
-                identity_last_assessed=?,
-                recognition_json=CASE WHEN ?>=58 OR identity_category_confidence<58
-                    THEN ? ELSE recognition_json END WHERE ip=?""",
+                identity_last_assessed=?,recognition_json=? WHERE ip=?""",
                 (dev.get("oui_manufacturer", ""), dev.get("reported_manufacturer", ""),
                  json.dumps(dev.get("identity_conflicts", [])),
-                 dev.get("identity_category_confidence", 0),
-                 dev.get("identity_category_confidence", 0), ts,
-                 dev.get("identity_category_confidence", 0),
+                 accepted_confidence, accepted_confidence, ts,
                  json.dumps(dev.get("recognition", {}), ensure_ascii=False), ip))
             if prior:
                 current_values = [dev.get("hostname", ""), dev.get("vendor", ""),
-                                  dev.get("device_type", ""), dev.get("os_guess", ""),
+                                  accepted_type, dev.get("os_guess", ""),
                                   dev.get("model", "")]
                 for attr, old_value, new_value in zip(
                         ("hostname", "manufacturer", "device_type", "os_guess", "model"),
@@ -3348,16 +3358,17 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
             current_confidence = int(dev.get("identification_confidence") or 0)
             record_event(conn, ip, "DEVICE_IDENTITY_ASSESSED",
                          f"Current assessment: {current_name} / {current_type} "
-                         f"({current_confidence}%). Persisted inventory: "
+                         f"({current_confidence}%). Accepted inventory: "
                          f"{retained_name} / {retained_type} ({int(retained_confidence or 0)}%). "
-                         "A weaker current assessment does not overwrite a stronger retained identity.",
+                         f"Decision: {identity_decision['action']} — {identity_decision['explanation']}",
                          category="discovery", severity="INFO",
                          device_id=dev.get("device_id", ""))
             # Preserve the legacy event for presence/history consumers, but make
             # its payload explicit about current assessment versus retained state.
             record_event(conn, ip, "DEVICE_FINGERPRINTED",
                          f"Assessment {current_type} ({current_confidence}%); "
-                         f"inventory retains {retained_type} ({int(retained_confidence or 0)}%).",
+                         f"accepted inventory {retained_type} ({int(retained_confidence or 0)}%); "
+                         f"{identity_decision['action']}.",
                          category="discovery", severity="INFO",
                          device_id=dev.get("device_id", ""))
     DB_MANAGER.write(_w)
