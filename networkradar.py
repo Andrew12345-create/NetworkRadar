@@ -3372,9 +3372,9 @@ def _investigate_identity_subscan_target(task):
                 (ip,)
             ).fetchone()
         if not row:
-            IDENTITY_SUBSCAN.complete(
-                key, recognised=False,
-                error="Device is no longer online; awaiting a fresh observation."
+            IDENTITY_SUBSCAN.defer(
+                key, "Device is offline or no longer present in the live inventory; waiting for a fresh sighting.",
+                delay_seconds=300
             )
             completed = True
             return
@@ -3463,8 +3463,12 @@ def identity_subscan_worker():
                         SUBSCAN_ACTIVE_EVENT.set()
                 if not task:
                     break
-                future = executor.submit(_investigate_identity_subscan_target, task)
-                futures[future] = task
+                try:
+                    future = executor.submit(_investigate_identity_subscan_target, task)
+                    futures[future] = task
+                except Exception as exc:
+                    IDENTITY_SUBSCAN.defer(task.get("key", ""),
+                        "Worker submission failed: " + _clean(exc, 160))
 
             if futures:
                 SUBSCAN_ACTIVE_EVENT.set()
