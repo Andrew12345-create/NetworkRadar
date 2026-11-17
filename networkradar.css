@@ -2202,6 +2202,8 @@ th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hov
 .subscan-progress-card .progress-track{height:9px;margin:10px 0 8px}
 .subscan-progress-target{margin:4px 0;color:#e2f4ff;font:700 12px/1.4 Consolas,monospace;overflow-wrap:anywhere}
 .subscan-progress-card .hint{line-height:1.5}
+.subscan-progress-card .progress-fill.is-running{background:linear-gradient(110deg,#1686e8 0%,#41e2c1 35%,#1686e8 70%);background-size:220% 100%;animation:subscanProgressSweep 1.6s linear infinite}
+@keyframes subscanProgressSweep{from{background-position:100% 0}to{background-position:-120% 0}}
 @media(max-width:760px){.subscan-progress-grid{grid-template-columns:1fr}}
 .scan-monitor[data-state="RUNNING"] .scan-monitor-top strong{color:#00ffb0}
 .scan-monitor[data-state="ERROR"] .scan-monitor-top strong{color:#ff7188}
