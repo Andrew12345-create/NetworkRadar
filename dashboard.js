@@ -52,12 +52,26 @@ async function openDevice(ip){
   identity+='<div class="quality-meta"><span>'+esc(iq.evidence_count??ev.length)+' evidence records</span><span>'+esc(iq.independent_families??0)+' source families</span><span>'+esc((iq.source_families||[]).join(' · ')||'No source families yet')+'</span></div>';
   if(iq.limitations?.length)identity+='<div class="hint quality-limit">'+iq.limitations.map(esc).join(' ')+'</div>';
   identity+='</section>';
+  const reconciliation=rec.reconciliation||d.identity_reconciliation||{};
+  if(reconciliation.accepted){
+   identity+='<section class="identity-quality"><div class="identity-quality-head"><div><span class="label">IDENTITY RECONCILIATION · 14.2</span><h3>Current assessment vs accepted identity</h3><p>The latest scan is not automatically allowed to replace a stronger retained classification.</p></div><div class="quality-score"><strong>'+esc(reconciliation.action||"UNKNOWN")+'</strong><span>decision</span></div></div>';
+   identity+=deviceProfileCards([["CURRENT ASSESSMENT",reconciliation.current?.device_type||"Unknown"],["CURRENT CONFIDENCE",(reconciliation.current?.confidence??0)+"%"],["ACCEPTED INVENTORY",reconciliation.accepted?.device_type||d.device_type||"Unknown"],["ACCEPTED CONFIDENCE",(reconciliation.accepted?.confidence??d.identification_confidence??0)+"%"],["PREVIOUS IDENTITY",reconciliation.previous?.device_type||"None"],["REPLACEMENT MARGIN",reconciliation.replacement_margin??8]]);
+   identity+='<div class="notice">'+esc(reconciliation.explanation||"No reconciliation explanation available.")+'</div></section>';
+  }
+  const evidenceIntel=rec.evidence_intelligence||{};
+  const evidenceAttributes=evidenceIntel.attributes||{};
+  const evidenceRows=Object.keys(evidenceAttributes).map(k=>({attribute:k,value:evidenceAttributes[k].value,confidence:evidenceAttributes[k].confidence,independent_sources:evidenceAttributes[k].independent_sources,sources:(evidenceAttributes[k].sources||[]).join(" · "),conflict:evidenceAttributes[k].conflict?"CONFLICT":"—"}));
+  if(evidenceRows.length){
+   identity+='<h3>FRESHNESS-AWARE EVIDENCE INTELLIGENCE</h3><div class="hint">Repeated observations from one protocol family are capped. Old or undated evidence does not receive a fresh score; competing values remain visible.</div>';
+   identity+=deviceRows(evidenceRows,[["ATTRIBUTE","attribute"],["VALUE","value"],["SCORE","confidence"],["INDEPENDENT FAMILIES","independent_sources"],["SOURCES","sources"],["CONFLICT","conflict"]]);
+   identity+='<div class="hint">Historical evidence considered: '+esc(evidenceIntel.evidence_count??0)+' · ignored placeholders: '+esc(evidenceIntel.ignored_count??0)+'</div>';
+  }
   identity+='<h3>WHY NETWORKRADAR THINKS THIS IS THIS DEVICE</h3>';
   identity+=deviceRows(ass,[['ATTRIBUTE','attribute'],['ASSESSED VALUE','value'],['CONFIDENCE','confidence'],['STATUS','status'],['EVIDENCE COUNT','evidence_count'],['INDEPENDENT SOURCES','independent_sources'],['RATIONALE','rationale']],'No persisted attribute assessments yet.');
   identity+='<h3>RAW IDENTITY EVIDENCE</h3>'+deviceRows(ev,[['TIME','timestamp'],['SOURCE','source'],['ATTRIBUTE','attribute'],['OBSERVED VALUE','value'],['CONFIDENCE','confidence'],['CLASS','class']]);
   if(rec.category){identity+=`<div class="notice"><b>${esc(rec.category)}</b> · ${esc(rec.confidence||0)}% · ${esc(rec.status||'UNKNOWN')}</div>`;identity+=deviceRows(rec.matches||[],[['MATCH','matched'],['CLASSIFICATION','category'],['SOURCE FAMILY','source_family'],['WEIGHT','weight']],'No signature matches.');}
   const osProfile=rec.operating_system||{};
-  identity+='<section class="identity-quality"><div class="identity-quality-head"><div><span class="label">NETWORKRADAR IDENTITY ENGINE 13.0</span><h3>Evidence-fused device profile</h3><p>Independent protocol families are scored separately. Repeated observations from one family cannot manufacture extra confidence.</p></div><div class="quality-score"><strong>'+esc(rec.confidence??0)+'</strong><span>evidence score</span></div></div>';
+  identity+='<section class="identity-quality"><div class="identity-quality-head"><div><span class="label">NETWORKRADAR IDENTITY ENGINE 14.2</span><h3>Evidence-fused device profile</h3><p>Independent protocol families are scored separately. Repeated observations from one family cannot manufacture extra confidence.</p></div><div class="quality-score"><strong>'+esc(rec.confidence??0)+'</strong><span>evidence score</span></div></div>';
   identity+=deviceProfileCards([["SELECTED CATEGORY",rec.selected_category||rec.category||"Unclassified"],["PROFILE STATUS",rec.status||"UNKNOWN"],["INDEPENDENT SOURCE FAMILIES",(rec.source_families||[]).length],["OS FAMILY",osProfile.family||"Not resolved"],["REPORTED MODEL",rec.model||"Not reported"],["REPORTED MANUFACTURER",rec.manufacturer||"Not reported"],["TCP PORTS",(rec.tcp_ports||[]).join(", ")||"Not observed"],["UDP PORTS",(rec.udp_ports||[]).join(", ")||"Not observed"],["NMAP SAFE SCRIPTS",(rec.nmap_scripts||[]).join(", ")||"Not collected"]]);
   identity+='<div class="quality-meta"><span>Evidence families: '+esc((rec.source_families||[]).join(" · ")||"None")+'</span></div>';
   if(osProfile.candidates?.length)identity+='<h3>OPERATING SYSTEM EVIDENCE</h3>'+deviceRows(osProfile.candidates,[["SOURCE","source"],["OBSERVED OS","value"],["RELIABILITY","reliability"]]);
