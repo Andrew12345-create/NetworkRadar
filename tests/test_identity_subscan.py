@@ -85,5 +85,50 @@ class IdentitySubscanCoordinatorTests(unittest.TestCase):
         self.assertEqual(queue.snapshot()["total_targets"], 0)
 
 
+    def test_parallel_claims_respect_worker_limit(self):
+        queue = IdentitySubscanCoordinator(max_workers=3)
+        devices = [self.device(f"192.168.100.{20+i}", mac=f"AA:BB:CC:DD:EE:{20+i:02X}") for i in range(5)]
+        queue.observe(devices, now=100)
+        claimed = [queue.claim_due(now=100) for _ in range(3)]
+        self.assertTrue(all(claimed))
+        self.assertIsNone(queue.claim_due(now=100))
+        snapshot = queue.snapshot(now=100)
+        self.assertEqual(snapshot["counts"]["running"], 3)
+        self.assertEqual(snapshot["active_worker_count"], 3)
+        self.assertEqual(len(snapshot["active_investigations"]), 3)
+
+    def test_parallel_progress_is_independent_per_target(self):
+        queue = IdentitySubscanCoordinator(max_workers=2)
+        first_device = self.device("192.168.100.20", mac="AA:BB:CC:DD:EE:20")
+        second_device = self.device("192.168.100.21", mac="AA:BB:CC:DD:EE:21")
+        queue.observe([first_device, second_device], now=100)
+        first = queue.claim_due(now=100)
+        second = queue.claim_due(now=100)
+        queue.update_progress(first["key"], "Nmap fingerprint", 40, "First target", now=101)
+        queue.update_progress(second["key"], "Service analysis", 75, "Second target", now=102)
+        by_ip = {x["ip"]: x["progress"]["percent"] for x in queue.snapshot(now=102)["active_investigations"]}
+        self.assertEqual(by_ip["192.168.100.20"], 40)
+        self.assertEqual(by_ip["192.168.100.21"], 75)
+
+    def test_local_mac_is_not_a_cross_ip_queue_anchor(self):
+        queue = IdentitySubscanCoordinator()
+        first = self.device("192.168.100.20", mac="02:11:22:33:44:55")
+        second = self.device("192.168.100.21", mac="02:11:22:33:44:55")
+        queue.observe([first, second], now=100)
+        self.assertEqual(queue.snapshot(now=100)["total_targets"], 2)
+
+    def test_global_mac_deduplicates_ip_changes(self):
+        queue = IdentitySubscanCoordinator()
+        queue.observe([self.device("192.168.100.20", mac="AA:11:22:33:44:55")], now=100)
+        queue.observe([self.device("192.168.100.21", mac="AA:11:22:33:44:55")], now=101)
+        snapshot = queue.snapshot(now=101)
+        self.assertEqual(snapshot["total_targets"], 1)
+        self.assertEqual(snapshot["targets"][0]["ip"], "192.168.100.21")
+
+    def test_worker_limit_is_clamped(self):
+        self.assertEqual(IdentitySubscanCoordinator(max_workers=99).max_workers, 5)
+        self.assertEqual(IdentitySubscanCoordinator(max_workers="invalid").max_workers, 3)
+
+
 if __name__ == "__main__":
     unittest.main()
