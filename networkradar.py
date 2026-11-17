@@ -8111,10 +8111,11 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
     ips = [dev["ip"] for dev in target_devices if dev.get("ip")]
     udp_ips = list(plan["udp_targets"])
     if not ips:
-        note = (
-            "Adaptive fingerprint scheduler deferred Nmap: all live devices have "
-            "recent evidence or are inside the retry cooldown."
-        )
+        if str(plan.get("policy") or "").startswith("scope validation failed"):
+            reason = "current authorised subnet is missing or invalid; active fingerprinting was blocked."
+        else:
+            reason = "no live device is due for a fresh fingerprint; recent attempts and retry cooldowns are being respected."
+        note = "Adaptive fingerprint scheduler deferred Nmap: " + reason
         for dev in devices:
             dev.setdefault("collection_notes", []).append(note)
         return False
