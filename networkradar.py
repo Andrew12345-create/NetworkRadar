@@ -315,6 +315,7 @@ from networkradar_modules.discovery.scan_budget import deep_scan_profile
 from networkradar_modules.discovery.adaptive_fingerprint import build_fingerprint_plan
 from networkradar_modules.discovery.port_intelligence import run_full_tcp_scan, validate_target as validate_full_port_target
 from networkradar_modules.identity.domain_intelligence import build_domain_activity
+from networkradar_modules.identity.cache import IdentityLookupCache
 from networkradar_modules.discovery.arp import read_arp_cache as read_arp_cache_records
 from networkradar_modules.discovery.neighbors import (
     collect_windows_neighbor_cache, merge_reachable_neighbors,
@@ -1803,11 +1804,21 @@ def local_identity():
             pass
     return ident
 
+_IDENTITY_NAME_CACHE = IdentityLookupCache(
+    positive_ttl=600.0, negative_ttl=60.0, max_entries=2048
+)
+
 def reverse_dns(ip):
-    return _reverse_dns(ip)
+    scope = str(current_network() or "")
+    return _IDENTITY_NAME_CACHE.get(
+        "reverse_dns", ip, scope, lambda: _reverse_dns(ip)
+    )
 
 def netbios_name(ip):
-    return _netbios_name(ip)
+    scope = str(current_network() or "")
+    return _IDENTITY_NAME_CACHE.get(
+        "netbios", ip, scope, lambda: _netbios_name(ip)
+    )
 
 def _same_private_host(src_ip, url):
     return is_same_private_http_host(src_ip, url)
