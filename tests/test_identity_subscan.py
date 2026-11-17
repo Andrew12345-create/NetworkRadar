@@ -119,7 +119,7 @@ class IdentitySubscanCoordinatorTests(unittest.TestCase):
 
     def test_global_mac_deduplicates_ip_changes(self):
         queue = IdentitySubscanCoordinator()
-        queue.observe([self.device("192.168.100.20", mac="AA:11:22:33:44:55")], now=100)
+        queue.observe([self.device("192.168.100.20", mac="A8:11:22:33:44:55")], now=100)
         queue.observe([self.device("192.168.100.21", mac="AA:11:22:33:44:55")], now=101)
         snapshot = queue.snapshot(now=101)
         self.assertEqual(snapshot["total_targets"], 1)
