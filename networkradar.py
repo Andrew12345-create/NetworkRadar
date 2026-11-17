@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 13.7.0 — Dashboard consistency and accessibility refinements.
+NetworkRadar 13.8.0 — Embedded OS fingerprint recognition and identity refinement.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
