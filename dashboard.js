@@ -551,6 +551,7 @@ async function loadPhantomPanels(){
   $('subscanPolicy').textContent='Maximum '+(sub.max_attempts_per_target||3)+' attempts per target · exponential backoff · next due in '+(sub.next_due_in_seconds==null?'—':Math.ceil(sub.next_due_in_seconds)+'s')+'. Active probing only on the explicitly authorised current private subnet.';
   const sp=sub.progress||{};const currentPct=Math.max(0,Math.min(100,Number(sp.percent)||0));const running=sp.state==='RUNNING';const completed=sp.state==='COMPLETED';
   $('subscanCurrentBar').style.width=(running||completed||sp.state==='QUEUED'||sp.state==='EXHAUSTED')?currentPct+'%':'0%';
+  $('subscanCurrentBar').classList.toggle('is-running',running);
   $('subscanCurrentPercent').textContent=(running||completed||sp.state==='QUEUED'||sp.state==='EXHAUSTED')?currentPct+'%':'0%';
   $('subscanCurrentTarget').textContent=sp.ip?(running?'INVESTIGATING '+sp.ip:(completed?'LAST COMPLETED · '+sp.ip:'LAST ATTEMPT · '+sp.ip)):'No device currently being investigated';
   $('subscanCurrentDetail').textContent=(sp.phase||'Waiting for an unidentified device')+(sp.message?' · '+sp.message:'');
