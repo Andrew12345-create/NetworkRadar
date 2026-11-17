@@ -158,6 +158,20 @@ _RULES = {
         "mdns": (r"_hap\._tcp|_matter\._tcp|_home-assistant\._tcp|_ewelink\._tcp", 0.78, "Smart-home DNS-SD service"),
         "nmap_service": (r"\b(mqtt|coap|matter)\b", 0.62, "Nmap identifies IoT protocol"),
     },
+    "Embedded / appliance device": {
+        # Embedded RTOS fingerprints identify a broad platform family, not a
+        # manufacturer, product role, or exact hardware model.
+        "nmap_os": (
+            r"\b(vxworks|qnx|ecos|threadx|freertos|zephyr|rtos)\b",
+            0.86,
+            "Nmap OS fingerprint reports an embedded real-time operating system",
+        ),
+        "nmap_script": (
+            r"\b(vxworks|qnx|ecos|threadx|freertos|zephyr|rtos)\b",
+            0.84,
+            "Nmap script evidence reports an embedded real-time operating system",
+        ),
+    },
     "Server / infrastructure host": {
         "reported_name": (r"\b(server|domain controller|hypervisor|proxmox|esxi|vmware)\b", 0.62, "Server/infrastructure name"),
         "nmap_os": (r"\b(server|windows server|linux)\b", 0.48, "Nmap OS/server signature"),
@@ -524,10 +538,10 @@ def _os_assessment(device: Mapping[str, Any], facts: list[dict]) -> dict:
         family = "Windows"
     elif re.search(r"\b(mac os|macos|darwin)\b", text):
         family = "macOS"
+    elif re.search(r"\b(vxworks|qnx|ecos|threadx|freertos|zephyr|rtos|embedded|busybox|udhcp)\b", text):
+        family = "Embedded / appliance OS"
     elif re.search(r"\b(linux|ubuntu|debian|fedora|freebsd|openbsd)\b", text):
         family = "Linux / Unix"
-    elif re.search(r"\b(embedded|busybox|udhcp)\b", text):
-        family = "Embedded / appliance OS"
     if not candidates:
         return {"family": "", "candidates": [], "status": "NOT_OBSERVED"}
     return {
