@@ -8058,7 +8058,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
     """Run authorised TCP, OS, safe-script and targeted UDP identification."""
     if not devices or not is_authorized():
         return False
-    # Use completed port-scan observations as the fingerprint freshness clock.
+    # Use the latest port-scan attempt as the fingerprint freshness clock.
     # last_identified is intentionally unsuitable: passive evidence fusion
     # refreshes it even when Nmap has not run.
     all_ips = [str(d.get("ip") or "").strip() for d in devices if d.get("ip")]
@@ -8073,14 +8073,14 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
                     f"WHERE ip IN ({marks}) GROUP BY ip",
                     all_ips,
                 ).fetchall()
+                confidence_rows = conn.execute(
+                    "SELECT ip, COALESCE(identification_confidence, 0) "
+                    f"FROM devices WHERE ip IN ({marks})",
+                    all_ips,
+                ).fetchall()
             last_fingerprint_at = {
                 str(row[0]): row[1] for row in rows if row and row[0]
             }
-            confidence_rows = conn.execute(
-                "SELECT ip, COALESCE(identification_confidence, 0) "
-                f"FROM devices WHERE ip IN ({marks})",
-                all_ips,
-            ).fetchall()
             confidence_by_ip = {
                 str(row[0]): row[1] for row in confidence_rows if row and row[0]
             }
