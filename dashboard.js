@@ -428,7 +428,7 @@ function syncNavigationButton(){
  ];
  const groups=Object.fromEntries(definitions.map(x=>[x.id,[]]));
  const overviewIds=new Set(['top','topology','activity','cmd']);
- const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','ipv6']);
+ const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','identitySubscan','ipv6']);
  const networkIds=new Set(['networkWorkspaces','profiles','dns','dhcp','arp','behaviour','changes']);
  const securityIds=new Set(['firewall','investigations','alerts','config','hunt','exposure']);
  const managementIds=new Set(['phantomAccess','commandCenter']);
@@ -544,23 +544,34 @@ if("IntersectionObserver" in window){
 
 async function loadPhantomPanels(){
  try{
-  const [u,v,x,sub]=await Promise.all([fetch('/api/unknown-hunter').then(r=>r.json()),fetch('/api/ipv6').then(r=>r.json()),fetch('/api/exposure').then(r=>r.json()),fetch('/api/identity/subscan').then(r=>r.json())]);
+  const [u,v,x,sub]=await Promise.all([
+   getJSON('/api/unknown-hunter'),getJSON('/api/ipv6'),getJSON('/api/exposure'),getJSON('/api/identity/subscan')
+  ]);
   $('unknownRows').innerHTML=u.map(d=>'<tr><td class="mono">'+esc(d.ip)+'</td><td>'+esc(d.name)+'</td><td>'+esc(d.device_type)+'</td><td>'+esc(d.os_guess)+'</td><td>'+d.confidence+'%</td><td>'+d.evidence_count+' / '+d.independent_sources+' sources</td><td title="'+esc((d.next_steps||[]).join(" | "))+'">'+esc((d.next_steps||[])[0]||"Collect more evidence")+'</td><td>'+esc(d.status)+'</td></tr>').join('')||'<tr><td colspan="8">No low-confidence devices in current inventory.</td></tr>';
-  const counts=sub.counts||{};$('subscanQueued').textContent=counts.queued??0;$('subscanRunning').textContent=counts.running??0;$('subscanResolved').textContent=counts.resolved??0;$('subscanExhausted').textContent=counts.exhausted??0;
-  pill($('subscanWorkerState'),sub.worker_alive?'WORKER ONLINE':(sub.paused?'PAUSED':'WORKER OFFLINE'),sub.worker_alive?'ok':'warn');
-  $('subscanPolicy').textContent='Maximum '+(sub.max_attempts_per_target||3)+' attempts per target · exponential backoff · next due in '+(sub.next_due_in_seconds==null?'—':Math.ceil(sub.next_due_in_seconds)+'s')+'. Active probing only on the explicitly authorised current private subnet.';
-  const sp=sub.progress||{};const currentPct=Math.max(0,Math.min(100,Number(sp.percent)||0));const running=sp.state==='RUNNING';const completed=sp.state==='COMPLETED';
-  $('subscanCurrentBar').style.width=(running||completed||sp.state==='QUEUED'||sp.state==='EXHAUSTED')?currentPct+'%':'0%';
-  $('subscanCurrentBar').classList.toggle('is-running',running);
-  $('subscanCurrentPercent').textContent=(running||completed||sp.state==='QUEUED'||sp.state==='EXHAUSTED')?currentPct+'%':'0%';
-  $('subscanCurrentTarget').textContent=sp.ip?(running?'INVESTIGATING '+sp.ip:(completed?'LAST COMPLETED · '+sp.ip:'LAST ATTEMPT · '+sp.ip)):'No device currently being investigated';
-  $('subscanCurrentDetail').textContent=(sp.phase||'Waiting for an unidentified device')+(sp.message?' · '+sp.message:'');
-  const queuePct=Math.max(0,Math.min(100,Number(sub.queue_progress_percent)||0));$('subscanQueueBar').style.width=queuePct+'%';$('subscanQueuePercent').textContent=queuePct+'%';
+  const counts=sub.counts||{};
+  $('subscanQueued').textContent=counts.queued??0;
+  $('subscanRunning').textContent=counts.running??0;
+  $('subscanResolved').textContent=counts.resolved??0;
+  $('subscanExhausted').textContent=counts.exhausted??0;
+  pill($('subscanWorkerState'),sub.worker_alive?'WORKERS ONLINE':(sub.paused?'PAUSED':'WORKERS OFFLINE'),sub.worker_alive?'ok':'warn');
+  $('subscanPolicy').textContent='Workers '+(sub.active_worker_count||0)+' / '+(sub.max_workers||3)+' · '+(sub.max_attempts_per_target||3)+' attempts per target · exponential backoff · next due in '+(sub.next_due_in_seconds==null?'—':Math.ceil(sub.next_due_in_seconds)+'s')+'. Active probing remains restricted to the explicitly authorised current private subnet.';
+  const active=Array.isArray(sub.active_investigations)?sub.active_investigations:[];
+  $('subscanActiveCount').textContent=(sub.active_worker_count||active.length)+' / '+(sub.max_workers||3);
+  $('subscanActiveCards').innerHTML=active.map((item,index)=>{
+   const p=item.progress||{},pct=Math.max(0,Math.min(99,Number(p.percent)||0));
+   return '<article class="nr-subscan-worker-card"><div class="nr-subscan-worker-top"><div><span class="nr-worker-index">WORKER '+(index+1)+'</span><strong class="mono">'+esc(item.ip)+'</strong></div><b>'+pct+'%</b></div><div class="nr-worker-track"><i class="is-running" style="width:'+pct+'%"></i></div><div class="nr-worker-phase">'+esc(p.phase||'Preparing investigation')+'</div><p>'+esc(p.message||'Targeted evidence collection is running.')+'</p><small>Attempt '+esc(item.attempts||1)+' · '+esc(p.state||'RUNNING')+'</small></article>';
+  }).join('')||'<div class="device-empty">No device is being investigated at this moment. Eligible targets remain queued until a worker is free and the current network is authorised.</div>';
+  const queuePct=Math.max(0,Math.min(100,Number(sub.queue_progress_percent)||0));
+  $('subscanQueueBar').style.width=queuePct+'%';
+  $('subscanQueuePercent').textContent=queuePct+'%';
   $('subscanQueueDetail').textContent=(sub.processed_targets||0)+' of '+(sub.total_targets||0)+' targets processed · '+(counts.queued||0)+' queued · '+(counts.running||0)+' running';
   $('subscanRows').innerHTML=(sub.targets||[]).map(t=>'<tr><td class="mono">'+esc(t.ip)+'</td><td>'+esc(t.state)+'</td><td>'+esc(t.attempts)+'</td><td>'+esc(t.next_attempt_at?new Date(t.next_attempt_at*1000).toLocaleTimeString():'—')+'</td><td>'+esc(t.last_error||'—')+'</td></tr>').join('')||'<tr><td colspan="5">No devices currently queued for follow-up.</td></tr>';
-  $('ipv6Rows').innerHTML=v.map(d=>`<tr><td class="mono">${esc(d.ipv6)}</td><td class="mono">${esc(d.mac||'—')}</td><td>${esc(d.interface_alias||'—')}</td><td>${esc(d.state)}</td><td>${esc(d.timestamp)}</td><td>${esc(d.linked_device_id||'Uncorrelated')}</td></tr>`).join('')||'<tr><td colspan="6">No IPv6 neighbour observations recorded.</td></tr>';
-  $('exposureRows').innerHTML=x.map(d=>`<tr><td class="mono">${esc(d.ip)}</td><td>${esc(d.title)}</td><td class="${d.severity==='HIGH'?'red':'amber'}">${esc(d.severity)}</td><td>${esc(d.observed_ports)}</td><td>${esc(d.recommendation)}</td><td>${esc(d.last_seen)}</td><td>${esc(d.status)}</td></tr>`).join('')||'<tr><td colspan="7">No current or stale exposure observations.</td></tr>';
- }catch(e){$('unknownRows').innerHTML='<tr><td colspan="8">Panel unavailable: '+esc(e.message)+'</td></tr>';}
+  $('ipv6Rows').innerHTML=v.map(d=>'<tr><td class="mono">'+esc(d.ipv6)+'</td><td class="mono">'+esc(d.mac||'—')+'</td><td>'+esc(d.interface_alias||'—')+'</td><td>'+esc(d.state)+'</td><td>'+esc(d.timestamp)+'</td><td>'+esc(d.linked_device_id||'Uncorrelated')+'</td></tr>').join('')||'<tr><td colspan="6">No IPv6 neighbour observations recorded.</td></tr>';
+  $('exposureRows').innerHTML=x.map(d=>'<tr><td class="mono">'+esc(d.ip)+'</td><td>'+esc(d.title)+'</td><td class="'+(d.severity==='HIGH'?'red':'amber')+'">'+esc(d.severity)+'</td><td>'+esc(d.observed_ports)+'</td><td>'+esc(d.recommendation)+'</td><td>'+esc(d.last_seen)+'</td><td>'+esc(d.status)+'</td></tr>').join('')||'<tr><td colspan="7">No current or stale exposure observations.</td></tr>';
+ }catch(e){
+  $('unknownRows').innerHTML='<tr><td colspan="8">Panel unavailable: '+esc(e.message)+'</td></tr>';
+  if($('subscanActiveCards'))$('subscanActiveCards').innerHTML='<div class="device-empty">Investigation status unavailable: '+esc(e.message)+'</div>';
+ }
 }
 async function investigateUnknown(){
  const status=$("unknownInvestigationStatus");status.textContent="Reviewing local identity evidence…";
@@ -760,3 +771,124 @@ async function restartRemoteService(id){const name=prompt('Exact Windows service
 async function revokeAgent(id){if(!confirm(`Immediately revoke ${id}? Its future requests will be rejected and queued commands cancelled.`))return;try{const r=await fetch(`/api/command/agents/${encodeURIComponent(id)}/revoke`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);await loadCommandCenter();}catch(e){alert(e.message);}}
 
 loadCommandCenter();setInterval(loadCommandCenter,10000);loadPhantomAccess();setInterval(loadPhantomAccess,30000);
+
+
+// 13.7.0 DEVICE INTELLIGENCE WORKSPACE — searchable grid/list inventory and live summaries.
+let nrDeviceQuickFilter = "ALL";
+let nrDeviceView = "GRID";
+function nrDeviceKind(d){
+ const t=String(d.device_type||"").toLowerCase(),n=String(d.device_name||d.manual_name||"").toLowerCase(),v=String(d.manufacturer||"").toLowerCase();
+ if(/printer|scanner/.test(t+" "+n))return "PRINTER";
+ if(/windows|linux|unix|computer|laptop|desktop/.test(t))return "COMPUTER";
+ if(/tv|media|stream|receiver|webos/.test(t+" "+n))return "MEDIA";
+ if(/router|firewall|access point|network service/.test(t))return "NETWORK";
+ if(/iot|smart|embedded/.test(t))return "IOT";
+ if(/tp-link|tenda|huawei/.test(v)&&/network|router|access/.test(t))return "NETWORK";
+ return "OTHER";
+}
+function nrDeviceConfidence(d){
+ const v=Number(d.identification_confidence);
+ return Number.isFinite(v)?Math.max(0,Math.min(100,v)):0;
+}
+function nrDeviceUnknown(d){
+ return nrDeviceConfidence(d)<65||/unclass|unidentified|unknown/i.test(String(d.device_type||""));
+}
+function nrDeviceSeen(d){
+ return d.last_seen?new Date(String(d.last_seen).replace(" ","T")).toLocaleString():"Not recorded";
+}
+function nrDeviceEsc(v){return esc(v===undefined||v===null||v===""?"—":v);}
+function nrRenderDeviceInventory(){
+ const section=$("devices");if(!section)return;
+ const online=deviceCache.filter(d=>d.status==="ONLINE").length;
+ const offline=deviceCache.filter(d=>d.status!=="ONLINE").length;
+ const unknown=deviceCache.filter(nrDeviceUnknown).length;
+ const strong=deviceCache.filter(d=>nrDeviceConfidence(d)>=80).length;
+ const overview=$("nrDeviceOverview");
+ if(overview)overview.innerHTML=[
+  ["TOTAL ASSETS",deviceCache.length,"Historical inventory"],
+  ["ONLINE",online,"Currently responding"],
+  ["OFFLINE",offline,"Retained device records"],
+  ["NEEDS IDENTITY",unknown,"Below recognition threshold"],
+  ["HIGH CONFIDENCE",strong,"80% or stronger"]
+ ].map((x,i)=>'<article class="nr-device-stat nr-stat-'+i+'"><span>'+x[0]+'</span><strong>'+x[1]+'</strong><small>'+x[2]+'</small></article>').join("");
+ const q=($("deviceSearch")?.value||"").toLowerCase().trim();
+ const st=$("deviceFilter")?.value||"ALL";
+ const rows=deviceCache.filter(d=>{
+  const hay=[d.ip,d.device_name,d.manual_name,d.device_type,d.manufacturer,d.mac,d.hostname,d.model,d.os_guess,d.open_ports,d.service_summary,d.status].join(" ").toLowerCase();
+  const kind=nrDeviceKind(d);
+  const stateOK=st==="ALL"||(st==="ONLINE"&&d.status==="ONLINE")||(st==="OFFLINE"&&d.status!=="ONLINE")||(st==="TRUSTED"&&d.trust_state==="TRUSTED")||(st==="UNKNOWN"&&nrDeviceUnknown(d))||(st==="HIGH_CONFIDENCE"&&nrDeviceConfidence(d)>=80);
+  const quickOK=nrDeviceQuickFilter==="ALL"||(nrDeviceQuickFilter==="UNKNOWN"&&nrDeviceUnknown(d))||(nrDeviceQuickFilter==="PRINTER"&&kind==="PRINTER")||(nrDeviceQuickFilter==="COMPUTER"&&kind==="COMPUTER")||(nrDeviceQuickFilter==="MEDIA"&&kind==="MEDIA")||(nrDeviceQuickFilter==="NETWORK"&&kind==="NETWORK")||(nrDeviceQuickFilter==="OFFLINE"&&d.status!=="ONLINE");
+  return stateOK&&quickOK&&(!q||hay.includes(q));
+ }).sort((a,b)=>(a.status==="ONLINE"?0:1)-(b.status==="ONLINE"?0:1)||nrDeviceConfidence(b)-nrDeviceConfidence(a));
+ const count=$("nrDeviceResultCount");if(count)count.textContent=rows.length+" devices shown";
+ const cards=$("nrDeviceCards");
+ if(cards)cards.innerHTML=rows.map(d=>{
+  const confidence=nrDeviceConfidence(d),online=d.status==="ONLINE",kind=nrDeviceKind(d);
+  const name=d.manual_name||d.friendly_name||d.device_name||d.hostname||"Unidentified device";
+  return '<article class="nr-device-card '+(online?'is-online':'is-offline')+'" data-open-device="'+nrDeviceEsc(d.ip)+'" role="button" tabindex="0">'+
+   '<div class="nr-device-card-head"><span class="nr-device-kind">'+kind+'</span><span class="nr-device-state '+(online?'online':'offline')+'"><i></i>'+(online?'ONLINE':'OFFLINE')+'</span></div>'+
+   '<h3>'+nrDeviceEsc(name)+'</h3><div class="nr-device-subtitle">'+nrDeviceEsc(d.device_type||"Unclassified device")+'</div>'+
+   '<div class="nr-device-address"><span>IP</span><b class="mono">'+nrDeviceEsc(d.ip)+'</b></div>'+
+   '<div class="nr-device-meta"><span>MODEL</span><b>'+nrDeviceEsc(d.model||"Not confirmed")+'</b><span>NIC / VENDOR</span><b>'+nrDeviceEsc(d.manufacturer||"Unknown")+'</b></div>'+
+   '<div class="nr-device-confidence"><div><span>IDENTITY CONFIDENCE</span><b>'+confidence+'%</b></div><div class="nr-confidence-track"><i style="width:'+confidence+'%"></i></div></div>'+
+   '<div class="nr-device-card-foot"><span class="mono">'+nrDeviceEsc(d.mac||"MAC unavailable")+'</span><small>Last seen '+nrDeviceEsc(nrDeviceSeen(d))+'</small></div></article>';
+ }).join("")||'<div class="nr-device-empty">No devices match these filters. Clear the search or choose another device category.</div>';
+ if(cards)cards.querySelectorAll("[data-open-device]").forEach(card=>{
+  card.addEventListener("click",()=>openDevice(card.dataset.openDevice));
+  card.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openDevice(card.dataset.openDevice);}});
+ });
+ const tbody=$("deviceRows");
+ if(tbody)tbody.innerHTML=rows.map(d=>'<tr class="clickrow" data-open-device="'+nrDeviceEsc(d.ip)+'" tabindex="0" role="button"><td class="mono">'+nrDeviceEsc(d.ip)+'</td><td>'+nrDeviceEsc(d.manual_name||d.device_name)+'</td><td>'+nrDeviceEsc(d.device_type)+'</td><td>'+nrDeviceEsc(d.model)+'</td><td>'+nrDeviceEsc(d.manufacturer)+'</td><td>'+nrDeviceConfidence(d)+'%</td><td class="risk-'+nrDeviceEsc(d.risk_band||"UNKNOWN")+'">'+nrDeviceEsc(d.risk_band||"UNKNOWN")+'</td><td>'+nrDeviceEsc(d.status)+'</td></tr>').join("")||'<tr><td colspan="8">No matching devices.</td></tr>';
+ if(tbody)tbody.querySelectorAll("[data-open-device]").forEach(row=>row.addEventListener("click",()=>openDevice(row.dataset.openDevice)));
+}
+function filterDevices(){nrRenderDeviceInventory();}
+function nrInitDeviceWorkspace(){
+ const section=$("devices");if(!section||section.dataset.nrEnhanced==="1")return;
+ section.dataset.nrEnhanced="1";
+ const heading=section.querySelector(".row-between");
+ const overview=document.createElement("div");overview.id="nrDeviceOverview";overview.className="nr-device-overview";
+ if(heading)section.insertBefore(overview,heading);
+ const toolbar=document.createElement("div");toolbar.className="nr-device-toolbar";
+ const controls=heading?.querySelector(".button-row");
+ const view=document.createElement("div");view.className="nr-device-view-toggle";
+ view.innerHTML='<button type="button" data-device-view="GRID" aria-pressed="true">GRID</button><button type="button" data-device-view="LIST" aria-pressed="false">LIST</button>';
+ const quick=document.createElement("div");quick.className="nr-device-quickfilters";
+ quick.innerHTML=[["ALL","All devices"],["OFFLINE","Offline"],["UNKNOWN","Needs identity"],["COMPUTER","Computers"],["PRINTER","Printers"],["MEDIA","TVs & media"],["NETWORK","Network gear"]].map(([k,l])=>'<button type="button" data-device-quick="'+k+'" class="'+(k==="ALL"?"active":"")+'">'+l+'</button>').join("");
+ const count=document.createElement("span");count.id="nrDeviceResultCount";count.className="nr-device-result-count";
+ toolbar.append(quick);
+ const lower=document.createElement("div");lower.className="nr-device-toolbar-lower";
+ if(controls)lower.appendChild(controls);
+ lower.append(view,count);toolbar.append(lower);
+ if(heading)heading.insertAdjacentElement("afterend",toolbar);else section.appendChild(toolbar);
+ const cards=document.createElement("div");cards.id="nrDeviceCards";cards.className="nr-device-grid";
+ const tableScroll=section.querySelector(".scroll");
+ if(tableScroll){tableScroll.id="nrDeviceTableScroll";tableScroll.insertAdjacentElement("beforebegin",cards);}
+ section.classList.add("nr-device-grid-mode");
+ quick.addEventListener("click",e=>{
+  const b=e.target.closest("[data-device-quick]");if(!b)return;
+  nrDeviceQuickFilter=b.dataset.deviceQuick;
+  quick.querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));
+  nrRenderDeviceInventory();
+ });
+ view.addEventListener("click",e=>{
+  const b=e.target.closest("[data-device-view]");if(!b)return;
+  nrDeviceView=b.dataset.deviceView;
+  section.classList.toggle("nr-device-grid-mode",nrDeviceView==="GRID");
+  section.classList.toggle("nr-device-list-mode",nrDeviceView==="LIST");
+  view.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b?"true":"false"));
+  try{localStorage.setItem("nr-device-view",nrDeviceView);}catch(_e){}
+ });
+ try{
+  const saved=localStorage.getItem("nr-device-view");
+  if(saved==="LIST")view.querySelector('[data-device-view="LIST"]').click();
+ }catch(_e){}
+ // Put the highest-value device work first while preserving every original panel and API target.
+ const panel=section.closest("[data-workspace-panel='devices']");
+ if(panel){
+  const order=["devices","identity","unknownHunter","identitySubscan","continuity","candidates","ipv6"];
+  order.forEach(id=>{const node=$(id);if(node&&node.parentElement===panel)panel.appendChild(node);});
+ }
+ nrRenderDeviceInventory();
+}
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",nrInitDeviceWorkspace,{once:true});
+else nrInitDeviceWorkspace();

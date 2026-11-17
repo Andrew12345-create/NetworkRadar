@@ -1,4 +1,14 @@
-# NetworkRadar 13.6.1
+## Device Intelligence & NIGHTWATCH workspace (13.7.0)
+
+- Reworks Devices & Identity into a responsive inventory workspace with live totals, category filters, search, grid/list views, confidence bars, online/offline state and last-seen context.
+- Adds per-device active investigation cards and independent progress displays for up to three concurrent one-host investigations by default.
+- Extends Unknown Device Hunter with device-family-specific evidence guidance for Windows endpoints, printers, TVs/media devices, network infrastructure, embedded/VxWorks and mobile devices. Guidance is read-only and does not launch probes.
+- Configures concurrency with `NETWORKRADAR_IDENTITY_WORKERS` (1–5; default 3). The main network scan remains mutually exclusive with targeted identity work.
+- The scheduler uses globally administered unicast MAC addresses as cross-IP queue anchors. Locally administered/randomised MACs remain IP-scoped.
+- Preserves historical inventory records and existing first/last-seen information; offline devices are retained rather than deleted.
+- Adds regression tests for worker limits, independent progress, randomised-MAC scoping and global-MAC continuity.
+
+# NetworkRadar 13.7.0
 
 ## Separate identity subscan progress (13.6.1)
 
@@ -38,7 +48,7 @@
 
 ## Current release
 
-NetworkRadar 13.5.0 builds on 13.4.0 and the 13.3.x authorisation, firewall-timeout and Windows network-context fixes below. Live Windows/Nmap/Npcap validation is still required to confirm scan duration on the local network.
+NetworkRadar 13.7.0 adds a bounded parallel identity investigation pool and a redesigned Devices & Identity workspace. Live Windows/Nmap/Npcap validation remains required.
 
 ## Windows dashboard startup reliability (13.1.1)
 

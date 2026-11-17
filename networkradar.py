@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 13.6.1 — Isolated identity subscan progress and scan coordination.
+NetworkRadar 13.7.0 — Parallel device intelligence and isolated scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
   - Exposes the latest scan's measured phase durations in the local dashboard and API.
@@ -403,7 +403,9 @@ SCAN_NOW_EVENT = threading.Event()
 SUBSCAN_ACTIVE_EVENT = threading.Event()
 MAIN_SCAN_RESERVED_EVENT = threading.Event()
 SCAN_SUBSCAN_GATE = threading.Lock()
-IDENTITY_SUBSCAN = IdentitySubscanCoordinator(max_attempts=3, base_backoff=90,
+IDENTITY_SUBSCAN = IdentitySubscanCoordinator(max_attempts=3,
+                                                max_workers=os.environ.get("NETWORKRADAR_IDENTITY_WORKERS", "3"),
+                                                base_backoff=90,
                                                 max_backoff=3600,
                                                 exhausted_cooldown=21600)
 
@@ -3339,102 +3341,147 @@ def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None, targeted=
     return devices
 
 
-def identity_subscan_worker():
-    """Continuously investigate unknown devices one at a time with strict bounds."""
-    IDENTITY_SUBSCAN.set_worker_alive(True)
+def _investigate_identity_subscan_target(task):
+    """Run one bounded identity investigation for a single authorised host."""
+    ip = str(task.get("ip") or "")
+    key = str(task.get("key") or "")
+    completed = False
     try:
-        while not STOP_EVENT.wait(3):
+        IDENTITY_SUBSCAN.update_progress(
+            key, "Checking target scope", 7,
+            "Confirming the device is inside the currently authorised private subnet."
+        )
+        with NET_LOCK:
+            network_text = str(NET_CTX.get("network") or "")
+        network = ipaddress.ip_network(network_text, strict=False)
+        address = ipaddress.ip_address(ip)
+        if address not in network or not address.is_private:
+            IDENTITY_SUBSCAN.complete(
+                key, recognised=False,
+                error="Target is outside the currently authorised private subnet."
+            )
+            completed = True
+            return
+        IDENTITY_SUBSCAN.update_progress(
+            key, "Checking live inventory", 10,
+            "Looking up the latest device record before probing."
+        )
+        with DB_MANAGER.read() as conn:
+            row = conn.execute(
+                "SELECT * FROM devices WHERE ip=? AND status='ONLINE' LIMIT 1",
+                (ip,)
+            ).fetchone()
+        if not row:
+            IDENTITY_SUBSCAN.defer(
+                key, "Device is offline or no longer present in the live inventory; waiting for a fresh sighting.",
+                delay_seconds=300
+            )
+            completed = True
+            return
+        device = dict(row)
+        device.setdefault("ip", ip)
+        device.setdefault("mac", "")
+        device.setdefault("hostname", "")
+        device.setdefault("device_name", "Unidentified device")
+        device.setdefault("device_type", "Unclassified network device")
+        device.setdefault("os_guess", "Unknown")
+        device.setdefault("model", "")
+        device.setdefault("identification_confidence", 0)
+        device["vendor"] = device.get("manufacturer") or device.get("oui_manufacturer") or ""
+        device["port_numbers"] = [
+            int(value) for value in re.findall(
+                r"(?<!\d)(\d{1,5})(?!\d)", str(device.get("open_ports") or "")
+            ) if 1 <= int(value) <= 65535
+        ]
+
+        def _subscan_progress(phase, percent, message):
+            IDENTITY_SUBSCAN.update_progress(key, phase, percent, message)
+
+        result = enrich_devices(
+            [device], deep=True, mdns_rows=[], targeted=True,
+            progress_callback=_subscan_progress
+        )
+        enriched = result[0] if result else device
+        recognised = not IdentitySubscanCoordinator.is_unidentified(enriched)
+        outcome = IDENTITY_SUBSCAN.complete(
+            key, recognised=recognised,
+            error="" if recognised else
+            "No new conclusive identity evidence; retry scheduled with backoff."
+        )
+        completed = True
+
+        def _event(conn):
+            record_event(
+                conn, ip, "IDENTITY_SUBSCAN_COMPLETED",
+                f"Targeted identity subscan {outcome.get('state', 'UNKNOWN')}; "
+                f"confidence={int(enriched.get('identification_confidence') or 0)}%; "
+                f"attempt={task.get('attempts', 0)}.",
+                category="discovery"
+            )
+        DB_MANAGER.write(_event)
+    except Exception as exc:
+        if not completed:
+            IDENTITY_SUBSCAN.complete(key, recognised=False, error=_clean(exc, 220))
+
+
+def identity_subscan_worker():
+    """Schedule up to the configured number of independent one-host workers."""
+    IDENTITY_SUBSCAN.set_worker_alive(True)
+    executor = ThreadPoolExecutor(
+        max_workers=IDENTITY_SUBSCAN.max_workers,
+        thread_name_prefix="NR-IdentityTarget"
+    )
+    futures = {}
+    try:
+        while not STOP_EVENT.wait(1):
+            # Retire finished jobs before filling available worker slots.
+            for future, task in list(futures.items()):
+                if future.done():
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        IDENTITY_SUBSCAN.complete(
+                            task.get("key", ""), recognised=False, error=_clean(exc, 220)
+                        )
+                    futures.pop(future, None)
+
             if not is_authorized():
+                if not futures:
+                    SUBSCAN_ACTIVE_EVENT.clear()
                 continue
-            # Reserve the subscan slot atomically against the main scan scheduler.
-            # This prevents a full scan and targeted investigation starting together.
-            with SCAN_SUBSCAN_GATE:
-                with JOB_LOCK:
-                    main_scan_running = JOB_STATE.get("state") == "RUNNING"
-                if (MAIN_SCAN_RESERVED_EVENT.is_set() or main_scan_running
-                        or SUBSCAN_ACTIVE_EVENT.is_set()):
-                    task = None
-                else:
-                    task = IDENTITY_SUBSCAN.claim_due()
+
+            while len(futures) < IDENTITY_SUBSCAN.max_workers:
+                # Reserve each subscan atomically against a full network scan.
+                with SCAN_SUBSCAN_GATE:
+                    with JOB_LOCK:
+                        main_scan_running = JOB_STATE.get("state") == "RUNNING"
+                    if MAIN_SCAN_RESERVED_EVENT.is_set() or main_scan_running:
+                        task = None
+                    else:
+                        task = IDENTITY_SUBSCAN.claim_due()
                     if task:
                         SUBSCAN_ACTIVE_EVENT.set()
-            if not task:
-                continue
-            ip = str(task.get("ip") or "")
-            try:
-                IDENTITY_SUBSCAN.update_progress(
-                    task["key"], "Checking target scope", 7,
-                    "Confirming the device is still inside the authorised private subnet."
-                )
-                with NET_LOCK:
-                    network_text = str(NET_CTX.get("network") or "")
-                network = ipaddress.ip_network(network_text, strict=False)
-                address = ipaddress.ip_address(ip)
-                if address not in network or not address.is_private:
-                    IDENTITY_SUBSCAN.complete(task["key"], recognised=False,
-                                              error="Target is outside the currently authorised private subnet.")
-                    continue
-                IDENTITY_SUBSCAN.update_progress(
-                    task["key"], "Checking live inventory", 10,
-                    "Looking up the latest device record before probing."
-                )
-                with DB_MANAGER.read() as conn:
-                    row = conn.execute(
-                        "SELECT * FROM devices WHERE ip=? AND status='ONLINE' LIMIT 1",
-                        (ip,)
-                    ).fetchone()
-                if not row:
-                    IDENTITY_SUBSCAN.complete(task["key"], recognised=False,
-                                              error="Device is no longer online; awaiting a fresh observation.")
-                    continue
-                device = dict(row)
-                device.setdefault("ip", ip)
-                device.setdefault("mac", "")
-                device.setdefault("hostname", "")
-                device.setdefault("device_name", "Unidentified device")
-                device.setdefault("device_type", "Unclassified network device")
-                device.setdefault("os_guess", "Unknown")
-                device.setdefault("model", "")
-                device.setdefault("identification_confidence", 0)
-                device["vendor"] = device.get("manufacturer") or device.get("oui_manufacturer") or ""
-                device["port_numbers"] = [
-                    int(value) for value in re.findall(r"(?<!\d)(\d{1,5})(?!\d)",
-                                                       str(device.get("open_ports") or ""))
-                    if 1 <= int(value) <= 65535
-                ]
-                def _subscan_progress(phase, percent, message):
-                    IDENTITY_SUBSCAN.update_progress(
-                        task["key"], phase, percent, message
-                    )
-                result = enrich_devices(
-                    [device], deep=True, mdns_rows=[], targeted=True,
-                    progress_callback=_subscan_progress
-                )
-                enriched = result[0] if result else device
-                recognised = not IdentitySubscanCoordinator.is_unidentified(enriched)
-                outcome = IDENTITY_SUBSCAN.complete(
-                    task["key"], recognised=recognised,
-                    error="" if recognised else "No new conclusive identity evidence; retry scheduled with backoff."
-                )
-                def _event(conn):
-                    record_event(
-                        conn, ip, "IDENTITY_SUBSCAN_COMPLETED",
-                        f"Targeted identity subscan {outcome.get('state','UNKNOWN')}; "
-                        f"confidence={int(enriched.get('identification_confidence') or 0)}%; "
-                        f"attempt={task.get('attempts', 0)}.",
-                        category="discovery"
-                    )
-                DB_MANAGER.write(_event)
-            except Exception as exc:
-                IDENTITY_SUBSCAN.complete(
-                    task["key"], recognised=False,
-                    error=_clean(exc, 220)
-                )
-            finally:
+                if not task:
+                    break
+                try:
+                    future = executor.submit(_investigate_identity_subscan_target, task)
+                    futures[future] = task
+                except Exception as exc:
+                    IDENTITY_SUBSCAN.defer(task.get("key", ""),
+                        "Worker submission failed: " + _clean(exc, 160))
+
+            if futures:
+                SUBSCAN_ACTIVE_EVENT.set()
+            else:
                 SUBSCAN_ACTIVE_EVENT.clear()
-                # Leave capacity for normal discovery and telemetry work.
-                STOP_EVENT.wait(15)
+
     finally:
+        # Do not leave claimed-but-never-started jobs marked RUNNING on shutdown.
+        for future, task in list(futures.items()):
+            if future.cancel():
+                IDENTITY_SUBSCAN.defer(task.get("key", ""), "Application shutdown; attempt returned to queue.")
+        executor.shutdown(wait=True, cancel_futures=True)
+        SUBSCAN_ACTIVE_EVENT.clear()
         IDENTITY_SUBSCAN.set_worker_alive(False)
 
 
@@ -8735,7 +8782,7 @@ def _main_inner():
         dns.join(timeout=5)
         dhcp.join(timeout=5)
         arp.join(timeout=5)
-        subscan_thread.join(timeout=5)
+        subscan_thread.join(timeout=40)
         print("Flushing database...")
         DB_MANAGER.flush(timeout=10)
         DB_MANAGER.stop(timeout=10)
