@@ -1,6 +1,7 @@
 import unittest
 from datetime import datetime, timezone, timedelta
 
+from networkradar_modules.identity.investigation import build_identity_next_steps
 from networkradar_modules.identity.evidence_intelligence import (
     evidence_freshness, rank_evidence, reconcile_identity_assessment,
     plan_investigation_methods,
@@ -92,6 +93,17 @@ class EvidenceIntelligenceTests(unittest.TestCase):
         self.assertNotIn("nmap", [row["method"] for row in result["planned"]])
         self.assertIn("AUTHORIZATION_REQUIRED",
                       [row["state"] for row in result["deferred"]])
+
+    def test_unknown_device_guidance_does_not_repeat_unavailable_dhcp(self):
+        result = build_identity_next_steps(
+            {"ip": "192.168.1.22", "status": "ONLINE",
+             "dhcp_capture_status": "UNAVAILABLE"},
+            [], authorised=True,
+        )
+        dhcp_actions = [row for row in result["next_actions"]
+                        if "DHCP" in row["action"]]
+        self.assertTrue(dhcp_actions)
+        self.assertTrue(all(row["priority"] != "HIGH" for row in dhcp_actions))
 
 
 if __name__ == "__main__":
