@@ -3346,22 +3346,26 @@ def identity_subscan_worker():
         while not STOP_EVENT.wait(3):
             if not is_authorized():
                 continue
-            with JOB_LOCK:
-                main_scan_running = JOB_STATE.get("state") == "RUNNING"
-            if main_scan_running or SUBSCAN_ACTIVE_EVENT.is_set():
-                continue
-            task = IDENTITY_SUBSCAN.claim_due()
+            # Reserve the subscan slot atomically against the main scan scheduler.
+            # This prevents a full scan and targeted investigation starting together.
+            with SCAN_SUBSCAN_GATE:
+                with JOB_LOCK:
+                    main_scan_running = JOB_STATE.get("state") == "RUNNING"
+                if (MAIN_SCAN_RESERVED_EVENT.is_set() or main_scan_running
+                        or SUBSCAN_ACTIVE_EVENT.is_set()):
+                    task = None
+                else:
+                    task = IDENTITY_SUBSCAN.claim_due()
+                    if task:
+                        SUBSCAN_ACTIVE_EVENT.set()
             if not task:
-                continue
-            SUBSCAN_ACTIVE_EVENT.set()
-            with JOB_LOCK:
-                main_scan_started = JOB_STATE.get("state") == "RUNNING"
-            if main_scan_started:
-                IDENTITY_SUBSCAN.defer_active("Deferred because a full network scan started.")
-                SUBSCAN_ACTIVE_EVENT.clear()
                 continue
             ip = str(task.get("ip") or "")
             try:
+                IDENTITY_SUBSCAN.update_progress(
+                    task["key"], "Checking target scope", 7,
+                    "Confirming the device is still inside the authorised private subnet."
+                )
                 with NET_LOCK:
                     network_text = str(NET_CTX.get("network") or "")
                 network = ipaddress.ip_network(network_text, strict=False)
@@ -3370,6 +3374,10 @@ def identity_subscan_worker():
                     IDENTITY_SUBSCAN.complete(task["key"], recognised=False,
                                               error="Target is outside the currently authorised private subnet.")
                     continue
+                IDENTITY_SUBSCAN.update_progress(
+                    task["key"], "Checking live inventory", 10,
+                    "Looking up the latest device record before probing."
+                )
                 with DB_MANAGER.read() as conn:
                     row = conn.execute(
                         "SELECT * FROM devices WHERE ip=? AND status='ONLINE' LIMIT 1",
@@ -3394,7 +3402,14 @@ def identity_subscan_worker():
                                                        str(device.get("open_ports") or ""))
                     if 1 <= int(value) <= 65535
                 ]
-                result = enrich_devices([device], deep=True, mdns_rows=[], targeted=True)
+                def _subscan_progress(phase, percent, message):
+                    IDENTITY_SUBSCAN.update_progress(
+                        task["key"], phase, percent, message
+                    )
+                result = enrich_devices(
+                    [device], deep=True, mdns_rows=[], targeted=True,
+                    progress_callback=_subscan_progress
+                )
                 enriched = result[0] if result else device
                 recognised = not IdentitySubscanCoordinator.is_unidentified(enriched)
                 outcome = IDENTITY_SUBSCAN.complete(
