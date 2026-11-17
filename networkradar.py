@@ -1,4 +1,12 @@
 ﻿"""
+NetworkRadar 13.5.0 — Scan performance observability and evidence-led device investigation.
+13.5.0 changes:
+  - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
+  - Exposes the latest scan's measured phase durations in the local dashboard and API.
+  - Adds evidence-aware next-step guidance for unknown devices without automatically probing them.
+  - Keeps active discovery approval-gated and exact model claims evidence-backed.
+  - Adds no destructive database migration; existing inventory and evidence history are preserved.
+
 NetworkRadar 13.3.3 — Enforce network authorisation for active discovery.
 NetworkRadar 13.3.3 changes:
   - Enforces current workspace authorisation before Nmap ARP/host discovery.
@@ -296,6 +304,8 @@ from networkradar_modules.core.startup import (
     release_instance_lock as _release_instance_lock, bind_local_server,
 )
 from networkradar_modules.diagnostics.status import engine_record
+from networkradar_modules.diagnostics.scan_profiler import ScanProfiler, measure_phase
+from networkradar_modules.identity.investigation import build_identity_next_steps
 from networkradar_modules.database.manager import DatabaseManager, NestedWriteError
 from networkradar_modules.discovery.nmap import best_os_match, run_nmap_discovery
 from networkradar_modules.discovery.tcp_sweep import sweep_tcp_hosts
@@ -394,6 +404,13 @@ JOB_LOCK = threading.Lock()
 JOB_STATE = {"state": "IDLE", "phase": "Waiting", "percent": 0,
              "started_at": "", "updated_at": "", "message": "Initialising.",
              "scan_number": 0, "last_error": "", "history": []}
+
+SCAN_PERFORMANCE_LOCK = threading.RLock()
+LAST_SCAN_PERFORMANCE = {
+    "available": False, "completed": False, "scan_number": 0,
+    "total_duration_seconds": 0.0, "phase_count": 0, "phases": [],
+    "message": "No completed scan has been profiled yet.",
+}
 
 NET_LOCK = threading.RLock()
 NET_CTX = {"network": "", "ip": "", "gateway": "", "interface": "",
@@ -1803,7 +1820,7 @@ def mdns_active_snapshot(duration=2.0):
     except Exception:
         return []
 
-def discover_devices():
+def discover_devices(profiler=None):
     """Discover devices actively only after explicit approval of this network."""
     network = current_network()
     devices, duration = [], 0.0
@@ -1815,7 +1832,8 @@ def discover_devices():
         update_job(phase="ARP / Nmap sweep", percent=10,
                    message=f"Running authorised Nmap host discovery on {network}.")
         if is_authorized():  # Recheck immediately before the active subprocess.
-            devices, duration = run_nmap_discovery(network, NMAP, NMAP_LOG)
+            with measure_phase(profiler, "discovery.nmap_host_sweep"):
+                devices, duration = run_nmap_discovery(network, NMAP, NMAP_LOG)
             scope_complete = True
     else:
         update_job(phase="Passive inventory", percent=10,
@@ -1829,14 +1847,15 @@ def discover_devices():
         update_job(phase="TCP service reachability", percent=15,
                    message="Testing a bounded set of common TCP service ports across the authorised IPv4 subnet.")
         try:
-            tcp_summary = sweep_tcp_hosts(
-                network, timeout=0.35, max_workers=128, max_hosts=512,
-                progress=lambda done, total, responders: update_job(
-                    phase="TCP service reachability", percent=15 + int(4 * done / max(1, total)),
-                    message=f"TCP reachability probes: {done:,}/{total:,}; "
-                            f"{responders} host(s) accepted a connection."
-                ),
-            )
+            with measure_phase(profiler, "discovery.tcp_reachability_sweep"):
+                tcp_summary = sweep_tcp_hosts(
+                    network, timeout=0.35, max_workers=128, max_hosts=512,
+                    progress=lambda done, total, responders: update_job(
+                        phase="TCP service reachability", percent=15 + int(4 * done / max(1, total)),
+                        message=f"TCP reachability probes: {done:,}/{total:,}; "
+                                f"{responders} host(s) accepted a connection."
+                    ),
+                )
             by_ip = {str(row.get("ip")): row for row in devices}
             for observed in tcp_summary.get("devices", []):
                 existing = by_ip.get(observed["ip"])
@@ -1861,10 +1880,11 @@ def discover_devices():
     neighbour_started = time.monotonic()
     with NET_LOCK:
         interface_index = NET_CTX.get("interface_index")
-    snapshot = collect_windows_neighbor_cache(
-        network, interface_index=interface_index
-    )
-    devices = merge_reachable_neighbors(devices, snapshot.get("records", []))
+    with measure_phase(profiler, "discovery.windows_neighbour_cache"):
+        snapshot = collect_windows_neighbor_cache(
+            network, interface_index=interface_index
+        )
+        devices = merge_reachable_neighbors(devices, snapshot.get("records", []))
     duration = round(duration + (time.monotonic() - neighbour_started), 2)
     if snapshot.get("status") == "ERROR":
         print("WINDOWS NEIGHBOUR DISCOVERY:", _clean(snapshot.get("detail", ""), 180))
@@ -3091,7 +3111,7 @@ def attach_enrolled_endpoint_inventory(devices):
     return attached
 
 
-def enrich_devices(devices, deep=False, mdns_rows=None):
+def enrich_devices(devices, deep=False, mdns_rows=None, profiler=None):
     attach_enrolled_endpoint_inventory(devices)
     arp = read_arp_cache()
     local = local_identity()
@@ -3105,7 +3125,8 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
             dev.setdefault("_extra", []).append(("ARP cache", dev["mac"], 70))
     ssdp = {}
     try:
-        ssdp = ssdp_scan(timeout=2.0)
+        with measure_phase(profiler, "identity.ssdp_discovery"):
+            ssdp = ssdp_scan(timeout=2.0)
     except Exception:
         pass
     mdns_by_ip = defaultdict(list)
@@ -3113,20 +3134,23 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
         if item.get("ip") and item.get("records"):
             mdns_by_ip[item["ip"]].append(item["records"])
     if deep:
-        deep_fingerprint(devices)
+        with measure_phase(profiler, "identity.deep_fingerprint_total"):
+            deep_fingerprint(devices, profiler=profiler)
     passive_tcp = {"status": "NOT_RUN", "devices": {}, "detail": "Deep discovery not requested."}
     if deep and is_authorized():
-        passive_tcp = passive_tcp_fingerprint_snapshot(duration=4)
+        with measure_phase(profiler, "identity.passive_tcp_snapshot"):
+            passive_tcp = passive_tcp_fingerprint_snapshot(duration=4)
     for dev in devices:
         if dev.get("ip") in passive_tcp.get("devices", {}):
             dev["passive_tcp"] = passive_tcp["devices"][dev["ip"]]
     l2_by_mac = {}
     try:
         if deep:
-            for item in collect_lldp_cdp(duration=2):
-                lm = _normalise_mac(item.get("mac", ""))
-                if lm:
-                    l2_by_mac[lm] = item
+            with measure_phase(profiler, "identity.lldp_cdp_collection"):
+                for item in collect_lldp_cdp(duration=2):
+                    lm = _normalise_mac(item.get("mac", ""))
+                    if lm:
+                        l2_by_mac[lm] = item
     except Exception:
         pass
     for dev in devices:
@@ -3134,15 +3158,16 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
         if lm and lm in l2_by_mac:
             dev["lldp_cdp"] = l2_by_mac[lm]
     obs_by_ip = {}
-    with ThreadPoolExecutor(max_workers=12) as pool:
-        fs = {pool.submit(identify_device, dev, ssdp.get(dev["ip"], {}), False): dev
-              for dev in devices}
-        for fut in as_completed(fs):
-            dev = fs[fut]
-            try:
-                obs_by_ip[dev["ip"]] = fut.result()
-            except Exception as e:
-                obs_by_ip[dev["ip"]] = [("Error", _clean(e, 160), 0)]
+    with measure_phase(profiler, "identity.hostname_and_device_resolution"):
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            fs = {pool.submit(identify_device, dev, ssdp.get(dev["ip"], {}), False): dev
+                  for dev in devices}
+            for fut in as_completed(fs):
+                dev = fs[fut]
+                try:
+                    obs_by_ip[dev["ip"]] = fut.result()
+                except Exception as e:
+                    obs_by_ip[dev["ip"]] = [("Error", _clean(e, 160), 0)]
     # Network probes are independent across hosts. Run the bounded read-only
     # enrichments concurrently so one slow endpoint cannot serialize the scan.
     def _collect_probe_bundle(dev):
@@ -3156,18 +3181,19 @@ def enrich_devices(devices, deep=False, mdns_rows=None):
         )
 
     probe_results = {}
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(devices)))) as pool:
-        futures = {pool.submit(_collect_probe_bundle, dev): dev for dev in devices}
-        for future in as_completed(futures):
-            dev = futures[future]
-            try:
-                ip, tls_rows, snmp_rows, service_rows = future.result()
-                probe_results[ip] = (tls_rows, snmp_rows, service_rows)
-            except Exception as exc:
-                probe_results[dev["ip"]] = ([], {}, [])
-                dev.setdefault("collection_notes", []).append(
-                    "Parallel identity enrichment: " + _clean(exc, 140)
-                )
+    with measure_phase(profiler, "identity.parallel_tls_snmp_service_probes"):
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(devices)))) as pool:
+            futures = {pool.submit(_collect_probe_bundle, dev): dev for dev in devices}
+            for future in as_completed(futures):
+                dev = futures[future]
+                try:
+                    ip, tls_rows, snmp_rows, service_rows = future.result()
+                    probe_results[ip] = (tls_rows, snmp_rows, service_rows)
+                except Exception as exc:
+                    probe_results[dev["ip"]] = ([], {}, [])
+                    dev.setdefault("collection_notes", []).append(
+                        "Parallel identity enrichment: " + _clean(exc, 140)
+                    )
 
     for dev in devices:
         try:
@@ -5684,6 +5710,7 @@ def refresh_exposure_intelligence():
 
 
 def unknown_device_hunter(conn, limit=100):
+    """Return low-confidence devices with evidence-specific, non-invasive next steps."""
     rows = conn.execute("""SELECT d.ip,d.device_id,d.mac,d.hostname,d.device_name,
         d.device_type,d.os_guess,d.model,d.identification_confidence,d.status,
         d.last_seen,COUNT(e.id),COUNT(DISTINCT e.source)
@@ -5696,18 +5723,43 @@ def unknown_device_hunter(conn, limit=100):
         GROUP BY d.ip ORDER BY COALESCE(d.identification_confidence,0),d.last_seen DESC
         LIMIT ?""", (max(1,min(int(limit),250)),)).fetchall()
     results=[]
+    active_authorised = is_authorized()
     for r in rows:
-        results.append({"ip":r[0],"device_id":r[1] or "","mac":r[2] or "",
-            "hostname":r[3] or "","name":r[4] or "Unidentified device",
-            "device_type":r[5] or "Unclassified","os_guess":r[6] or "Unknown",
-            "model":r[7] or "","confidence":int(r[8] or 0),"status":r[9],
-            "last_seen":r[10],"evidence_count":int(r[11] or 0),
-            "independent_sources":int(r[12] or 0),
-            "next_steps":["Collect more passive observations",
-                          "Review DHCP, mDNS and service evidence",
-                          "Use an authorised endpoint inventory if exact hardware details are needed"]})
+        ip = r[0]
+        sources = [x[0] for x in conn.execute(
+            "SELECT DISTINCT source FROM device_identity_evidence WHERE ip=? ORDER BY source",
+            (ip,)
+        ).fetchall()]
+        dhcp_seen = bool(conn.execute(
+            "SELECT 1 FROM dhcp_events WHERE client_ip=? LIMIT 1", (ip,)
+        ).fetchone())
+        profile = {
+            "ip": ip, "device_type": r[5] or "Unclassified network device",
+            "os_guess": r[6] or "Unknown", "model": r[7] or "",
+            "identification_confidence": int(r[8] or 0),
+            "port_numbers": r[7] or "",
+        }
+        guidance = build_identity_next_steps(
+            profile, sources, dhcp_observed=dhcp_seen,
+            mdns_observed=any("mdns" in str(x).casefold() or "dns-sd" in str(x).casefold() for x in sources),
+            ssdp_observed=any("ssdp" in str(x).casefold() or "upnp" in str(x).casefold() for x in sources),
+            authorised=active_authorised,
+        )
+        results.append({
+            "ip": ip, "device_id": r[1] or "", "mac": r[2] or "",
+            "hostname": r[3] or "", "name": r[4] or "Unidentified device",
+            "device_type": r[5] or "Unclassified", "os_guess": r[6] or "Unknown",
+            "model": r[7] or "", "confidence": int(r[8] or 0),
+            "status": r[9], "last_seen": r[10],
+            "evidence_count": int(r[11] or 0),
+            "independent_sources": int(r[12] or 0),
+            "next_steps": [item["action"] for item in guidance["next_actions"]],
+            "identity_guidance": guidance,
+        })
     return results
 
+
+def investigate_unknown_devices(limit=50):
 
 def investigate_unknown_devices(limit=50):
     """Create/update low-severity identity-review investigations from local evidence only."""
@@ -6983,6 +7035,10 @@ class Handler(BaseHTTPRequestHandler):
                         "status_errors": status_errors[:8],
                     })
 
+                if p.path == "/api/scan_performance":
+                    with SCAN_PERFORMANCE_LOCK:
+                        return self.send_json(json.loads(json.dumps(LAST_SCAN_PERFORMANCE)))
+
                 if p.path == "/api/diagnostics":
                     with DNS_STATE_LOCK:
                         dns_diag = dict(DNS_STATE)
@@ -7867,7 +7923,7 @@ def start_web():
         pass
     return server
 
-def deep_fingerprint(devices):
+def deep_fingerprint(devices, profiler=None):
     """Run authorised TCP, OS, safe-script and targeted UDP identification."""
     if not devices or not is_authorized():
         return False
@@ -7903,9 +7959,10 @@ def deep_fingerprint(devices):
     ]
     first_error = ""
     try:
-        r = subprocess.run(base + ips, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace",
-                           timeout=profile["tcp_timeout"])
+        with measure_phase(profiler, "fingerprint.nmap_tcp_os_services"):
+            r = subprocess.run(base + ips, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace",
+                               timeout=profile["tcp_timeout"])
     except subprocess.TimeoutExpired:
         r = None
         first_error = (
@@ -7926,9 +7983,10 @@ def deep_fingerprint(devices):
             ]
             fallback_timeout = profile["tcp_fallback_timeout"]
             try:
-                r = subprocess.run(fallback + ips, capture_output=True, text=True,
-                                   encoding="utf-8", errors="replace",
-                                   timeout=fallback_timeout)
+                with measure_phase(profiler, "fingerprint.nmap_tcp_fallback"):
+                    r = subprocess.run(fallback + ips, capture_output=True, text=True,
+                                       encoding="utf-8", errors="replace",
+                                       timeout=fallback_timeout)
             except subprocess.TimeoutExpired as exc:
                 raise RuntimeError(
                     f"Bounded Nmap fallback exceeded {fallback_timeout} seconds."
@@ -8024,11 +8082,12 @@ def deep_fingerprint(devices):
             "--script-timeout", "8s", "-oX", "-"
         ]
         try:
-            udp_result = subprocess.run(
-                udp_command + ips, capture_output=True, text=True,
-                encoding="utf-8", errors="replace",
-                timeout=profile["udp_timeout"]
-            )
+            with measure_phase(profiler, "fingerprint.nmap_targeted_udp"):
+                udp_result = subprocess.run(
+                    udp_command + ips, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
+                    timeout=profile["udp_timeout"]
+                )
             if udp_result.returncode == 0 and udp_result.stdout.strip():
                 udp_root = ET.fromstring(udp_result.stdout)
                 for host in udp_root.findall("host"):
@@ -8342,6 +8401,7 @@ def _main_inner():
 
                 scan_n += 1
                 started = time.monotonic()
+                profiler = ScanProfiler(scan_n, current_network())
                 update_job(state="RUNNING", phase="Discovery", percent=8,
                            message=f"Scanning {current_network()}.",
                            scan_number=scan_n, error="")
@@ -8353,16 +8413,19 @@ def _main_inner():
                             prev[r[0]] = {"mac": r[1] or "",
                                           "hostname": r[2] or "",
                                           "open_ports": r[3] or ""}
-                    devices, _dur, scope_complete = discover_devices()
+                    with measure_phase(profiler, "scan.discovery_total"):
+                        devices, _dur, scope_complete = discover_devices(profiler=profiler)
                     update_job(phase="Inventory", percent=20,
                                message=(f"{len(devices)} hosts observed; "
                                         f"{'authorised scan' if scope_complete else 'passive/partial inventory'}."))
                     update_job(phase="Inventory persistence", percent=27,
                                message="Saving new sightings, refreshing known devices and reconciling online/offline state.")
-                    new, ret, off = update_inventory(
-                        devices, complete_scope=scope_complete
-                    )
-                    audit_arp_cache()
+                    with measure_phase(profiler, "scan.inventory_persistence"):
+                        new, ret, off = update_inventory(
+                            devices, complete_scope=scope_complete
+                        )
+                    with measure_phase(profiler, "scan.arp_audit"):
+                        audit_arp_cache()
                     deep = (scan_n == 1 or scan_n % FINGERPRINT_EVERY_N_SCANS == 0)
                     active_authorised = is_authorized()
                     deep_active = bool(deep and active_authorised)
@@ -8377,61 +8440,84 @@ def _main_inner():
                                message=("Collecting passive mDNS observations and running a bounded authorised browse."
                                         if active_authorised else
                                         "Collecting only mDNS packets visible to the local capture interface."))
-                    try:
-                        mdns_rows = mdns_passive_snapshot(duration=2)
-                    except Exception:
-                        mdns_rows = []
-                    # Active DNS-SD browsing is approval-gated and rate-bounded.
-                    try:
-                        mdns_rows.extend(mdns_active_snapshot(duration=2.0))
-                    except Exception:
-                        pass
+                    with measure_phase(profiler, "scan.mdns_passive_and_active"):
+                        try:
+                            mdns_rows = mdns_passive_snapshot(duration=2)
+                        except Exception:
+                            mdns_rows = []
+                        # Active DNS-SD browsing is approval-gated and rate-bounded.
+                        try:
+                            mdns_rows.extend(mdns_active_snapshot(duration=2.0))
+                        except Exception:
+                            pass
                     update_job(phase="Identity enrichment", percent=45,
                                message=("Running authorised deep Nmap/service fingerprinting and fusing DHCP, mDNS, SSDP, TLS and other identity evidence."
                                         if deep_active else
                                         "Fusing passive observations, cached DHCP/mDNS evidence and enrolled endpoint inventory; active identity probes remain disabled."
                                         if not active_authorised else
                                         "Correlating available identity evidence; scheduled deep fingerprinting is not due this scan."))
-                    devices = enrich_devices(devices, deep=deep, mdns_rows=mdns_rows)
+                    with measure_phase(profiler, "scan.identity_enrichment_total"):
+                        devices = enrich_devices(
+                            devices, deep=deep, mdns_rows=mdns_rows, profiler=profiler
+                        )
                     update_job(phase="Identity evidence", percent=58,
                                message=f"Enrichment complete for {len(devices)} responding hosts; retaining unknowns where evidence is insufficient.")
                     # Update only this workspace; a non-empty completed scan is required.
                     try:
                         if scope_complete:
-                            update_network_sighting_presence(devices)
+                            with measure_phase(profiler, "scan.network_sighting_persistence"):
+                                update_network_sighting_presence(devices)
                     except Exception as sighting_error:
                         print("NETWORK SIGHTINGS:", _clean(sighting_error, 180))
                     # Keep Phantom Track in step with the completed inventory run.
                     # Offline devices are not re-observed; their anchors remain historical.
                     try:
-                        run_identity_continuity()
+                        with measure_phase(profiler, "scan.identity_continuity"):
+                            run_identity_continuity()
                     except Exception as continuity_error:
                         print("PHANTOM TRACK:", _clean(continuity_error, 180))
                     update_job(phase="Phantom intelligence", percent=62,
                                message="Updating IPv6 neighbours and observed service exposure.")
                     try:
-                        if scan_n == 1 or scan_n % 3 == 0:
-                            persist_ipv6_observations(collect_ipv6_neighbours())
-                        refresh_exposure_intelligence()
+                        with measure_phase(profiler, "scan.ipv6_and_exposure_intelligence"):
+                            if scan_n == 1 or scan_n % 3 == 0:
+                                persist_ipv6_observations(collect_ipv6_neighbours())
+                            refresh_exposure_intelligence()
                     except Exception as intel_error:
                         print("PHANTOM INTELLIGENCE:", _clean(intel_error, 180))
                     update_job(phase="Behaviour", percent=70, message="Comparing baselines.")
-                    behaviour_snapshot()
+                    with measure_phase(profiler, "scan.behaviour_baseline"):
+                        behaviour_snapshot()
                     update_job(phase="Correlation", percent=82, message="Clustering alerts.")
-                    correlate()
+                    with measure_phase(profiler, "scan.alert_correlation"):
+                        correlate()
                     update_job(phase="Risk", percent=90, message="Computing risk.")
-                    compute_risk()
+                    with measure_phase(profiler, "scan.risk_computation"):
+                        compute_risk()
                     try:
-                        curr = {d["ip"]: {"mac": d.get("mac", ""),
-                                          "hostname": d.get("hostname", ""),
-                                          "open_ports": d.get("open_ports", ""),
-                                          "_ports_complete": bool(d.get("_port_scan_complete", False))}
-                                for d in devices}
-                        detect_changes(prev, curr, ports_complete=deep)
-                        audit_config()
+                        with measure_phase(profiler, "scan.change_detection_and_config_audit"):
+                            curr = {d["ip"]: {"mac": d.get("mac", ""),
+                                              "hostname": d.get("hostname", ""),
+                                              "open_ports": d.get("open_ports", ""),
+                                              "_ports_complete": bool(d.get("_port_scan_complete", False))}
+                                    for d in devices}
+                            detect_changes(prev, curr, ports_complete=deep)
+                            audit_config()
                     except Exception as e:
                         print("CHANGES:", _clean(e, 150))
                     total = round(time.monotonic() - started, 2)
+                    performance = profiler.snapshot()
+                    performance.update({
+                        "completed": True,
+                        "device_count": len(devices),
+                        "deep_scan_requested": bool(deep),
+                        "deep_scan_authorised": bool(deep_active),
+                        "total_duration_seconds": total,
+                        "message": "Measured scan phases; durations are wall-clock observations, not estimates.",
+                    })
+                    with SCAN_PERFORMANCE_LOCK:
+                        LAST_SCAN_PERFORMANCE.clear()
+                        LAST_SCAN_PERFORMANCE.update(performance)
                     def _w(conn):
                         conn.execute("""INSERT INTO scans(timestamp, network,
                             hosts_up, duration) VALUES (?, ?, ?, ?)""",
@@ -8446,6 +8532,19 @@ def _main_inner():
                                message=f"Scan {scan_n}: {len(devices)} hosts in {total}s.",
                                scan_number=scan_n)
                 except Exception as e:
+                    try:
+                        performance = profiler.snapshot()
+                        performance.update({
+                            "completed": False,
+                            "device_count": 0,
+                            "message": "Scan failed before completion; phase timings are partial.",
+                            "error_type": type(e).__name__,
+                        })
+                        with SCAN_PERFORMANCE_LOCK:
+                            LAST_SCAN_PERFORMANCE.clear()
+                            LAST_SCAN_PERFORMANCE.update(performance)
+                    except Exception:
+                        pass
                     msg = _clean(e, 400)
                     update_job(state="ERROR", phase="Scan error", percent=0,
                                message="Scan failed; inventory retained.",
