@@ -12,7 +12,7 @@ from collections import Counter
 
 _DOMAIN_GROUPS = {
     "SEARCH": {
-        "google.com": "Google", "bing.com": "Microsoft Bing",
+        "google.com": "Google", "google.co.ke": "Google", "google.co.uk": "Google", "google.co.in": "Google", "bing.com": "Microsoft Bing",
         "duckduckgo.com": "DuckDuckGo", "search.brave.com": "Brave Search",
         "yandex.com": "Yandex", "baidu.com": "Baidu",
     },
