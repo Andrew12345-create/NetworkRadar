@@ -66,7 +66,9 @@
 
 ## Current release
 
-NetworkRadar 14.0.0 adds adaptive evidence-aware fingerprint scheduling on top of the 13.8.0 embedded OS recognition. Main Nmap work is limited to the highest-priority live private IPv4 targets, recent attempts are cooled down, and TCP/UDP process budgets are tightened. Existing inventory and deferred targets are retained; explicit authorisation and conservative identity claims remain unchanged. Windows/Nmap live validation is required.\n\nNetworkRadar 13.8.0 adds evidence-backed recognition for embedded real-time operating-system fingerprints, including VxWorks, QNX, eCos, ThreadX, FreeRTOS and Zephyr. It can classify a device broadly as an embedded/appliance device when an Nmap OS or script fingerprint supports that family; it does not infer the device manufacturer, product role or exact model. The release preserves existing database records and network-authorisation boundaries. Windows/Nmap live validation remains required.
+NetworkRadar 14.0.0 adds adaptive evidence-aware fingerprint scheduling on top of the 13.8.0 embedded OS recognition. Main Nmap work is limited to the highest-priority live private IPv4 targets, recent attempts are cooled down, and TCP/UDP process budgets are tightened. Existing inventory and deferred targets are retained; explicit authorisation and conservative identity claims remain unchanged. Windows/Nmap live validation is required.
+
+NetworkRadar 13.8.0 adds evidence-backed recognition for embedded real-time operating-system fingerprints, including VxWorks, QNX, eCos, ThreadX, FreeRTOS and Zephyr. It can classify a device broadly as an embedded/appliance device when an Nmap OS or script fingerprint supports that family; it does not infer the device manufacturer, product role or exact model. The release preserves existing database records and network-authorisation boundaries. Windows/Nmap live validation remains required.
 
 ## Windows dashboard startup reliability (13.1.1)
 
