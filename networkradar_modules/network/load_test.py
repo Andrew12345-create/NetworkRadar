@@ -92,8 +92,13 @@ class NetworkLoadTestManager:
                     process.terminate()
                     return
                 self._process = process
-                if self._job["state"] != "STOPPING":
+                stopping = self._job["state"] == "STOPPING"
+                if not stopping:
                     self._job["state"] = "RUNNING"
+            # A stop can arrive while Popen is being created. Re-check after
+            # publishing the process handle so that early emergency stops win.
+            if stopping:
+                process.terminate()
             output, _ = process.communicate(timeout=config["duration_seconds"] + 12)
             parsed = {}
             try:

@@ -842,7 +842,7 @@ async function stopNetworkLoadTest(){
 async function pollNetworkLoadTest(){
  try{
   const data=await getJSON("/api/load-test/status",5000),out=$("nltStatus"),metrics=$("nltMetrics");
-  if(out)out.textContent=[data.state||"IDLE",data.error||"",data.job_id?"Target "+data.target+" · "+data.aggregate_mbps+" Mbps configured · "+data.duration_seconds+"s":"",data.state==="FAILED"?"Check that the target iPerf3 server is running and UDP port 5201 is reachable.":""].filter(Boolean).join("\\n");
+  if(out)out.textContent=[data.state||"IDLE",data.error||"",data.job_id?"Target "+data.target+" · "+data.aggregate_mbps+" Mbps configured · "+data.duration_seconds+"s":"",data.state==="FAILED"?"Check that the target iPerf3 server is running and UDP port 5201 is reachable.":""].filter(Boolean).join("\n");
   if(metrics)metrics.textContent=["Measured throughput: "+(data.throughput_mbps==null?"—":data.throughput_mbps+" Mbps"),"Jitter: "+(data.jitter_ms==null?"—":data.jitter_ms+" ms"),"Packet loss: "+(data.lost_percent==null?"—":data.lost_percent+"%"),"iPerf3: "+(data.available?"AVAILABLE":"NOT FOUND")].join(" · ");
   if(["STARTING","RUNNING","STOPPING"].includes(data.state)){if(loadTestPollTimer)clearTimeout(loadTestPollTimer);loadTestPollTimer=setTimeout(pollNetworkLoadTest,1500);}
  }catch(error){const out=$("nltStatus");if(out)out.textContent="Status unavailable: "+error.message;}
