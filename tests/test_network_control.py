@@ -1,5 +1,7 @@
 import ipaddress
 import unittest
+import threading
+import time
 
 from networkradar_modules.control.routeros import (
     RouterOSAdapter, format_routeros_rate, validate_duration,
@@ -192,6 +194,32 @@ class RouterOSAdapterTests(unittest.TestCase):
         self.assertTrue(status["fasttrack_detected"])
         self.assertEqual(status["bandwidth_enforcement_status"], "BLOCKED_BY_FASTTRACK")
         self.assertEqual(status["bandwidth_queues"][0]["target"], "192.168.1.20/32")
+
+    def test_status_reads_are_collected_concurrently(self):
+        class SlowReadClient(FakeRouterOSClient):
+            def __init__(self):
+                super().__init__()
+                self.active_reads = 0
+                self.max_active_reads = 0
+                self.read_lock = threading.Lock()
+
+            def get(self, path, params=None):
+                with self.read_lock:
+                    self.active_reads += 1
+                    self.max_active_reads = max(self.max_active_reads, self.active_reads)
+                try:
+                    time.sleep(0.04)
+                    return super().get(path, params)
+                finally:
+                    with self.read_lock:
+                        self.active_reads -= 1
+
+        fake = SlowReadClient()
+        adapter = RouterOSAdapter("192.168.1.1", "nr-control", "not-a-real-secret", client=fake)
+        adapter.connect()
+        fake.max_active_reads = 0
+        adapter.status()
+        self.assertGreater(fake.max_active_reads, 1)
 
     def test_bandwidth_queue_uses_upload_download_order_and_is_idempotent(self):
         adapter, fake = make_adapter()

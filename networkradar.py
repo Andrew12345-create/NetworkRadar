@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 15.3.0 — Router Identification First, evidence intelligence and adaptive investigation.
+NetworkRadar 15.4.0 — Network Control API Responsiveness, evidence intelligence and adaptive investigation.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
@@ -1623,6 +1623,28 @@ def refresh_network_context():
             f"{decision}. " + " ".join(reasons) + " Passive monitoring only.")
 
     return changed, authorised
+
+def network_context_snapshot(max_age_seconds=120):
+    """Return cached network context without launching live OS discovery.
+
+    Read-only HTTP endpoints must not run PowerShell or database writes.
+    The application loop refreshes this context in the background; security-
+    sensitive write actions continue to perform their own live refresh.
+    """
+    with NET_LOCK:
+        context = dict(NET_CTX)
+    checked = str(context.get("last_checked") or "").strip()
+    age = None
+    if checked:
+        try:
+            age = max(0.0, (datetime.now() - datetime.strptime(
+                checked, "%Y-%m-%d %H:%M:%S"
+            )).total_seconds())
+        except (TypeError, ValueError):
+            age = None
+    context["_context_age_seconds"] = age
+    context["_context_fresh"] = age is not None and age <= float(max_age_seconds)
+    return context
 
 def current_network():
     with NET_LOCK:
@@ -7152,9 +7174,12 @@ class Handler(BaseHTTPRequestHandler):
         if p.path == "/api/network-control/discover":
             try:
                 from networkradar_modules.control.router_discovery import identify_router
-                refresh_network_context()
-                with NET_LOCK:
-                    context = dict(NET_CTX)
+                context = network_context_snapshot()
+                if not context.get("_context_fresh"):
+                    return self.send_json({
+                        "error": "The cached network context is stale. NetworkRadar is refreshing network information in the background; try router identification again shortly.",
+                        "context_age_seconds": context.get("_context_age_seconds"),
+                    }, 503)
                 if not context.get("authorized"):
                     return self.send_json({"error": "Router identification requires explicit authorisation of this exact network."}, 403)
                 gateway = str(context.get("gateway") or "")
@@ -7168,10 +7193,21 @@ class Handler(BaseHTTPRequestHandler):
         if p.path == "/api/network-control/status":
             try:
                 from networkradar_modules.control.service import NETWORK_CONTROL
-                refresh_network_context()
-                with NET_LOCK:
-                    current_network = str(NET_CTX.get("network") or "")
-                return self.send_json(NETWORK_CONTROL.status(current_network))
+                context = network_context_snapshot()
+                current_network = (
+                    str(context.get("network") or "")
+                    if context.get("_context_fresh") else ""
+                )
+                result = NETWORK_CONTROL.status(current_network)
+                result["network_context_fresh"] = bool(context.get("_context_fresh"))
+                result["network_context_age_seconds"] = context.get("_context_age_seconds")
+                if not context.get("_context_fresh"):
+                    result["connected"] = False
+                    result["message"] = (
+                        "Router status is paused because the cached network context is stale. "
+                        "Wait for the background network refresh, then refresh router status."
+                    )
+                return self.send_json(result)
             except Exception as exc:
                 return self.send_json({"connected": False, "error": _clean(exc, 300)}, 502)
         if p.path == "/api/phantom-access/ssh/terminal":
