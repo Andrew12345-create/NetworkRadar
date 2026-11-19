@@ -56,8 +56,9 @@ def validate_test_config(endpoint, duration_seconds=30, aggregate_mbps=5, stream
             address = ipaddress.ip_address(value)
         except ValueError as exc:
             raise ValueError("Endpoint resolved to an invalid address.") from exc
-        if not address.is_global:
-            raise ValueError("Endpoint must resolve only to public internet addresses; private, local and reserved destinations are blocked.")
+        if (not address.is_global or address.is_multicast or address.is_unspecified or
+                address.is_loopback or address.is_link_local or address.is_reserved):
+            raise ValueError("Endpoint must resolve only to public internet addresses; private, local, multicast and reserved destinations are blocked.")
     return {"endpoint": raw, "host": host, "duration_seconds": duration_seconds,
             "aggregate_mbps": float(aggregate_mbps), "streams": streams}
 
