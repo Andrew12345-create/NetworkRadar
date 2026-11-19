@@ -621,3 +621,24 @@ The higher-level inventory orchestration, multi-source enrichment and database p
 - Windows PowerShell, Nmap, TShark, packet capture, browser and remote-management integration tests must still be run on a Windows host.
 - A complete route-by-route security review of the HTTP API, WebSocket bridge, SSH trust store, agent HMAC protocol and remote action flows remains in progress.
 - No production-readiness claim is made.
+
+
+# NetworkRadar 15.7.0 — Host-only shared WAN load generator
+
+## Delivered
+- Replaces the iPerf3 client/server workflow with a host-originated HTTPS download engine. No software, agent, or configuration is required on any other device.
+- Generates bounded traffic from the NetworkRadar computer to a user-owned or explicitly authorised HTTPS download endpoint. This can consume the shared WAN connection and affect internet access for other clients on that connection.
+- Uses a shared token bucket to cap aggregate download rate across all workers; supports 1–4 concurrent downloads, a 5–120 second duration and a 20 Mbps ceiling.
+- Enforces a 256 MB hard transfer ceiling, HTTPS-only URLs, standard port 443, public destination resolution, no URL credentials, no redirects and one active session.
+- Adds live received-byte, observed-throughput and worker telemetry plus an emergency stop.
+- Removes all iPerf3 executable and target-server requirements.
+
+## Important limitations
+- A suitable HTTPS download endpoint must be owned by, or explicitly authorised for use by, the operator. NetworkRadar deliberately does not default to Cloudflare, random websites, or third-party speed-test infrastructure as a traffic sink.
+- This primarily loads the shared internet/WAN path. It does not selectively slow one device and does not intentionally impair local LAN traffic.
+- The 20 Mbps rate cap and 256 MB transfer ceiling may not saturate a faster connection. Actual impact depends on the connection's bottleneck and other traffic.
+- Public DNS is checked for non-global/private/reserved addresses and redirects are rejected. Use only a stable, trusted endpoint.
+
+## Validation boundary
+- Automated tests cover URL policy, destination restrictions, rate/duration/worker caps and removal of the iPerf3 dependency.
+- CI must pass before merge. A real Windows smoke test and a controlled test against an operator-owned endpoint are still required; this change has not been exercised against the user's live router or ISP.

@@ -643,3 +643,9 @@ See [Architecture](docs/ARCHITECTURE.md), [Release Notes](RELEASE_NOTES.md), and
 ## License
 
 No license file has been selected yet. Public visibility on GitHub does not by itself grant permission to copy, modify or redistribute this project. Add an explicit license before presenting NetworkRadar as an open-source release.
+
+
+## Shared WAN load generator (15.7.0)
+NetworkRadar can generate a bounded HTTPS download workload from the computer running the application. No client software or configuration is required on other LAN devices. Configure an HTTPS download URL hosted by you or a service you are explicitly authorised to use, then start a short, capped session. The feature is limited to 20 Mbps, 120 seconds, four workers and 256 MB total transfer. It blocks redirects and destinations resolving to private/local/reserved IP addresses. Stop is available at any time.
+
+This is a WAN bandwidth-consumption test, not per-device traffic shaping: other clients sharing the same internet bottleneck may experience slower internet access, while local LAN traffic is not intentionally affected. Do not use arbitrary third-party websites or speed-test endpoints as load sinks. Use an endpoint whose traffic you are authorised to generate.
