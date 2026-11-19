@@ -56,14 +56,15 @@ def validate_target_ip(ip: str, network: str, gateway: str = "") -> str:
 
 
 def validate_duration(minutes) -> int:
-    if isinstance(minutes, bool):
-        raise ValueError("Duration must be an integer number of minutes.")
-    try:
-        value = int(minutes)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Duration must be an integer number of minutes.") from exc
-    if value not in (1, 5, 10, 15, 30, 60, 120, 360, 1440):
-        raise ValueError("Choose a supported pause duration from 1 minute to 24 hours.")
+    """Accept any whole-minute pause from 1 minute through 24 hours."""
+    if isinstance(minutes, bool) or not (
+        isinstance(minutes, int)
+        or (isinstance(minutes, str) and minutes.strip().isdigit())
+    ):
+        raise ValueError("Duration must be a whole number of minutes.")
+    value = int(minutes)
+    if not 1 <= value <= 1440:
+        raise ValueError("Pause duration must be between 1 minute and 24 hours.")
     return value
 
 

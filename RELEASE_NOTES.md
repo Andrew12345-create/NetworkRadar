@@ -1,6 +1,8 @@
-# NetworkRadar 15.0.0 — Network Control Engine
+# NetworkRadar 15.1.0 — Network Control Engine
 
 ## Network Control Engine
+- Adds user-selected whole-minute pause durations from 1 minute to 24 hours for device and network-wide restrictions, including minute/hour input, quick presets and an estimated restoration timestamp before confirmation.
+- Removes the former fixed-duration-only restriction; backend validation accepts any integer minute in the bounded 1–1440 minute range and rejects decimals, booleans and out-of-range values.
 - Adds the first managed router adapter for MikroTik RouterOS 7+ using HTTPS REST with strict certificate validation and no insecure TLS bypass.
 - Adds a dedicated Network Control workspace with router capability status, online-device selection, bandwidth controls, timed pauses and emergency restore.
 - Applies per-device upload/download limits using RouterOS Simple Queues. The UI reports detected FastTrack because FastTrack can bypass Simple Queues; NetworkRadar does not alter existing FastTrack rules.

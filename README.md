@@ -1,6 +1,8 @@
-# NetworkRadar 15.0.0
+# NetworkRadar 15.1.0
 
-## Network Control Engine (15.0.0)
+## Network Control Engine (15.1.0)
+- Adds custom whole-minute pause durations from 1 minute to 24 hours for individual devices and the entire authorised network, with minute/hour units and quick presets.
+- Shows the expected restoration time before confirmation; the router remains responsible for automatic expiry if NetworkRadar closes.
 
 - Adds a dedicated Network Control workspace backed by router-enforced policies rather than local packet manipulation.
 - Adds the first production router adapter for MikroTik RouterOS 7+ over HTTPS REST with certificate verification; the router account and password remain in process memory only.
