@@ -237,12 +237,8 @@ class RouterOSAdapter:
         except Exception:
             v6_rows = []
             ipv6_supported = False
-        v4_rows = _rows(self.client.get("/ip/firewall/filter", {"chain": "forward"}))
-        fasttrack = any(
-            str(row.get("action", "")).lower() == "fasttrack-connection"
-            and not _truthy(row.get("disabled", "false"))
-            for row in v4_rows
-        )
+        fasttrack_rules = self._active_fasttrack_rules()
+        fasttrack = bool(fasttrack_rules)
         self.info = {
             "platform": platform, "identity": str(identity.get("name") or ""),
             "model": str(resource.get("board-name") or ""),
@@ -253,6 +249,20 @@ class RouterOSAdapter:
             "lan_wan_ready": {"LAN", "WAN"}.issubset(list_names),
         }
         return dict(self.info)
+
+    def _active_fasttrack_rules(self):
+        """Read current enabled FastTrack rules; cached connect-time state is insufficient."""
+        rows = _rows(self.client.get("/ip/firewall/filter", {"chain": "forward"}))
+        return [
+            {
+                "id": str(row.get(".id") or ""),
+                "comment": str(row.get("comment") or ""),
+                "chain": str(row.get("chain") or "forward"),
+            }
+            for row in rows
+            if str(row.get("action", "")).lower() == "fasttrack-connection"
+            and not _truthy(row.get("disabled", "false"))
+        ]
 
     def _require_interface_lists(self):
         lists = _rows(self.client.get("/interface/list"))
@@ -484,6 +494,21 @@ class RouterOSAdapter:
         ip = _private_ipv4(ip)
         download = format_routeros_rate(download_mbps)
         upload = format_routeros_rate(upload_mbps)
+        # Simple Queues are bypassed by FastTracked connections. Refresh the
+        # router firewall immediately before writing; never report a successful
+        # limit when the router is known to route eligible traffic around it.
+        fasttrack_rules = self._active_fasttrack_rules()
+        if fasttrack_rules:
+            rule_ids = ", ".join(item["id"] or "unknown" for item in fasttrack_rules[:5])
+            raise ValueError(
+                "BANDWIDTH LIMIT NOT APPLIED. This router has enabled FastTrack "
+                "rule(s), which can bypass RouterOS Simple Queues and leave the "
+                "device running at normal speed. NetworkRadar will not disable or "
+                "rewrite your firewall automatically. Have the router administrator "
+                "exclude this device's connections from FastTrack (or disable "
+                "FastTrack for the affected traffic), then reconnect and apply the "
+                f"limit again. Detected rule IDs: {rule_ids}."
+            )
         comment = f"NetworkRadar:bandwidth:{ip}"
         path = "/queue/simple"
         rows = _rows(self.client.get(path))
@@ -505,11 +530,29 @@ class RouterOSAdapter:
                 payload["place-before"] = str(rows[0][".id"])
             self.client.put(path, payload)
             action = "created"
+        verified = [
+            row for row in _rows(self.client.get(path))
+            if str(row.get("comment") or "") == comment
+        ]
+        if len(verified) != 1:
+            raise RouterOSError(
+                "The router did not return exactly one NetworkRadar bandwidth queue after the write; enforcement is unverified."
+            )
+        queue = verified[0]
+        if (
+            str(queue.get("target") or "") != ip + "/32"
+            or str(queue.get("max-limit") or "") != f"{upload}/{download}"
+            or _truthy(queue.get("disabled", "false"))
+            or _truthy(queue.get("invalid", "false"))
+        ):
+            raise RouterOSError(
+                "The router queue did not verify as enabled and valid with the requested target and rate. Enforcement is not confirmed."
+            )
         return {
             "target": ip, "download_mbps": float(download_mbps),
             "upload_mbps": float(upload_mbps), "max_limit": f"{upload}/{download}",
-            "action": action,
-            "warning": "RouterOS FastTrack can bypass Simple Queues. NetworkRadar detects FastTrack but does not change your existing FastTrack policy.",
+            "action": action, "enforcement_status": "QUEUE_CONFIG_VERIFIED",
+            "verification": "RouterOS returned one enabled, valid Simple Queue with the requested target and upload/download limits. Run a client-side throughput test to confirm the observed rate.",
         }
 
     def remove_bandwidth_limit(self, ip):
@@ -566,6 +609,8 @@ class RouterOSAdapter:
             row for row in _rows(self.client.get("/queue/simple"))
             if str(row.get("comment") or "").startswith("NetworkRadar:bandwidth:")
         ]
+        fasttrack_rules = self._active_fasttrack_rules()
+        self.info["fasttrack_detected"] = bool(fasttrack_rules)
         v6_entries = []
         if self.info.get("ipv6_supported"):
             v6_entries = _rows(self.client.get("/ipv6/firewall/address-list", {"list": MANAGED_PAUSE_LIST}))
@@ -576,7 +621,13 @@ class RouterOSAdapter:
             "version": str(resource.get("version") or self.info.get("version") or ""),
             "uptime": str(resource.get("uptime") or ""),
             "ipv6_supported": bool(self.info.get("ipv6_supported")),
-            "fasttrack_detected": bool(self.info.get("fasttrack_detected")),
+            "fasttrack_detected": bool(fasttrack_rules),
+            "fasttrack_rule_count": len(fasttrack_rules),
+            "bandwidth_enforcement_status": (
+                "BLOCKED_BY_FASTTRACK" if fasttrack_rules and v4_queues else
+                "FASTTRACK_PRESENT" if fasttrack_rules else
+                "QUEUE_CONFIGURED_UNVERIFIED" if v4_queues else "NO_ACTIVE_LIMITS"
+            ),
             "interface_lists": self.info.get("interface_lists", []),
             "active_ipv4_pauses": [
                 {"address": row.get("address"), "comment": row.get("comment"), "timeout": row.get("timeout")}
@@ -587,7 +638,14 @@ class RouterOSAdapter:
                 for row in v6_entries if str(row.get("comment") or "").startswith("NetworkRadar:pause:")
             ],
             "bandwidth_queues": [
-                {"target": row.get("target"), "max_limit": row.get("max-limit"), "name": row.get("name")}
+                {
+                    "target": row.get("target"), "max_limit": row.get("max-limit"),
+                    "name": row.get("name"), "rate": row.get("rate"),
+                    "bytes": row.get("bytes"), "packets": row.get("packets"),
+                    "queued_bytes": row.get("queued-bytes"),
+                    "dropped": row.get("dropped"), "disabled": row.get("disabled"),
+                    "invalid": row.get("invalid"),
+                }
                 for row in v4_queues
             ],
             "credentials_persisted": False,
