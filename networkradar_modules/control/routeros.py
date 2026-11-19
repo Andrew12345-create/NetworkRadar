@@ -13,6 +13,7 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -602,18 +603,32 @@ class RouterOSAdapter:
         }
 
     def status(self):
-        resource = _first(self.client.get("/system/resource"))
-        identity = _first(self.client.get("/system/identity"))
-        v4_entries = _rows(self.client.get("/ip/firewall/address-list", {"list": MANAGED_PAUSE_LIST}))
+        # Independent read-only REST requests run concurrently. This bounds
+        # dashboard latency to roughly one router timeout, not their sum.
+        reads = {
+            "resource": lambda: _first(self.client.get("/system/resource")),
+            "identity": lambda: _first(self.client.get("/system/identity")),
+            "v4_entries": lambda: _rows(self.client.get(
+                "/ip/firewall/address-list", {"list": MANAGED_PAUSE_LIST})),
+            "v4_queues": lambda: _rows(self.client.get("/queue/simple")),
+            "fasttrack_rules": self._active_fasttrack_rules,
+        }
+        if self.info.get("ipv6_supported"):
+            reads["v6_entries"] = lambda: _rows(self.client.get(
+                "/ipv6/firewall/address-list", {"list": MANAGED_PAUSE_LIST}))
+        with ThreadPoolExecutor(max_workers=len(reads), thread_name_prefix="NR-RouterStatus") as pool:
+            futures = {key: pool.submit(operation) for key, operation in reads.items()}
+            values = {key: future.result() for key, future in futures.items()}
+        resource = values["resource"]
+        identity = values["identity"]
+        v4_entries = values["v4_entries"]
         v4_queues = [
-            row for row in _rows(self.client.get("/queue/simple"))
+            row for row in values["v4_queues"]
             if str(row.get("comment") or "").startswith("NetworkRadar:bandwidth:")
         ]
-        fasttrack_rules = self._active_fasttrack_rules()
+        fasttrack_rules = values["fasttrack_rules"]
         self.info["fasttrack_detected"] = bool(fasttrack_rules)
-        v6_entries = []
-        if self.info.get("ipv6_supported"):
-            v6_entries = _rows(self.client.get("/ipv6/firewall/address-list", {"list": MANAGED_PAUSE_LIST}))
+        v6_entries = values.get("v6_entries", [])
         return {
             "connected": True, "provider": "mikrotik-routeros",
             "host": self.host, "identity": str(identity.get("name") or ""),

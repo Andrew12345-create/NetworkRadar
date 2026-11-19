@@ -1,3 +1,18 @@
+# NetworkRadar 15.4.0 — Network Control API Responsiveness
+
+## Fixes for router identification and status timeouts
+- Router identification and router status GET endpoints now use the latest background-refreshed network context instead of launching synchronous PowerShell discovery and database writes on every dashboard request.
+- Router identification fails closed with a clear HTTP 503 response when the cached network context is older than 120 seconds; it does not probe a gateway using stale authorisation.
+- Router status reports whether its network context is fresh. A stale context suspends the displayed session until the background refresh completes; it does not disconnect or alter the router session.
+- MikroTik RouterOS status performs independent read-only REST reads concurrently, bounding worst-case wait to approximately one REST timeout rather than the sum of sequential request timeouts.
+- Dashboard API errors surface the server's actual error message. Client-side aborts display an actionable timeout message instead of the opaque "signal is aborted without reason".
+- Router identification and status receive bounded 9-second and 12-second browser deadlines respectively.
+- Network-control write actions retain their explicit fresh network-context refresh and confirmation requirements. Router configuration safety checks are unchanged.
+
+## Validation
+- Added regression tests for cached network-context freshness.
+- Existing router-control safety, discovery, JavaScript syntax and full regression suites remain required in CI.
+
 # NetworkRadar 15.3.0 — Router Identification First
 
 ## Router identification foundation
