@@ -95,18 +95,18 @@ class _TokenBucket:
         self.lock = threading.Lock()
 
     def acquire(self, amount, stop_event):
-        remaining = float(amount)
-        while remaining > 0 and not stop_event.is_set():
+        amount = float(amount)
+        while not stop_event.is_set():
             with self.lock:
                 now = time.monotonic()
                 self.tokens = min(self.capacity, self.tokens + (now - self.updated) * self.rate)
                 self.updated = now
-                taken = min(remaining, self.tokens)
-                self.tokens -= taken
-                remaining -= taken
-            if remaining > 0:
-                stop_event.wait(min(0.1, remaining / self.rate))
-        return remaining <= 0 and not stop_event.is_set()
+                if self.tokens >= amount:
+                    self.tokens -= amount
+                    return True
+                wait_for = (amount - self.tokens) / self.rate
+            stop_event.wait(min(0.1, max(0.001, wait_for)))
+        return False
 
     def refund(self, amount):
         if amount <= 0:
