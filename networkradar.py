@@ -7196,6 +7196,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": _clean(exc, 300)}, 400)
             except Exception as exc:
                 return self.send_json({"error": _clean(exc, 300)}, 502)
+        if p.path == "/api/load-test/status":
+            try:
+                from networkradar_modules.network.load_test import NETWORK_LOAD_TEST
+                return self.send_json(NETWORK_LOAD_TEST.status())
+            except Exception as exc:
+                return self.send_json({"state": "ERROR", "error": _clean(exc, 300)}, 500)
         if p.path == "/api/network-control/status":
             try:
                 from networkradar_modules.control.service import NETWORK_CONTROL
@@ -8020,6 +8026,65 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local_request_allowed():
             return self.send_json({"error": "Local access only."}, 403)
         control_path = urlparse(self.path).path
+        if control_path.startswith("/api/load-test/"):
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 4096:
+                return self.send_json({"error": "Invalid load-test request body."}, 400)
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            except Exception:
+                return self.send_json({"error": "Invalid JSON request body."}, 400)
+            if not isinstance(payload, dict) or payload.get("confirm") is not True:
+                return self.send_json({"error": "Explicit confirmation is required before generating network traffic."}, 400)
+            try:
+                from networkradar_modules.network.load_test import NETWORK_LOAD_TEST
+                if control_path == "/api/load-test/stop":
+                    return self.send_json(NETWORK_LOAD_TEST.stop())
+                if control_path != "/api/load-test/start":
+                    return self.send_json({"error": "Unknown load-test action."}, 404)
+                refresh_network_context()
+                with NET_LOCK:
+                    context = dict(NET_CTX)
+                if not context.get("authorized"):
+                    return self.send_json({"error": "Authorise the current network before running a load test."}, 403)
+                target = str(payload.get("target") or "").strip()
+                mode = str(payload.get("mode") or "lan").lower()
+                try:
+                    import ipaddress
+                    address = ipaddress.ip_address(target)
+                    network = ipaddress.ip_network(str(context.get("network") or ""), strict=False)
+                except ValueError:
+                    return self.send_json({"error": "Enter a valid IPv4 target and ensure NetworkRadar has a current network context."}, 400)
+                if address.version != 4:
+                    return self.send_json({"error": "Only literal IPv4 targets are supported."}, 400)
+                if mode == "lan":
+                    if address not in network or not address.is_private:
+                        return self.send_json({"error": "LAN tests are restricted to the currently authorised private subnet."}, 403)
+                    gateway = str(context.get("gateway") or "")
+                    if target == gateway:
+                        return self.send_json({"error": "The gateway is excluded as a load-test target to protect network availability."}, 400)
+                    with DB_MANAGER.read() as conn:
+                        device = conn.execute("SELECT status FROM devices WHERE ip=? LIMIT 1", (target,)).fetchone()
+                    if not device or str(device["status"] or "").upper() != "ONLINE":
+                        return self.send_json({"error": "LAN target must be an ONLINE device in the NetworkRadar inventory. Start iperf3 server on that device first."}, 409)
+                elif mode == "internet":
+                    if address.is_private or address.is_loopback or address.is_link_local or address.is_multicast or address.is_reserved:
+                        return self.send_json({"error": "Internet mode requires a public IPv4 address of an iPerf3 server you own or are authorised to use."}, 400)
+                    if payload.get("external_ack") is not True:
+                        return self.send_json({"error": "Acknowledge that this public iPerf3 endpoint is yours or explicitly authorised."}, 400)
+                else:
+                    return self.send_json({"error": "Mode must be lan or internet."}, 400)
+                result = NETWORK_LOAD_TEST.start(
+                    target, payload.get("duration_seconds", 20),
+                    payload.get("aggregate_mbps", 5), payload.get("streams", 1),
+                )
+                return self.send_json(result, 202)
+            except ValueError as exc:
+                return self.send_json({"error": _clean(exc, 300)}, 400)
+            except RuntimeError as exc:
+                return self.send_json({"error": _clean(exc, 400)}, 409)
+            except Exception as exc:
+                return self.send_json({"error": _clean(exc, 300)}, 500)
         if control_path.startswith("/api/network-control/"):
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > 8192:
