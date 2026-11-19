@@ -8054,6 +8054,8 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("duration_seconds", 30),
                     payload.get("aggregate_mbps", 5),
                     payload.get("streams", 2),
+                    payload.get("max_total_mb", 256),
+                    str(payload.get("profile") or "Custom"),
                 )
                 return self.send_json(result, 202)
             except ValueError as exc:

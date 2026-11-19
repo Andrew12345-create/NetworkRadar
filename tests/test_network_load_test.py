@@ -1,8 +1,7 @@
 import unittest
-from unittest.mock import patch
 
 from networkradar_modules.network.load_test import (
-    MAX_TOTAL_BYTES, NetworkLoadTestManager, validate_test_config,
+    MAX_TOTAL_BYTES, MAX_TOTAL_MB, NetworkLoadTestManager, validate_test_config,
 )
 
 
@@ -14,6 +13,18 @@ class LoadTestValidationTests(unittest.TestCase):
         result = validate_test_config("https://test.example/download.bin", resolver=self.public_resolver)
         self.assertEqual(result["host"], "test.example")
         self.assertEqual(result["streams"], 2)
+        self.assertEqual(result["max_total_mb"], 256)
+
+    def test_accepts_extreme_profile_with_explicit_bounds(self):
+        result = validate_test_config(
+            "https://test.example/large-test-payload.bin",
+            duration_seconds=180, aggregate_mbps=75, streams=8,
+            max_total_mb=1024, profile="Extreme",
+            resolver=self.public_resolver,
+        )
+        self.assertEqual(result["streams"], 8)
+        self.assertEqual(result["max_total_bytes"], 1024 * 1024 * 1024)
+        self.assertEqual(result["profile"], "Extreme")
 
     def test_rejects_non_https_and_nonstandard_ports(self):
         for endpoint in ("http://test.example/file", "https://test.example:8443/file", "ftp://test.example/file"):
@@ -31,16 +42,22 @@ class LoadTestValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "public internet"):
             validate_test_config("https://test.example/file", resolver=private_resolver)
 
-    def test_enforces_duration_rate_stream_and_url_caps(self):
+    def test_enforces_duration_rate_stream_data_and_url_caps(self):
         for kwargs in (
-            {"duration_seconds": 4}, {"duration_seconds": 121},
-            {"aggregate_mbps": 0.1}, {"aggregate_mbps": 20.1},
-            {"streams": 0}, {"streams": 5},
+            {"duration_seconds": 4}, {"duration_seconds": 181},
+            {"aggregate_mbps": 0.1}, {"aggregate_mbps": 100.1},
+            {"streams": 0}, {"streams": 9},
+            {"max_total_mb": 15}, {"max_total_mb": 1025},
+            {"profile": "Unbounded"},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 validate_test_config("https://test.example/file", resolver=self.public_resolver, **kwargs)
         with self.assertRaises(ValueError):
             validate_test_config("https://user:pass@test.example/file", resolver=self.public_resolver)
+
+    def test_global_data_cap_matches_one_gibibyte(self):
+        self.assertEqual(MAX_TOTAL_MB, 1024)
+        self.assertEqual(MAX_TOTAL_BYTES, 1024 * 1024 * 1024)
 
     def test_manager_does_not_require_iperf3(self):
         manager = NetworkLoadTestManager(resolver=self.public_resolver)
