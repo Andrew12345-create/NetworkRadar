@@ -1,4 +1,6 @@
 import unittest
+from unittest.mock import patch
+from networkradar_modules.control import router_discovery
 from networkradar_modules.control.router_discovery import identify_router, _private_target, _extract_title
 
 
@@ -15,12 +17,14 @@ class RouterDiscoveryTests(unittest.TestCase):
         self.assertEqual(_extract_title("<html><title>ASUS Router</title></html>"), "ASUS Router")
 
     def test_discovery_never_claims_control_ready_without_adapter_session(self):
-        # A closed local port is a valid unknown-device outcome, not a crash.
-        result = identify_router("192.168.1.254", "192.168.1.0/24")
+        # Mock all network probes: unit tests must never contact a real gateway.
+        empty = {"port": 80, "evidence": [], "headers": {}, "body": "", "certificate_subject": ""}
+        with patch.object(router_discovery, "_probe_http", return_value=empty):
+            result = identify_router("192.168.1.254", "192.168.1.0/24")
         self.assertFalse(result["control_ready"])
         self.assertFalse(result["credentials_sent"])
         self.assertFalse(result["configuration_changed"])
 
 
-if __test__:
+if __name__ == "__main__":
     unittest.main()

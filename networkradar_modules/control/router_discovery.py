@@ -12,7 +12,6 @@ import ipaddress
 import re
 import socket
 import ssl
-from urllib.parse import urlsplit
 
 
 _VENDOR_PATTERNS = [
@@ -112,7 +111,7 @@ def _probe_http(host: str, port: int) -> dict:
 
 def _extract_title(body: str) -> str:
     match = re.search(r"<title[^>]*>(.*?)</title>", body, re.I | re.S)
-    return re.sub(r"\\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip()[:180] if match else ""
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip()[:180] if match else ""
 
 
 def _certificate_name(cert: dict) -> str:
