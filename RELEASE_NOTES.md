@@ -1,4 +1,14 @@
-# NetworkRadar 15.1.0 — Network Control Engine
+# NetworkRadar 15.2.0 — Bandwidth Enforcement Integrity
+
+## Critical bandwidth-control correction
+- RouterOS FastTrack bypasses Simple Queues. The previous release warned about this but still allowed a queue write to be reported as successful.
+- NetworkRadar now re-reads enabled FastTrack rules immediately before applying a per-device bandwidth limit and refuses the operation when FastTrack could bypass it. No ineffective queue is created or updated.
+- After a queue write, NetworkRadar reads the queue back and verifies its target, requested upload/download rates, enabled state and validity before reporting configuration success.
+- Router status now refreshes FastTrack state and exposes queue rate, byte, packet, queued-byte and drop counters where RouterOS returns them.
+- NetworkRadar deliberately does not disable or rewrite existing FastTrack/firewall rules automatically. The router administrator must configure the affected traffic to bypass FastTrack, or disable FastTrack for that traffic, before a Simple Queue can enforce the cap.
+- A verified queue configuration is not a substitute for a real throughput test from the limited client; ISP speed, other queues, VPNs, hardware offload and existing connections can affect observed results.
+
+## Network Control Engine (15.1.0)
 
 ## Network Control Engine
 - Adds user-selected whole-minute pause durations from 1 minute to 24 hours for device and network-wide restrictions, including minute/hour input, quick presets and an estimated restoration timestamp before confirmation.

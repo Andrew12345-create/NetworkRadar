@@ -11,6 +11,7 @@ from networkradar_modules.control.service import NetworkControlManager
 class FakeRouterOSClient:
     def __init__(self, ipv6=True):
         self.ipv6 = ipv6
+        self.fasttrack_enabled = False
         self.puts = []
         self.patches = []
         self.deletes = []
@@ -36,7 +37,10 @@ class FakeRouterOSClient:
         if path == "/ip/address":
             return [{"interface": "br-lan", "address": "192.168.1.1/24"}, {"interface": "br-guest", "address": "192.168.50.1/24"}]
         if path == "/ip/firewall/filter":
-            return list(self.rules)
+            return list(self.rules) + (
+                [{"action": "fasttrack-connection", "disabled": "false", ".id": "*FT1"}]
+                if self.fasttrack_enabled else []
+            )
         if path == "/ipv6/firewall/filter":
             if not self.ipv6:
                 raise RuntimeError("IPv6 unavailable")
@@ -171,6 +175,23 @@ class RouterOSAdapterTests(unittest.TestCase):
         self.assertEqual(fake.v6_entries[0]["address"], "2606:4700:4700::/64")
         self.assertEqual(len(fake.v6_entries), 1, "Only the IPv6 prefix on the authorised IPv4 LAN should be paused.")
         self.assertEqual(result["duration_minutes"], 30)
+
+    def test_bandwidth_limit_refuses_to_claim_success_when_fasttrack_bypasses_simple_queues(self):
+        adapter, fake = make_adapter()
+        fake.fasttrack_enabled = True
+        with self.assertRaisesRegex(ValueError, "BANDWIDTH LIMIT NOT APPLIED"):
+            adapter.set_bandwidth_limit("192.168.1.20", 10, 2)
+        self.assertEqual(fake.queues, [])
+        self.assertEqual(fake.puts, [])
+
+    def test_status_refreshes_fasttrack_and_reports_queue_enforcement_state(self):
+        adapter, fake = make_adapter()
+        adapter.set_bandwidth_limit("192.168.1.20", 10, 2)
+        fake.fasttrack_enabled = True
+        status = adapter.status()
+        self.assertTrue(status["fasttrack_detected"])
+        self.assertEqual(status["bandwidth_enforcement_status"], "BLOCKED_BY_FASTTRACK")
+        self.assertEqual(status["bandwidth_queues"][0]["target"], "192.168.1.20/32")
 
     def test_bandwidth_queue_uses_upload_download_order_and_is_idempotent(self):
         adapter, fake = make_adapter()
