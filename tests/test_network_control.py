@@ -117,9 +117,13 @@ class NetworkControlValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_target_ip("192.168.2.20", "192.168.1.0/24")
 
-    def test_pause_duration_is_bounded(self):
-        self.assertEqual(validate_duration("15"), 15)
-        for value in (0, -1, 2, 1441, "later"):
+    def test_pause_duration_accepts_any_whole_minute_from_one_to_24_hours(self):
+        for value in (1, 2, 7, 15, 47, 90, 361, 720, 1439, 1440, "37"):
+            with self.subTest(value=value):
+                self.assertEqual(validate_duration(value), int(value))
+
+    def test_pause_duration_rejects_invalid_or_out_of_range_values(self):
+        for value in (0, -1, 1441, "later", "1.5", 1.5, True, None, ""):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_duration(value)
 
