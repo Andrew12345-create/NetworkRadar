@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+
 from networkradar_modules.control import router_discovery
 from networkradar_modules.control.router_discovery import identify_router, _private_target, _extract_title
 
@@ -18,13 +19,37 @@ class RouterDiscoveryTests(unittest.TestCase):
         self.assertEqual(_extract_title("<title>ASUS   Home   Router</title>"), "ASUS Home Router")
 
     def test_discovery_never_claims_control_ready_without_adapter_session(self):
-        # Mock all network probes: unit tests must never contact a real gateway.
-        empty = {"port": 80, "evidence": [], "headers": {}, "body": "", "certificate_subject": ""}
-        with patch.object(router_discovery, "_probe_http", return_value=empty):
+        empty = {"port": 80, "evidence": [], "headers": {}, "body": ""}
+        with patch.object(router_discovery, "_probe_http", return_value=empty), \
+             patch.object(router_discovery, "_probe_ssdp_gateway", return_value=[]):
             result = identify_router("192.168.1.254", "192.168.1.0/24")
         self.assertFalse(result["control_ready"])
         self.assertFalse(result["credentials_sent"])
         self.assertFalse(result["configuration_changed"])
+
+    def test_oui_is_reported_but_never_overrides_router_vendor(self):
+        empty = {"port": 80, "evidence": [], "headers": {}, "body": ""}
+        assignment = {"organization": "Example Network Components", "registry": "MA-L"}
+        with patch.object(router_discovery, "_probe_http", return_value=empty), \
+             patch.object(router_discovery, "_probe_ssdp_gateway", return_value=[]):
+            result = identify_router("192.168.1.254", "192.168.1.0/24",
+                                     gateway_mac="00:11:22:33:44:55",
+                                     oui_assignment=assignment)
+        self.assertEqual(result["oui_assignment"], assignment)
+        self.assertEqual(result["vendor"], "Unknown")
+        self.assertIn("does not confirm", result["oui_interpretation"])
+        self.assertEqual(result["mac_address"], "00:11:22:33:44:55")
+
+    def test_ssdp_vendor_evidence_can_identify_gateway(self):
+        empty = {"port": 80, "evidence": [], "headers": {}, "body": ""}
+        ssdp = [{"type": "ssdp", "source": "192.168.1.254",
+                 "server": "MikroTik RouterOS", "target": "upnp:rootdevice"}]
+        with patch.object(router_discovery, "_probe_http", return_value=empty), \
+             patch.object(router_discovery, "_probe_ssdp_gateway", return_value=ssdp):
+            result = identify_router("192.168.1.254", "192.168.1.0/24")
+        self.assertEqual(result["vendor"], "MikroTik")
+        self.assertEqual(result["confidence"], "MEDIUM")
+        self.assertFalse(result["control_ready"])
 
 
 if __name__ == "__main__":

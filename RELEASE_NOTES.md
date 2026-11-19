@@ -1,3 +1,19 @@
+# NetworkRadar 15.5.0 — Multi-source Gateway Identification
+
+## Router identification improvements
+- Connects the gateway MAC already collected by Windows network context to router identification.
+- Reuses the existing IEEE MA-L, MA-M and MA-S cache with longest-prefix matching and exposes the registry owner and assignment type.
+- Labels IEEE ownership as address-block registrant metadata, not proof of router manufacturer, model or firmware. OUI data never overrides protocol fingerprints.
+- Adds bounded SSDP/UPnP M-SEARCH discovery. Only responses sourced from the authorised default gateway are retained; other LAN responders are discarded.
+- Retains SSDP SERVER, service target, UUID and LOCATION as evidence. Advertised LOCATION URLs are never fetched.
+- Combines gateway-scoped SSDP evidence with existing bounded HTTP/TLS metadata signatures.
+- Preserves private-subnet validation, stale-context checks, no-credential discovery, no configuration writes and control_ready=false until an authenticated compatible adapter exists.
+
+## Validation boundary
+- Adds tests for OUI evidence qualification, gateway-only SSDP vendor evidence and the no-control-without-adapter invariant.
+- This release improves identification evidence; it does not add router-control adapters or guarantee exact model/firmware identification.
+- Windows live-network verification remains necessary. SSDP may be blocked by the router, host firewall or Wi-Fi isolation.
+
 # NetworkRadar 15.4.0 — Network Control API Responsiveness
 
 ## Fixes for router identification and status timeouts

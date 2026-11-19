@@ -7185,7 +7185,13 @@ class Handler(BaseHTTPRequestHandler):
                 gateway = str(context.get("gateway") or "")
                 if not gateway:
                     return self.send_json({"error": "No default gateway is available on the selected network."}, 409)
-                return self.send_json(identify_router(gateway, str(context.get("network") or "")))
+                gateway_mac = str(context.get("gateway_mac") or "")
+                # OUI is corroborating address-block metadata, never router-brand proof.
+                oui_assignment = oui_lookup_details(gateway_mac) if gateway_mac else {}
+                return self.send_json(identify_router(
+                    gateway, str(context.get("network") or ""),
+                    gateway_mac=gateway_mac, oui_assignment=oui_assignment,
+                ))
             except ValueError as exc:
                 return self.send_json({"error": _clean(exc, 300)}, 400)
             except Exception as exc:

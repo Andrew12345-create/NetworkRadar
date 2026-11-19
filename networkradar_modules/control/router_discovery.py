@@ -1,9 +1,4 @@
-"""Read-only identification of the active LAN gateway/router.
-
-Only probes the explicitly authorised default gateway. No credentials are sent,
-no configuration is changed, redirects are refused, and response bodies are
-strictly size/time bounded.
-"""
+"""Read-only, multi-source identification of the active LAN gateway."""
 from __future__ import annotations
 
 import concurrent.futures
@@ -12,7 +7,9 @@ import ipaddress
 import re
 import socket
 import ssl
+import time
 
+from networkradar_modules.identity.protocols import parse_ssdp_message
 
 _VENDOR_PATTERNS = [
     ("MikroTik", ("mikrotik", "routeros", "routerboard", "webfig")),
@@ -29,23 +26,25 @@ _VENDOR_PATTERNS = [
     ("DrayTek", ("draytek", "vigor")),
     ("Zyxel", ("zyxel", "keenetic")),
     ("Cisco", ("cisco", "meraki", "catalyst")),
-    ("Tenda", ("tenda",)),
-    ("Mercusys", ("mercusys",)),
-    ("Cudy", ("cudy",)),
-    ("TOTOLINK", ("totolink",)),
-    ("Nokia", ("nokia", "g-2425g")),
-    ("FiberHome", ("fiberhome", "an5506")),
-    ("Mitrastar", ("mitrastar",)),
-    ("Sagemcom", ("sagemcom",)),
-    ("Technicolor", ("technicolor",)),
-    ("Arris", ("arris", "surfboard")),
+    ("Tenda", ("tenda",)), ("Mercusys", ("mercusys",)),
+    ("Cudy", ("cudy",)), ("TOTOLINK", ("totolink",)),
+    ("Nokia", ("nokia", "g-2425g")), ("FiberHome", ("fiberhome", "an5506")),
+    ("Mitrastar", ("mitrastar",)), ("Sagemcom", ("sagemcom",)),
+    ("Technicolor", ("technicolor",)), ("Arris", ("arris", "surfboard")),
     ("Motorola", ("motorola", "moto router")),
-    ("Huawei", ("huawei",)),
 ]
-
 _PORTS = (80, 443, 8080, 8443)
 _MAX_BODY = 16384
 _TIMEOUT = 1.35
+_SSDP_GROUP = ("239.255.255.250", 1900)
+_SSDP_TIMEOUT = 1.25
+_SSDP_REQUEST = (
+    "M-SEARCH * HTTP/1.1\r\n"
+    "HOST: 239.255.255.250:1900\r\n"
+    'MAN: "ssdp:discover"\r\n'
+    "MX: 1\r\n"
+    "ST: ssdp:all\r\n\r\n"
+)
 
 
 def _private_target(host: str, network: str) -> str:
@@ -60,13 +59,9 @@ def _private_target(host: str, network: str) -> str:
 def _probe_http(host: str, port: int) -> dict:
     secure = port in (443, 8443)
     connection = None
-    evidence = []
-    body_text = ""
-    headers = {}
+    evidence, body_text, headers = [], "", {}
     try:
         if secure:
-            # This connection is strictly for unauthenticated identity metadata.
-            # An untrusted certificate is recorded, never accepted for control.
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
@@ -79,10 +74,7 @@ def _probe_http(host: str, port: int) -> dict:
             "Connection": "close",
         })
         response = connection.getresponse()
-        # Do not follow redirects; the Location header itself may disclose the UI path.
-        raw = response.read(_MAX_BODY + 1)
-        if len(raw) > _MAX_BODY:
-            raw = raw[:_MAX_BODY]
+        raw = response.read(_MAX_BODY + 1)[:_MAX_BODY]
         headers = {str(k).lower(): str(v)[:500] for k, v in response.getheaders()}
         body_text = raw.decode("utf-8", "replace")
         evidence.append({"type": "http", "port": port, "status": response.status,
@@ -97,8 +89,42 @@ def _probe_http(host: str, port: int) -> dict:
                 connection.close()
             except Exception:
                 pass
-    return {"port": port, "evidence": evidence, "headers": headers,
-            "body": body_text[:_MAX_BODY]}
+    return {"port": port, "evidence": evidence, "headers": headers, "body": body_text[:_MAX_BODY]}
+
+
+def _probe_ssdp_gateway(host: str) -> list[dict]:
+    """Discover SSDP services, but accept only replies sent by the gateway."""
+    sock, observations = None, []
+    deadline = time.monotonic() + _SSDP_TIMEOUT
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+        sock.settimeout(0.2)
+        sock.sendto(_SSDP_REQUEST.encode("ascii"), _SSDP_GROUP)
+        while time.monotonic() < deadline and len(observations) < 8:
+            try:
+                payload, source = sock.recvfrom(16385)
+            except socket.timeout:
+                continue
+            if str(source[0]) != host or len(payload) > 16384:
+                continue
+            parsed = parse_ssdp_message(payload.decode("utf-8", "replace"))
+            if parsed.get("message_type") == "RESPONSE":
+                observations.append({
+                    "type": "ssdp", "source": host, "server": parsed.get("server", ""),
+                    "target": parsed.get("target", ""), "uuid": parsed.get("uuid", ""),
+                    "location": parsed.get("location", "")[:500],
+                    "limitations": parsed.get("limitations", []),
+                })
+    except (OSError, ValueError):
+        pass
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except OSError:
+                pass
+    return observations
 
 
 def _extract_title(body: str) -> str:
@@ -106,8 +132,9 @@ def _extract_title(body: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip()[:180] if match else ""
 
 
-def identify_router(host: str, network: str) -> dict:
-    """Identify a gateway using bounded, unauthenticated HTTP/TLS metadata probes."""
+def identify_router(host: str, network: str, gateway_mac: str = "",
+                    oui_assignment: dict | None = None) -> dict:
+    """Identify the authorised gateway with bounded HTTP/TLS, SSDP and IEEE OUI evidence."""
     target = _private_target(host, network)
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
@@ -120,37 +147,33 @@ def identify_router(host: str, network: str) -> dict:
             except Exception:
                 continue
 
-    evidence = []
-    text_parts = []
-    open_ports = []
+    evidence, text_parts, open_ports = [], [], []
     for result in sorted(results, key=lambda item: item["port"]):
         open_ports.append(result["port"])
         evidence.extend(result["evidence"])
-        text_parts.extend([
-            result["headers"].get("server", ""),
-            result["headers"].get("www-authenticate", ""),
-            result["headers"].get("location", ""),
-            result["body"],
-        ])
+        text_parts.extend([result["headers"].get("server", ""),
+                           result["headers"].get("www-authenticate", ""),
+                           result["headers"].get("location", ""), result["body"]])
+
+    ssdp_evidence = _probe_ssdp_gateway(target)
+    evidence.extend(ssdp_evidence)
+    text_parts.extend(item.get("server", "") + " " + item.get("target", "")
+                      for item in ssdp_evidence)
     haystack = " ".join(text_parts).lower()
     matches = []
-    for vendor, signatures in _VENDOR_PATTERNS:
+    for vendor_name, signatures in _VENDOR_PATTERNS:
         found = [signature for signature in signatures if signature in haystack]
         if found:
-            matches.append({"vendor": vendor, "matched_signatures": found})
+            matches.append({"vendor": vendor_name, "matched_signatures": found})
     distinct = list(dict.fromkeys(item["vendor"] for item in matches))
     if len(distinct) == 1:
-        vendor, confidence = distinct[0], "MEDIUM"
-        status = "IDENTIFIED_VENDOR"
+        vendor, confidence, status = distinct[0], "MEDIUM", "IDENTIFIED_VENDOR"
     elif len(distinct) > 1:
-        vendor, confidence = "Ambiguous", "LOW"
-        status = "AMBIGUOUS"
-    elif open_ports:
-        vendor, confidence = "Unknown router / gateway web interface", "LOW"
-        status = "WEB_INTERFACE_DETECTED"
+        vendor, confidence, status = "Ambiguous", "LOW", "AMBIGUOUS"
+    elif open_ports or ssdp_evidence:
+        vendor, confidence, status = "Unknown router / gateway interface", "LOW", "GATEWAY_INTERFACE_DETECTED"
     else:
-        vendor, confidence = "Unknown", "NONE"
-        status = "NO_WEB_MANAGEMENT_RESPONSE"
+        vendor, confidence, status = "Unknown", "NONE", "NO_MANAGEMENT_RESPONSE"
 
     adapters = {
         "MikroTik": ["MikroTik RouterOS 7+ HTTPS REST"],
@@ -159,19 +182,24 @@ def identify_router(host: str, network: str) -> dict:
         "OpenWrt": ["OpenWrt ubus/rpcd (HTTPS or SSH; explicit enablement required)"],
         "ASUS": ["ASUSWRT model/firmware-specific integration (availability varies)"],
     }
+    oui = dict(oui_assignment) if isinstance(oui_assignment, dict) else {}
     return {
-        "host": target, "status": status, "vendor": vendor,
-        "confidence": confidence, "open_management_ports": open_ports,
-        "model": "", "firmware": "", "evidence": evidence,
-        "vendor_matches": matches,
-        "control_adapter_candidates": adapters.get(vendor, []),
+        "host": target, "mac_address": str(gateway_mac or "")[:32],
+        "oui_assignment": oui,
+        "oui_interpretation": (
+            "IEEE address-block registrant only. This may identify an OEM, ODM, module supplier or interface vendor; it does not confirm the router brand or model."
+            if oui else "No usable global-unicast IEEE assignment was available for this gateway MAC."
+        ),
+        "status": status, "vendor": vendor, "confidence": confidence,
+        "open_management_ports": open_ports, "model": "", "firmware": "",
+        "evidence": evidence, "ssdp_response_count": len(ssdp_evidence),
+        "vendor_matches": matches, "control_adapter_candidates": adapters.get(vendor, []),
         "control_ready": False,
         "control_message": (
-            "Router identity is a preliminary fingerprint. Select and authenticate a compatible vendor adapter before any configuration change."
-            if status != "NO_WEB_MANAGEMENT_RESPONSE" else
-            "No web management response was observed. The router may use a non-standard port, a controller, SSH/SNMP, or block local probes."
+            "Identity is a preliminary evidence-based fingerprint. Select and authenticate a compatible vendor adapter before any configuration change."
+            if status != "NO_MANAGEMENT_RESPONSE" else
+            "No management response was observed. The router may use a controller, non-standard port, SSH/SNMP, or block local discovery."
         ),
-        "probe_scope": "Authorised default gateway only",
-        "credentials_sent": False,
-        "configuration_changed": False,
+        "probe_scope": "Authorised default gateway only; SSDP replies accepted only from that gateway",
+        "credentials_sent": False, "configuration_changed": False,
     }
