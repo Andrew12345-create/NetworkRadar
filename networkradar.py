@@ -7149,6 +7149,22 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local_request_allowed():
             return self.send_json({"error": "Local access only."}, 403)
         p = urlparse(self.path)
+        if p.path == "/api/network-control/discover":
+            try:
+                from networkradar_modules.control.router_discovery import identify_router
+                refresh_network_context()
+                with NET_LOCK:
+                    context = dict(NET_CTX)
+                if not context.get("authorized"):
+                    return self.send_json({"error": "Router identification requires explicit authorisation of this exact network."}, 403)
+                gateway = str(context.get("gateway") or "")
+                if not gateway:
+                    return self.send_json({"error": "No default gateway is available on the selected network."}, 409)
+                return self.send_json(identify_router(gateway, str(context.get("network") or "")))
+            except ValueError as exc:
+                return self.send_json({"error": _clean(exc, 300)}, 400)
+            except Exception as exc:
+                return self.send_json({"error": _clean(exc, 300)}, 502)
         if p.path == "/api/network-control/status":
             try:
                 from networkradar_modules.control.service import NETWORK_CONTROL

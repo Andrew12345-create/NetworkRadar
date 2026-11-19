@@ -6,6 +6,13 @@
 - Verifies the router returns exactly one enabled, valid Simple Queue with the requested target and upload/download rates after each write.
 - Exposes live FastTrack state and available queue counters in router status. NetworkRadar does not silently disable or rewrite administrator firewall rules.
 
+## Router identification and vendor-adapter architecture (15.3.0)
+- Adds a read-only, authorised-gateway identification step before router control.
+- Uses bounded HTTP/TLS metadata probes on standard management ports, records evidence and confidence, and never sends credentials or follows redirects.
+- Identifies vendor candidates where signatures are present; does not claim a precise model or firmware without evidence.
+- Presents compatible adapter candidates and explicitly distinguishes router identification from control support.
+- Universal router control requires vendor/model/firmware-specific adapters. Unsupported devices remain read-only; NetworkRadar never guesses undocumented endpoints or runs generic configuration commands.
+ 
 ## Network Control Engine (15.1.0)
 - Adds custom whole-minute pause durations from 1 minute to 24 hours for individual devices and the entire authorised network, with minute/hour units and quick presets.
 - Shows the expected restoration time before confirmation; the router remains responsible for automatic expiry if NetworkRadar closes.
