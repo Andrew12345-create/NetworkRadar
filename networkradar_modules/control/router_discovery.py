@@ -51,7 +51,8 @@ _TIMEOUT = 1.35
 def _private_target(host: str, network: str) -> str:
     address = ipaddress.ip_address(str(host).strip())
     scope = ipaddress.ip_network(str(network).strip(), strict=False)
-    if address.version != 4 or not address.is_private or address not in scope:
+    if (address.version != 4 or not address.is_private or address.is_loopback
+            or address.is_link_local or address not in scope):
         raise ValueError("Router identification is restricted to the authorised private IPv4 subnet.")
     return str(address)
 

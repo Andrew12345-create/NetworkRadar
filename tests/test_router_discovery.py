@@ -15,6 +15,7 @@ class RouterDiscoveryTests(unittest.TestCase):
 
     def test_html_title_is_extracted_without_markup(self):
         self.assertEqual(_extract_title("<html><title>ASUS Router</title></html>"), "ASUS Router")
+        self.assertEqual(_extract_title("<title>ASUS   Home   Router</title>"), "ASUS Home Router")
 
     def test_discovery_never_claims_control_ready_without_adapter_session(self):
         # Mock all network probes: unit tests must never contact a real gateway.
