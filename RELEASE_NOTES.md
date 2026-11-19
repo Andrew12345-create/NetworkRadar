@@ -1,4 +1,16 @@
-# NetworkRadar 15.6.0
+# NetworkRadar 15.8.0
+
+## Adaptive WAN Stress Engine
+- Replaces the narrow 20 Mbps / four-worker / 256 MB WAN generator with Light, Moderate, High, Extreme and Custom profiles.
+- Adds operator-configurable duration (5–180 seconds), aggregate rate ceiling (0.5–100 Mbps), parallel workers (1–8) and per-session data allowance (16–1,024 MB).
+- Extreme profile is configured for a 75 Mbps ceiling, eight workers, up to 180 seconds and up to 1,024 MB. Actual throughput depends on the endpoint, host, ISP and available WAN capacity.
+- Moves aggregate rate gating before socket reads so TCP back-pressure can regulate incoming traffic rather than throttling only after data has arrived.
+- Adds live data-cap progress, selected-profile reporting and stronger browser-side validation.
+- Retains HTTPS-only, standard-port-only, public-address-only endpoint validation, redirect blocking, explicit endpoint authorisation, one-session-at-a-time operation and emergency stop.
+- The application does not automatically provision or host external payload files. Operators must use an endpoint they own or are authorised to use.
+- Adds validation tests for Extreme profile values, expanded limits and the 1 GiB data ceiling.
+
+## Previous release notes · NetworkRadar 15.6.0
 
 ## Controlled Network Load Generator
 - Adds an explicit iPerf3 UDP load-testing workspace for authorised LAN devices and user-authorised public test endpoints.
