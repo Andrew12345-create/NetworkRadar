@@ -12,7 +12,6 @@ import socket
 import threading
 import time
 import uuid
-from urllib.error import URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -127,7 +126,7 @@ class NetworkLoadTestManager:
                 "duration_seconds": config["duration_seconds"],
                 "aggregate_mbps": config["aggregate_mbps"], "streams": config["streams"],
                 "started_at": time.time(), "finished_at": None, "_bytes_received": 0,
-                "error": None,
+                "_bytes_reserved": 0, "error": None,
             }
             bucket = _TokenBucket(config["aggregate_mbps"] * 1_000_000 / 8)
             self._workers = [
@@ -157,18 +156,37 @@ class NetworkLoadTestManager:
                         if response.status < 200 or response.status >= 300:
                             raise RuntimeError(f"Endpoint returned HTTP {response.status}.")
                         while not stop_event.is_set() and time.monotonic() < deadline:
-                            chunk = response.read(CHUNK_SIZE)
+                            with self._lock:
+                                job = self._job if self._job and self._job.get("job_id") == job_id else None
+                                remaining = MAX_TOTAL_BYTES - job["_bytes_received"] - job["_bytes_reserved"] if job else 0
+                                read_size = min(CHUNK_SIZE, max(0, remaining))
+                                if job and read_size:
+                                    job["_bytes_reserved"] += read_size
+                            if not read_size:
+                                stop_event.set()
+                                break
+                            try:
+                                chunk = response.read(read_size)
+                            except Exception:
+                                with self._lock:
+                                    if self._job and self._job.get("job_id") == job_id:
+                                        self._job["_bytes_reserved"] -= read_size
+                                raise
+                            with self._lock:
+                                if self._job and self._job.get("job_id") == job_id:
+                                    self._job["_bytes_reserved"] -= read_size
+                                    self._job["_bytes_received"] += len(chunk or b"")
+                                    reached_cap = self._job["_bytes_received"] + self._job["_bytes_reserved"] >= MAX_TOTAL_BYTES
+                                else:
+                                    reached_cap = True
                             if not chunk:
                                 break
                             bucket.consume(len(chunk), stop_event)
+                            if reached_cap:
+                                stop_event.set()
+                                break
                             if stop_event.is_set():
                                 break
-                            with self._lock:
-                                if self._job and self._job.get("job_id") == job_id:
-                                    self._job["_bytes_received"] += len(chunk)
-                                    if self._job["_bytes_received"] >= MAX_TOTAL_BYTES:
-                                        stop_event.set()
-                                        break
                 except Exception as exc:
                     if not stop_event.is_set():
                         raise RuntimeError(f"HTTPS download failed: {type(exc).__name__}: {str(exc)[:180]}") from exc
