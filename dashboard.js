@@ -421,7 +421,7 @@ async function refreshAll(){
    $("updated").textContent="Updated "+(s.timestamp||new Date().toLocaleTimeString())+(issues.length?" · "+issues.slice(0,4).join(" | "):"");
   }
   $("network").textContent=s.network||n.network||"—";$("activeSubnet").textContent=n.network||s.network||"—";
-  $("defaultGateway").textContent=n.gateway||"—";$("fingerprint").textContent=n.fingerprint||"—";$("fpConf").textContent=(n.confidence||0)+"%";
+  $("defaultGateway").textContent=n.gateway||"—";const ncHost=$("ncRouterHost");if(ncHost&&!ncHost.value&&n.gateway)ncHost.value=n.gateway;$("fingerprint").textContent=n.fingerprint||"—";$("fpConf").textContent=(n.confidence||0)+"%";
   $("networkWarning").textContent=n.warning||(n.authorized?"Authorised.":"Passive only.");$("authorizeNetwork").style.display=n.authorized?"none":"inline-block";$("netAuthz").textContent=n.auth_decision||"—";
   $("jobPhase").textContent=j.phase||"—";$("jobMessage").textContent=j.message||"Waiting for engine status.";$("jobPercent").textContent=(j.percent??0)+"%";$("jobBar").style.width=(j.percent??0)+"%";renderScanMonitor(j);
   $("online").textContent=s.online??"—";$("historical").textContent=s.historical??"—";$("deviceHint").textContent=(s.offline??"—")+" offline";$("openInvestigations").textContent=s.open_investigations??inv.length;
@@ -429,7 +429,7 @@ async function refreshAll(){
   pill($("dnsStatus"),s.dns_status||"UNKNOWN",s.dns_status==="ONLINE"?"ok":"warn");pill($("dhcpStatus"),s.dhcp_status||"UNKNOWN",s.dhcp_status==="ONLINE"?"ok":"warn");pill($("arpStatus"),s.arp_status||"UNKNOWN",s.arp_status==="ONLINE"?"ok":"warn");
   const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"");$("dhcpClass").title=dhcp.reason||"No DHCP diagnostic detail returned.";
   $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";const quality=diag.scan_quality||{},coverage=quality.identity_coverage||{},identityCoverage=coverage.available===false?"—":((coverage.coverage_percent??"—")+"%");$("scanQuality").textContent=(quality.score??"—")+"/100 · "+(quality.band||"—")+" · Identity "+identityCoverage;
-  if(data.devices){deviceCache=d;filterDevices();}else{$("deviceRows").innerHTML='<tr><td colspan="7">Device API unavailable. Check server log and /api/devices.</td></tr>';}
+  if(data.devices){deviceCache=d;filterDevices();renderNetworkControlDeviceOptions(d);}else{$("deviceRows").innerHTML='<tr><td colspan="7">Device API unavailable. Check server log and /api/devices.</td></tr>';}
   $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||'<tr><td colspan="3">—</td></tr>';
   renderDomainIntelligence(data.domainIntel||{});
   renderFullPortHistory(Array.isArray(data.fullPorts)?data.fullPorts:[]);
@@ -450,7 +450,7 @@ async function refreshAll(){
   $("behaviourStatus").textContent=diag.behaviour?.message||"Behaviour diagnostics unavailable.";
   $("behaviourRows").innerHTML=((diag.behaviour?.baseline_devices||0)>0?'<tr><td colspan="5">See device detail for samples.</td></tr>':'<tr><td colspan="5">Collecting baselines.</td></tr>');
   $("investigationRows").innerHTML=inv.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.title)}</td><td>${esc(x.severity)}</td><td>${esc(x.status)}</td><td>${esc(x.evidence_count)}</td></tr>`).join("")||'<tr><td colspan="5">None.</td></tr>';
-  loadNetworkWorkspaces();loadProfiles();loadChanges();loadConfig();loadAlertStream();loadIdentityIntel();loadContinuity();loadCandidates();loadPhantomPanels();
+  loadNetworkWorkspaces();loadProfiles();loadChanges();loadConfig();loadAlertStream();loadIdentityIntel();loadContinuity();loadCandidates();loadPhantomPanels();loadNetworkControlStatus();
  }catch(err){pill($("connection"),"DASHBOARD ERROR","bad");$("updated").textContent=err.message||String(err);}
  finally{refreshInFlight=false;}
 }
@@ -475,6 +475,7 @@ function syncNavigationButton(){
   {id:'command',label:'Command Centre',desc:'Live network picture, scan status, topology and current network context.'},
   {id:'devices',label:'Devices & Identity',desc:'Device inventory, identity evidence, unknown-device review and IPv6 neighbours.'},
   {id:'network',label:'Network Activity',desc:'Network workspaces, profiles, DNS, DHCP, ARP, behaviour and change history.'},
+  {id:'control',label:'Network Control',desc:'Router-enforced bandwidth limits, timed device pauses and network-wide internet control.'},
   {id:'security',label:'Security & Investigations',desc:'Firewall visibility, alerts, configuration audit, threat hunts and exposure.'},
   {id:'management',label:'Remote Management',desc:'Explicitly authorised endpoint access, SSH and enrolled-agent operations.'},
   {id:'intelligence',label:'Intelligence & Reports',desc:'Local intelligence assistant, recent events and report generation.'}
@@ -483,6 +484,7 @@ function syncNavigationButton(){
  const overviewIds=new Set(['top','topology','activity','cmd']);
  const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','ipv6']);
  const networkIds=new Set(['networkWorkspaces','profiles','dns','dhcp','arp','behaviour','changes']);
+ const controlIds=new Set(['networkControl']);
  const securityIds=new Set(['firewall','investigations','alerts','config','hunt','exposure']);
  const managementIds=new Set(['phantomAccess','commandCenter']);
  const intelligenceIds=new Set(['assistant','reports']);
@@ -491,6 +493,7 @@ function syncNavigationButton(){
   if(overviewIds.has(id)||node.classList.contains('nightwatch-metrics')||node.classList.contains('nw-inventory-status')||node.querySelector('#jobPhase,#online,#engines'))return 'command';
   if(deviceIds.has(id))return 'devices';
   if(networkIds.has(id))return 'network';
+   if(controlIds.has(id))return 'control';
   if(securityIds.has(id))return 'security';
   if(managementIds.has(id))return 'management';
   if(intelligenceIds.has(id)||node.querySelector('#eventRows'))return 'intelligence';
@@ -521,7 +524,7 @@ function syncNavigationButton(){
   if(!hash)return 'command';
   const target=document.getElementById(hash);
   const panel=target?.closest('[data-workspace-panel]');
-  return panel?.dataset.workspacePanel||(/^(workspace-)?(command|devices|network|security|management|intelligence)$/.test(hash)?hash.replace('workspace-',''):'command');
+  return panel?.dataset.workspacePanel||(/^(workspace-)?(command|devices|network|control|security|management|intelligence)$/.test(hash)?hash.replace('workspace-',''):'command');
  }
  window.activateNetworkRadarWorkspace=function(id,updateHash){
   const key=definitions.some(x=>x.id===id)?id:'command';
@@ -813,3 +816,22 @@ async function restartRemoteService(id){const name=prompt('Exact Windows service
 async function revokeAgent(id){if(!confirm(`Immediately revoke ${id}? Its future requests will be rejected and queued commands cancelled.`))return;try{const r=await fetch(`/api/command/agents/${encodeURIComponent(id)}/revoke`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);await loadCommandCenter();}catch(e){alert(e.message);}}
 
 loadCommandCenter();setInterval(loadCommandCenter,10000);loadPhantomAccess();setInterval(loadPhantomAccess,30000);
+
+/* NETWORK CONTROL ENGINE — router-mediated controls with explicit confirmation. */
+let ncStatusInFlight=false;let ncLastStatusAt=0;
+function renderNetworkControlDeviceOptions(devices){const select=$("ncDeviceSelect");if(!select)return;const current=select.value;const online=(Array.isArray(devices)?devices:[]).filter(x=>String(x.status||"").toUpperCase()==="ONLINE"&&x.ip);const options=online.map(x=>{const label=[x.hostname||x.device_name||x.device_type||"Unknown device",x.ip].filter(Boolean).join(" · ");return '<option value="'+esc(x.ip)+'">'+esc(label)+'</option>';}).join("");select.innerHTML='<option value="">Select an online device…</option>'+options;if(online.some(x=>x.ip===current))select.value=current;}
+function ncOutput(value,isError){const box=$("ncControlOutput");if(box)box.textContent=typeof value==="string"?value:JSON.stringify(value,null,2);if(isError&&$("ncRouterStatus"))$("ncRouterStatus").textContent=String(value);}
+async function ncPost(path,payload){const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});let data={};try{data=await response.json();}catch(_){}if(!response.ok){const error=new Error(data.error||("HTTP "+response.status));error.payload=data;error.status=response.status;throw error;}return data;}
+async function connectNetworkRouter(){const host=$("ncRouterHost")?.value.trim()||"",username=$("ncRouterUser")?.value.trim()||"",password=$("ncRouterPassword")?.value||"",port=Number($("ncRouterPort")?.value||443),ca_file=$("ncRouterCA")?.value.trim()||"";if(!host||!username||!password){ncOutput("Enter the router IPv4 address, dedicated REST username and password.",true);return;}if(!confirm("Connect to this router using verified HTTPS and perform read-only capability checks?"))return;if($("ncRouterStatus"))$("ncRouterStatus").textContent="Testing verified HTTPS connection…";try{const result=await ncPost("/api/network-control/connect",{provider:"mikrotik-routeros",host,username,password,port,ca_file,confirm:true});$("ncRouterPassword").value="";ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
+async function disconnectNetworkRouter(){try{const result=await ncPost("/api/network-control/disconnect",{confirm:true});ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
+function ncSelectedIP(){return $("ncDeviceSelect")?.value||"";}
+async function applyNetworkBandwidth(){const ip=ncSelectedIP(),download_mbps=Number($("ncDownloadLimit")?.value),upload_mbps=Number($("ncUploadLimit")?.value);if(!ip){ncOutput("Select an online device first.",true);return;}if(!confirm("Apply a router-enforced bandwidth limit to "+ip+"? Upload: "+upload_mbps+" Mbps. Download: "+download_mbps+" Mbps."))return;try{const result=await ncPost("/api/network-control/bandwidth",{ip,download_mbps,upload_mbps,confirm:true});ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
+async function removeNetworkBandwidth(){const ip=ncSelectedIP();if(!ip){ncOutput("Select a device first.",true);return;}if(!confirm("Remove only the NetworkRadar-managed bandwidth queue for "+ip+"?"))return;try{const result=await ncPost("/api/network-control/bandwidth/remove",{ip,confirm:true});ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
+async function ncPause(path,payload){try{let result;try{result=await ncPost(path,Object.assign({},payload,{allow_ipv4_only:false,confirm:true}));}catch(error){if(!error.payload?.requires_ipv4_only_confirmation)throw error;if(!confirm(error.message+"\n\nContinue with an explicitly IPv4-only restriction? IPv6 internet access may remain available."))return;result=await ncPost(path,Object.assign({},payload,{allow_ipv4_only:true,confirm:true}));}ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
+async function pauseNetworkDevice(minutes){const ip=ncSelectedIP();if(!ip){ncOutput("Select an online device first.",true);return;}if(!confirm("Temporarily pause internet access for "+ip+" for "+minutes+" minutes? The router will expire the pause automatically."))return;await ncPause("/api/network-control/pause",{scope:"device",ip,duration_minutes:minutes});}
+async function pauseWholeNetwork(minutes){if(!confirm("PAUSE INTERNET FOR THE ENTIRE CURRENT AUTHORISED NETWORK for "+minutes+" minutes? Local LAN traffic and router management are not targeted."))return;await ncPause("/api/network-control/pause",{scope:"network",duration_minutes:minutes});}
+async function resumeNetworkDevice(){const ip=ncSelectedIP();if(!ip){ncOutput("Select a device first.",true);return;}if(!confirm("Remove NetworkRadar-managed pause entries for "+ip+"?"))return;try{const result=await ncPost("/api/network-control/resume",{scope:"device",ip,confirm:true});ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
+async function resumeWholeNetwork(){if(!confirm("Resume internet access by removing NetworkRadar-managed network pause entries?"))return;try{const result=await ncPost("/api/network-control/resume",{scope:"network",confirm:true});ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
+async function restoreNetworkControl(){if(!confirm("EMERGENCY RESTORE: remove only NetworkRadar-managed pause entries, bandwidth queues and firewall rules from the connected router? Other router rules will be left untouched."))return;try{const result=await ncPost("/api/network-control/restore",{confirm:true});ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
+function renderNetworkControlStatus(data){const badge=$("ncConnectionBadge"),status=$("ncRouterStatus");if(!data?.connected){if(badge){badge.textContent="DISCONNECTED";badge.className="pill warn";}if(status)status.textContent=data?.message||"No router connected. Router controls are inactive.";$("ncRouterIdentity").textContent="—";$("ncRouterModel").textContent="—";$("ncRouterIPv6").textContent="UNKNOWN";$("ncRouterFastTrack").textContent="UNKNOWN";$("ncActivePolicies").textContent="No active router policies loaded.";return;}if(badge){badge.textContent="ROUTER CONNECTED";badge.className="pill ok";}if(status)status.textContent="Connected to "+(data.identity||data.host)+" · "+data.host+" · HTTPS REST · credentials memory-only.";$("ncRouterIdentity").textContent=data.identity||data.host||"—";$("ncRouterModel").textContent=[data.model,data.version].filter(Boolean).join(" · ")||"—";$("ncRouterIPv6").textContent=data.ipv6_supported?"AVAILABLE":"NOT VERIFIED";$("ncRouterFastTrack").textContent=data.fasttrack_detected?"DETECTED · QUEUE MAY BE BYPASSED":"NOT DETECTED";const lines=[];(data.active_ipv4_pauses||[]).forEach(x=>lines.push("IPv4 pause · "+(x.address||"—")+" · "+(x.timeout||"timer managed by router")));(data.active_ipv6_pauses||[]).forEach(x=>lines.push("IPv6 pause · "+(x.address||"—")+" · "+(x.timeout||"timer managed by router")));(data.bandwidth_queues||[]).forEach(x=>lines.push("Bandwidth · "+(x.target||"—")+" · "+(x.max_limit||"—")));$("ncActivePolicies").textContent=lines.join("\n")||"No active NetworkRadar-managed router policies.";}
+async function loadNetworkControlStatus(force){if(ncStatusInFlight||(!force&&Date.now()-ncLastStatusAt<15000))return;ncStatusInFlight=true;ncLastStatusAt=Date.now();try{const data=await getJSON("/api/network-control/status",10000);renderNetworkControlStatus(data);}catch(error){const status=$("ncRouterStatus");if(status)status.textContent="Router status unavailable: "+error.message;}finally{ncStatusInFlight=false;}}

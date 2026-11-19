@@ -1,4 +1,18 @@
-# NetworkRadar 14.2.0
+# NetworkRadar 15.0.0
+
+## Network Control Engine (15.0.0)
+
+- Adds a dedicated Network Control workspace backed by router-enforced policies rather than local packet manipulation.
+- Adds the first production router adapter for MikroTik RouterOS 7+ over HTTPS REST with certificate verification; the router account and password remain in process memory only.
+- Adds per-device upload/download limits through RouterOS Simple Queues, with FastTrack detection and an explicit warning that FastTrack can bypass queues.
+- Adds timed device and network internet pauses through managed IPv4/IPv6 firewall address lists. RouterOS expires timed entries itself, even if NetworkRadar closes.
+- Creates narrowly scoped forward-chain drop rules for LAN-to-WAN traffic only; router management and local LAN traffic are not targeted.
+- Requires fresh explicit authorisation for the current network, a private router address inside that subnet, an online inventory target for new device restrictions, and confirmation for every change.
+- Adds an emergency restore that removes only objects carrying NetworkRadar-owned comments; unrelated router rules and queues are preserved.
+- Requires explicit acknowledgement before proceeding with IPv4-only restrictions when dual-stack coverage cannot be verified. IPv6 privacy-address rotation remains a documented limitation.
+- RouterOS is the first managed adapter. Other router vendors remain unsupported for control until their management APIs and capabilities are implemented and verified.
+
+## Evidence intelligence and identity reconciliation (14.2.0)
 
 ## Evidence intelligence and identity reconciliation (14.2.0)
 
