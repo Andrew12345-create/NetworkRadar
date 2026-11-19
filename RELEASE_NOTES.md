@@ -1,3 +1,14 @@
+# NetworkRadar 15.6.0
+
+## Controlled Network Load Generator
+- Adds an explicit iPerf3 UDP load-testing workspace for authorised LAN devices and user-authorised public test endpoints.
+- Supports a single bounded test at a time, 5–60 second duration, 0.25–50 Mbps aggregate rate and 1–4 parallel streams.
+- Requires literal IPv4 targets; LAN targets must be online inventory devices inside the authorised subnet and cannot be the gateway.
+- Public internet targets require a separate acknowledgement that the endpoint is owned or authorised.
+- Adds live test state, measured throughput, jitter and packet-loss reporting, plus an emergency stop.
+- No arbitrary HTTP request flood, open-ended traffic generation, automatic router configuration or background test traffic is introduced.
+- Requires iperf3 on the NetworkRadar host and an iperf3 server on the selected target. Live Windows/network validation is required.
+
 # NetworkRadar 15.5.0 — Multi-source Gateway Identification
 
 ## Router identification improvements

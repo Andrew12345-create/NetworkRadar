@@ -819,6 +819,34 @@ loadCommandCenter();setInterval(loadCommandCenter,10000);loadPhantomAccess();set
 
 /* NETWORK CONTROL ENGINE — router-mediated controls with explicit confirmation. */
 let ncStatusInFlight=false;let ncLastStatusAt=0;
+let loadTestPollTimer=null;
+async function startNetworkLoadTest(){
+ const mode=$("nltMode")?.value||"lan",target=$("nltTarget")?.value.trim()||"";
+ const duration_seconds=Number($("nltDuration")?.value||20),aggregate_mbps=Number($("nltRate")?.value||5),streams=Number($("nltStreams")?.value||1);
+ if(!target){ncOutput("Enter the IP address of an iPerf3 server.",true);return;}
+ let external_ack=false;
+ if(mode==="internet"){
+  if(!confirm("This will send sustained UDP traffic to a PUBLIC iPerf3 server. Continue only if you own or have explicit permission to use this server. It can consume data and affect other users."))return;
+  external_ack=true;
+ }else if(!confirm("Generate up to "+aggregate_mbps+" Mbps of test traffic to "+target+" for "+duration_seconds+" seconds? The target must be an ONLINE LAN device running iperf3 in server mode."))return;
+ try{
+  const result=await ncPost("/api/load-test/start",{mode,target,duration_seconds,aggregate_mbps,streams,external_ack,confirm:true});
+  const out=$("nltStatus");if(out)out.textContent="STARTING · "+result.job_id;
+  pollNetworkLoadTest();
+ }catch(error){const out=$("nltStatus");if(out)out.textContent=error.message;}
+}
+async function stopNetworkLoadTest(){
+ try{const result=await ncPost("/api/load-test/stop",{confirm:true});const out=$("nltStatus");if(out)out.textContent=result.message||result.state||"Stop requested.";pollNetworkLoadTest();}
+ catch(error){const out=$("nltStatus");if(out)out.textContent=error.message;}
+}
+async function pollNetworkLoadTest(){
+ try{
+  const data=await getJSON("/api/load-test/status",5000),out=$("nltStatus"),metrics=$("nltMetrics");
+  if(out)out.textContent=[data.state||"IDLE",data.error||"",data.job_id?"Target "+data.target+" · "+data.aggregate_mbps+" Mbps configured · "+data.duration_seconds+"s":"",data.state==="FAILED"?"Check that the target iPerf3 server is running and UDP port 5201 is reachable.":""].filter(Boolean).join("\n");
+  if(metrics)metrics.textContent=["Measured throughput: "+(data.throughput_mbps==null?"—":data.throughput_mbps+" Mbps"),"Jitter: "+(data.jitter_ms==null?"—":data.jitter_ms+" ms"),"Packet loss: "+(data.lost_percent==null?"—":data.lost_percent+"%"),"iPerf3: "+(data.available?"AVAILABLE":"NOT FOUND")].join(" · ");
+  if(["STARTING","RUNNING","STOPPING"].includes(data.state)){if(loadTestPollTimer)clearTimeout(loadTestPollTimer);loadTestPollTimer=setTimeout(pollNetworkLoadTest,1500);}
+ }catch(error){const out=$("nltStatus");if(out)out.textContent="Status unavailable: "+error.message;}
+}
 function renderNetworkControlDeviceOptions(devices){const select=$("ncDeviceSelect");if(!select)return;const current=select.value;const online=(Array.isArray(devices)?devices:[]).filter(x=>String(x.status||"").toUpperCase()==="ONLINE"&&x.ip);const options=online.map(x=>{const label=[x.hostname||x.device_name||x.device_type||"Unknown device",x.ip].filter(Boolean).join(" · ");return '<option value="'+esc(x.ip)+'">'+esc(label)+'</option>';}).join("");select.innerHTML='<option value="">Select an online device…</option>'+options;if(online.some(x=>x.ip===current))select.value=current;}
 function ncOutput(value,isError){const box=$("ncControlOutput");if(box)box.textContent=typeof value==="string"?value:JSON.stringify(value,null,2);if(isError&&$("ncRouterStatus"))$("ncRouterStatus").textContent=String(value);}
 async function ncPost(path,payload){const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});let data={};try{data=await response.json();}catch(_){}if(!response.ok){const error=new Error(data.error||("HTTP "+response.status));error.payload=data;error.status=response.status;throw error;}return data;}
