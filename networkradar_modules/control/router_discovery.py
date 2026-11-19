@@ -63,7 +63,6 @@ def _probe_http(host: str, port: int) -> dict:
     evidence = []
     body_text = ""
     headers = {}
-    cert_subject = ""
     try:
         if secure:
             # This connection is strictly for unauthenticated identity metadata.
@@ -90,14 +89,6 @@ def _probe_http(host: str, port: int) -> dict:
                          "server": headers.get("server", ""),
                          "title": _extract_title(body_text),
                          "location": headers.get("location", "")[:300]})
-        if secure:
-            sock = getattr(connection, "sock", None)
-            if sock:
-                cert = sock.getpeercert()
-                cert_subject = _certificate_name(cert)
-                if cert_subject:
-                    evidence.append({"type": "tls_certificate", "port": port,
-                                     "subject": cert_subject, "trusted": False})
     except (OSError, socket.timeout, ssl.SSLError, http.client.HTTPException, ValueError):
         pass
     finally:
@@ -107,21 +98,12 @@ def _probe_http(host: str, port: int) -> dict:
             except Exception:
                 pass
     return {"port": port, "evidence": evidence, "headers": headers,
-            "body": body_text[:_MAX_BODY], "certificate_subject": cert_subject}
+            "body": body_text[:_MAX_BODY]}
 
 
 def _extract_title(body: str) -> str:
     match = re.search(r"<title[^>]*>(.*?)</title>", body, re.I | re.S)
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip()[:180] if match else ""
-
-
-def _certificate_name(cert: dict) -> str:
-    values = []
-    for group in cert.get("subject", ()):
-        for key, value in group:
-            if key in ("commonName", "organizationName") and value:
-                values.append(str(value))
-    return " / ".join(dict.fromkeys(values))[:180]
 
 
 def identify_router(host: str, network: str) -> dict:
@@ -148,7 +130,6 @@ def identify_router(host: str, network: str) -> dict:
             result["headers"].get("server", ""),
             result["headers"].get("www-authenticate", ""),
             result["headers"].get("location", ""),
-            result["certificate_subject"],
             result["body"],
         ])
     haystack = " ".join(text_parts).lower()
