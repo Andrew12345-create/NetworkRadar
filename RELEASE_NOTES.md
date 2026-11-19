@@ -1,3 +1,14 @@
+# NetworkRadar 15.3.0 — Router Identification First
+
+## Router identification foundation
+- Adds an authorised-gateway-only discovery stage before credentials or control actions.
+- Probes standard local HTTP/HTTPS management ports with strict timeouts and response-size limits; redirects are not followed.
+- Extracts page title, server headers, redirect metadata and TLS certificate subject as evidence. Certificate metadata is explicitly untrusted and is never used to authenticate a control session.
+- Matches observed evidence against vendor signatures for MikroTik, ASUS, TP-Link, UniFi/Ubiquiti, NETGEAR, D-Link, Linksys, Huawei, ZTE, OpenWrt, GL.iNet, DrayTek, Zyxel, Cisco and other common families.
+- Shows confidence and unknown/ambiguous results rather than inventing a model.
+- Shows adapter candidates separately from identity. This is a detection foundation, not a claim that every router is already controllable.
+- No credentials are sent and no router settings are changed during identification.
+
 # NetworkRadar 15.2.0 — Bandwidth Enforcement Integrity
 
 ## Critical bandwidth-control correction
