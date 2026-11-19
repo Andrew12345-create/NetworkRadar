@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 14.2.0 — Evidence intelligence, identity reconciliation and adaptive investigation.
+NetworkRadar 15.0.0 — Network Control Engine, evidence intelligence and adaptive investigation.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
@@ -7149,6 +7149,15 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local_request_allowed():
             return self.send_json({"error": "Local access only."}, 403)
         p = urlparse(self.path)
+        if p.path == "/api/network-control/status":
+            try:
+                from networkradar_modules.control.service import NETWORK_CONTROL
+                refresh_network_context()
+                with NET_LOCK:
+                    current_network = str(NET_CTX.get("network") or "")
+                return self.send_json(NETWORK_CONTROL.status(current_network))
+            except Exception as exc:
+                return self.send_json({"connected": False, "error": _clean(exc, 300)}, 502)
         if p.path == "/api/phantom-access/ssh/terminal":
             return self._handle_ssh_websocket(p)
         if p.path == "/assets/networkradar.css":
@@ -7952,6 +7961,115 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._local_request_allowed():
             return self.send_json({"error": "Local access only."}, 403)
+        control_path = urlparse(self.path).path
+        if control_path.startswith("/api/network-control/"):
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 8192:
+                return self.send_json({"error": "Invalid network-control request body."}, 400)
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            except Exception:
+                return self.send_json({"error": "Invalid JSON request body."}, 400)
+            if not isinstance(payload, dict):
+                return self.send_json({"error": "JSON object required."}, 400)
+            try:
+                from networkradar_modules.control.service import NETWORK_CONTROL
+                from networkradar_modules.control.routeros import validate_target_ip
+                if control_path == "/api/network-control/disconnect":
+                    return self.send_json(NETWORK_CONTROL.disconnect())
+                if payload.get("confirm") is not True:
+                    return self.send_json({"error": "Explicit confirmation is required for router-control changes."}, 400)
+                refresh_network_context()
+                with NET_LOCK:
+                    context = dict(NET_CTX)
+                network = str(context.get("network") or "")
+                if not context.get("authorized"):
+                    return self.send_json({"error": "Router control is disabled until this exact network is explicitly authorised."}, 403)
+                gateway = str(context.get("gateway") or "")
+                def _audit_control(ip, event_type, details, device_id=""):
+                    try:
+                        DB_MANAGER.write(lambda conn: record_event(conn, ip, event_type, details, category="management", severity="WARNING" if "PAUSED" in event_type else "INFO", device_id=device_id))
+                    except Exception:
+                        pass
+                if control_path == "/api/network-control/connect":
+                    provider = str(payload.get("provider") or "mikrotik-routeros")
+                    if provider != "mikrotik-routeros":
+                        return self.send_json({"error": "The first managed adapter supports MikroTik RouterOS 7+ over HTTPS REST."}, 400)
+                    result = NETWORK_CONTROL.connect_routeros(payload.get("host") or gateway, payload.get("username", ""), payload.get("password", ""), payload.get("port", 443), payload.get("ca_file", ""), network)
+                    _audit_control(result.get("host", gateway), "NETWORK_CONTROL_ROUTER_CONNECTED", "Connected to MikroTik RouterOS over verified HTTPS. Credentials are memory-only.")
+                    return self.send_json(result)
+                managed_paths = ("/api/network-control/bandwidth", "/api/network-control/bandwidth/remove", "/api/network-control/pause", "/api/network-control/resume", "/api/network-control/restore")
+                if control_path not in managed_paths:
+                    return self.send_json({"error": "Unknown network-control action."}, 404)
+                scope = str(payload.get("scope") or "device").lower()
+                target = ""
+                device_id = ""
+                device_row = None
+                needs_device = control_path in ("/api/network-control/bandwidth", "/api/network-control/bandwidth/remove") or (control_path == "/api/network-control/pause" and scope == "device") or (control_path == "/api/network-control/resume" and scope == "device")
+                if needs_device:
+                    target = validate_target_ip(payload.get("ip", ""), network, gateway)
+                    with DB_MANAGER.read() as conn:
+                        device_row = conn.execute("SELECT device_id,mac,hostname,status FROM devices WHERE ip=? LIMIT 1", (target,)).fetchone()
+                    if control_path not in ("/api/network-control/resume", "/api/network-control/bandwidth/remove"):
+                        if not device_row or str(device_row["status"] or "").upper() != "ONLINE":
+                            return self.send_json({"error": "Target must be an ONLINE device in the current NetworkRadar inventory."}, 409)
+                    if device_row:
+                        device_id = str(device_row["device_id"] or "")
+                if control_path == "/api/network-control/bandwidth":
+                    result = NETWORK_CONTROL.set_bandwidth(network, target, payload.get("download_mbps"), payload.get("upload_mbps"))
+                    _audit_control(target, "NETWORK_CONTROL_BANDWIDTH_LIMITED", f"RouterOS Simple Queue {result['max_limit']} applied to {target}.", device_id)
+                    return self.send_json(result)
+                if control_path == "/api/network-control/bandwidth/remove":
+                    result = NETWORK_CONTROL.remove_bandwidth(network, target)
+                    _audit_control(target, "NETWORK_CONTROL_BANDWIDTH_RESTORED", f"Removed {result['removed_queues']} NetworkRadar-managed bandwidth queue(s).", device_id)
+                    return self.send_json(result)
+                if control_path == "/api/network-control/pause":
+                    minutes = payload.get("duration_minutes", 15)
+                    allow_ipv4_only = payload.get("allow_ipv4_only") is True
+                    if scope == "device":
+                        ipv6_addresses = []
+                        if device_row and (device_id or device_row["mac"]):
+                            cutoff = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+                            device_mac = str(device_row["mac"] or "") if device_row else ""
+                            with DB_MANAGER.read() as conn:
+                                rows = conn.execute(
+                                    "SELECT ipv6 FROM ipv6_observation_events WHERE timestamp>=? AND (linked_device_id=? OR (?<>'' AND lower(mac)=lower(?))) ORDER BY id DESC LIMIT 100",
+                                    (cutoff, device_id, device_mac, device_mac),
+                                ).fetchall()
+                            ipv6_addresses = [str(row[0]) for row in rows if row and row[0]]
+                        result = NETWORK_CONTROL.pause_device(network, target, ipv6_addresses, minutes, allow_ipv4_only)
+                        _audit_control(target, "NETWORK_CONTROL_DEVICE_PAUSED", f"Temporary internet restriction applied for {minutes} minutes; IPv4 and {len(result.get('ipv6_blocked_addresses', []))} observed IPv6 address(es).", device_id)
+                    elif scope == "network":
+                        result = NETWORK_CONTROL.pause_network(network, minutes, allow_ipv4_only)
+                        _audit_control(network, "NETWORK_CONTROL_NETWORK_PAUSED", f"Temporary network internet restriction applied for {minutes} minutes.")
+                    else:
+                        return self.send_json({"error": "Scope must be device or network."}, 400)
+                    return self.send_json(result)
+                if control_path == "/api/network-control/resume":
+                    if scope == "device":
+                        result = NETWORK_CONTROL.resume_device(network, target)
+                        _audit_control(target, "NETWORK_CONTROL_DEVICE_RESUMED", "Removed NetworkRadar-managed temporary pause entries.", device_id)
+                    elif scope == "network":
+                        result = NETWORK_CONTROL.resume_network(network)
+                        _audit_control(network, "NETWORK_CONTROL_NETWORK_RESUMED", "Removed NetworkRadar-managed network pause entries.")
+                    else:
+                        return self.send_json({"error": "Scope must be device or network."}, 400)
+                    return self.send_json(result)
+                if control_path == "/api/network-control/restore":
+                    result = NETWORK_CONTROL.restore_all(network)
+                    _audit_control(network, "NETWORK_CONTROL_EMERGENCY_RESTORE", "Removed NetworkRadar-managed pause entries, bandwidth queues and firewall rules.")
+                    return self.send_json(result)
+            except PermissionError as exc:
+                return self.send_json({"error": _clean(exc, 300)}, 403)
+            except ValueError as exc:
+                message = _clean(exc, 400)
+                if "Confirm an explicitly IPv4-only" in message:
+                    return self.send_json({"error": message, "requires_ipv4_only_confirmation": True}, 409)
+                return self.send_json({"error": message}, 400)
+            except RuntimeError as exc:
+                return self.send_json({"error": _clean(exc, 400)}, 502)
+            except Exception as exc:
+                return self.send_json({"error": _clean(exc, 400)}, 502)
         try:
             if self.path == "/api/port-intelligence/scan":
                 length = int(self.headers.get("Content-Length", "0"))

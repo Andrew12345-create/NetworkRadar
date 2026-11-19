@@ -1,4 +1,20 @@
-# NetworkRadar 14.2.0 — Evidence Intelligence & Identity Reconciliation
+# NetworkRadar 15.0.0 — Network Control Engine
+
+## Network Control Engine
+- Adds the first managed router adapter for MikroTik RouterOS 7+ using HTTPS REST with strict certificate validation and no insecure TLS bypass.
+- Adds a dedicated Network Control workspace with router capability status, online-device selection, bandwidth controls, timed pauses and emergency restore.
+- Applies per-device upload/download limits using RouterOS Simple Queues. The UI reports detected FastTrack because FastTrack can bypass Simple Queues; NetworkRadar does not alter existing FastTrack rules.
+- Applies temporary device/network restrictions using router-managed IPv4 and IPv6 address-list timeouts. Expiry is enforced by the router, not a local countdown thread.
+- Uses LAN/WAN interface lists and inserts managed forward-chain rules before existing forward rules. Rules are scoped to LAN-to-WAN forwarding; local LAN and router-management traffic are not targeted.
+- Requires the current network to be explicitly authorised, router IP to be inside the authorised private subnet, targets to be in the current online inventory, and explicit confirmation for changes.
+- Emergency restore deletes only NetworkRadar-owned address-list entries, queues and firewall rules.
+- Router credentials are memory-only. HTTPS certificate verification is mandatory; self-signed router certificates require a trusted CA certificate path.
+- If dual-stack coverage cannot be established, the user must explicitly approve an IPv4-only action. Device IPv6 privacy-address rotation can create new addresses that are not yet observed.
+- MikroTik RouterOS 7+ is the first managed adapter. OpenWrt, ASUS, TP-Link and UniFi are not yet enabled for control; unsupported routers remain unaffected.
+
+## Validation boundary
+- Adds isolated unit tests for scope validation, duration/rate validation, dual-stack timed pauses, Simple Queue direction, ownership-safe restore and network-session binding.
+- Windows/Nmap/TShark live scans are unaffected. A real RouterOS integration test on the user's authorised router remains required before relying on traffic-control actions.
 
 ## Evidence intelligence and identity reconciliation
 - Separates the latest device assessment from the accepted inventory identity.

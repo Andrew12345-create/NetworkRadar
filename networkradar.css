@@ -2306,3 +2306,22 @@ button {
 #fullPortScanButton:disabled{opacity:.55;cursor:wait}
 #domainIntelLimits{line-height:1.55;overflow-wrap:anywhere}
 @media(max-width:700px){#domainIntelligence .grid{grid-template-columns:1fr}#fullPortTarget{max-width:none;width:100%}}
+
+/* NetworkRadar 15.0.0 — router control workspace */
+#networkControl .nc-layout{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+#networkControl .nc-card{min-width:0;padding:16px;border:1px solid var(--nr-surface-border,#284762);border-radius:14px;background:linear-gradient(145deg,rgba(18,39,59,.92),rgba(8,22,36,.96))}
+#networkControl .nc-card h3{margin:0 0 13px;color:var(--cyan,#5ce4dc);font-size:12px;letter-spacing:.12em}
+#networkControl .nc-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+#networkControl .nc-form-grid label,#networkControl .nc-card>label{display:flex;flex-direction:column;gap:6px;min-width:0;color:var(--muted,#9ab0c5);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+#networkControl input,#networkControl select{width:100%;min-width:0;box-sizing:border-box}
+#networkControl .nc-wide{grid-column:1/-1}
+#networkControl .nc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+#networkControl .nc-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+#networkControl .nc-metrics>div{display:flex;flex-direction:column;gap:5px;padding:11px;border-radius:10px;background:rgba(4,14,25,.58);min-width:0}
+#networkControl .nc-metrics span{font-size:10px;color:var(--muted,#9ab0c5);letter-spacing:.1em}
+#networkControl .nc-metrics b{font-size:13px;overflow-wrap:anywhere}
+#networkControl .nc-policy-list{white-space:pre-wrap;overflow-wrap:anywhere;min-height:40px;padding:12px;border-radius:10px;background:rgba(4,14,25,.58);font:12px/1.7 ui-monospace,Consolas,monospace}
+#networkControl button.danger{border-color:#a94353;background:#6e2634;color:#fff}
+#networkControl button.danger:hover{background:#873044}
+@media(max-width:820px){#networkControl .nc-layout{grid-template-columns:1fr}}
+@media(max-width:520px){#networkControl .nc-form-grid{grid-template-columns:1fr}#networkControl .nc-actions button{flex:1 1 100%}}

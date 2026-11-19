@@ -141,3 +141,16 @@ Legacy devices remains IP-keyed, and many historical event/telemetry queries are
 ## 13.7.0 dashboard presentation layer
 
 The dashboard continues to use the standalone `index.html`, `networkradar.css` and `dashboard.js` assets. Version 13.7.0 adds an additive CSS consistency layer for visible keyboard focus, constrained grid children, horizontally scrollable data tables, touch interaction and broad reduced-motion handling. It does not alter dashboard APIs, scan scheduling, network authorisation, identity scoring or database storage.
+
+
+## Network Control Engine (15.0.0)
+
+The optional router-control subsystem is isolated under `networkradar_modules/control/`. Its first adapter targets MikroTik RouterOS 7+ through the HTTPS REST API. The REST client requires certificate verification, refuses redirects, uses bounded timeouts and exposes only fixed resource operations; arbitrary RouterOS console commands are not exposed.
+
+Router credentials remain in process memory and are not written to SQLite, logs or the browser. The connection is bound to the exact currently authorised private IPv4 subnet. Every mutating API route refreshes the live Windows network context and checks the current authorisation again. New device restrictions additionally require an ONLINE inventory record. The dashboard remains loopback-only.
+
+Bandwidth limits use one RouterOS Simple Queue per device. Upload/download ordering is translated explicitly, and FastTrack presence is reported because FastTrack can bypass Simple Queues. Existing FastTrack rules are never changed automatically.
+
+Timed pauses use dedicated NetworkRadar-owned IPv4/IPv6 firewall address lists with RouterOS timeouts. A managed forward-chain drop rule is inserted before existing forward rules and matches only LAN-to-WAN traffic. This preserves local LAN communication and access to router management. IPv6 pauses use currently observed global device addresses or global prefixes assigned to the LAN interface that owns the currently authorised IPv4 subnet. If dual-stack coverage cannot be established, an IPv4-only action requires a separate explicit acknowledgement. IPv6 privacy-address rotation remains a coverage limitation.
+
+Emergency restore removes only address-list entries, queues and firewall rules with exact NetworkRadar-owned comments. It does not reset the router, alter interface lists, disable FastTrack, or delete unrelated administrator policies. RouterOS is the only enabled control adapter in this release; other router brands are not guessed or modified.
