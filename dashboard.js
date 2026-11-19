@@ -821,16 +821,12 @@ loadCommandCenter();setInterval(loadCommandCenter,10000);loadPhantomAccess();set
 let ncStatusInFlight=false;let ncLastStatusAt=0;
 let loadTestPollTimer=null;
 async function startNetworkLoadTest(){
- const mode=$("nltMode")?.value||"lan",target=$("nltTarget")?.value.trim()||"";
- const duration_seconds=Number($("nltDuration")?.value||20),aggregate_mbps=Number($("nltRate")?.value||5),streams=Number($("nltStreams")?.value||1);
- if(!target){ncOutput("Enter the IP address of an iPerf3 server.",true);return;}
- let external_ack=false;
- if(mode==="internet"){
-  if(!confirm("This will send sustained UDP traffic to a PUBLIC iPerf3 server. Continue only if you own or have explicit permission to use this server. It can consume data and affect other users."))return;
-  external_ack=true;
- }else if(!confirm("Generate up to "+aggregate_mbps+" Mbps of test traffic to "+target+" for "+duration_seconds+" seconds? The target must be an ONLINE LAN device running iperf3 in server mode."))return;
+ const endpoint=$("nltEndpoint")?.value.trim()||"";
+ const duration_seconds=Number($("nltDuration")?.value||30),aggregate_mbps=Number($("nltRate")?.value||5),streams=Number($("nltStreams")?.value||2);
+ if(!endpoint){ncOutput("Enter the HTTPS download URL of a test endpoint you own or are authorised to use.",true);return;}
+ if(!confirm("NetworkRadar will download data from this HTTPS endpoint using this laptop. This consumes your shared internet bandwidth and may slow internet access for other devices on this connection. Only continue if you own or are authorised to use the endpoint. Maximum 20 Mbps, 120 seconds and 256 MB total."))return;
  try{
-  const result=await ncPost("/api/load-test/start",{mode,target,duration_seconds,aggregate_mbps,streams,external_ack,confirm:true});
+  const result=await ncPost("/api/load-test/start",{endpoint,duration_seconds,aggregate_mbps,streams,external_ack:true,confirm:true});
   const out=$("nltStatus");if(out)out.textContent="STARTING · "+result.job_id;
   pollNetworkLoadTest();
  }catch(error){const out=$("nltStatus");if(out)out.textContent=error.message;}
@@ -842,9 +838,9 @@ async function stopNetworkLoadTest(){
 async function pollNetworkLoadTest(){
  try{
   const data=await getJSON("/api/load-test/status",5000),out=$("nltStatus"),metrics=$("nltMetrics");
-  if(out)out.textContent=[data.state||"IDLE",data.error||"",data.job_id?"Target "+data.target+" · "+data.aggregate_mbps+" Mbps configured · "+data.duration_seconds+"s":"",data.state==="FAILED"?"Check that the target iPerf3 server is running and UDP port 5201 is reachable.":""].filter(Boolean).join("\n");
-  if(metrics)metrics.textContent=["Measured throughput: "+(data.throughput_mbps==null?"—":data.throughput_mbps+" Mbps"),"Jitter: "+(data.jitter_ms==null?"—":data.jitter_ms+" ms"),"Packet loss: "+(data.lost_percent==null?"—":data.lost_percent+"%"),"iPerf3: "+(data.available?"AVAILABLE":"NOT FOUND")].join(" · ");
-  if(["STARTING","RUNNING","STOPPING"].includes(data.state)){if(loadTestPollTimer)clearTimeout(loadTestPollTimer);loadTestPollTimer=setTimeout(pollNetworkLoadTest,1500);}
+  if(out)out.textContent=[data.state||"IDLE",data.error||"",data.job_id?"Endpoint "+(data.endpoint_host||"—")+" · "+data.aggregate_mbps+" Mbps cap · "+data.duration_seconds+"s":"",data.state==="FAILED"?"Check that your authorised HTTPS endpoint returns a successful downloadable response.":""].filter(Boolean).join("\n");
+  if(metrics)metrics.textContent=["Received: "+(data.bytes_received==null?"0":(data.bytes_received/1048576).toFixed(2)+" MB"),"Observed rate: "+(data.throughput_mbps==null?"—":data.throughput_mbps+" Mbps"),"Workers: "+(data.streams||0),"Engine: "+(data.available?"READY":"UNAVAILABLE")].join(" · ");
+  if(["STARTING","RUNNING","STOPPING"].includes(data.state)){if(loadTestPollTimer)clearTimeout(loadTestPollTimer);loadTestPollTimer=setTimeout(pollNetworkLoadTest,1000);}
  }catch(error){const out=$("nltStatus");if(out)out.textContent="Status unavailable: "+error.message;}
 }
 function renderNetworkControlDeviceOptions(devices){const select=$("ncDeviceSelect");if(!select)return;const current=select.value;const online=(Array.isArray(devices)?devices:[]).filter(x=>String(x.status||"").toUpperCase()==="ONLINE"&&x.ip);const options=online.map(x=>{const label=[x.hostname||x.device_name||x.device_type||"Unknown device",x.ip].filter(Boolean).join(" · ");return '<option value="'+esc(x.ip)+'">'+esc(label)+'</option>';}).join("");select.innerHTML='<option value="">Select an online device…</option>'+options;if(online.some(x=>x.ip===current))select.value=current;}

@@ -1,158 +1,205 @@
-"""Bounded, explicit iPerf3 network-load testing.
+"""Bounded host-only WAN traffic generator for an operator-controlled HTTPS endpoint.
 
-This module never generates traffic by itself. A local API action must start a
-single bounded test against an explicitly supplied iPerf3 server.
+No software is installed on, or executed by, any target device. NetworkRadar
+originates HTTPS downloads from this host and uses a shared token bucket to
+cap aggregate traffic. The endpoint must be owned by, or explicitly authorised
+for use by, the operator.
 """
 from __future__ import annotations
 
 import ipaddress
-import json
-import shutil
-import subprocess
+import socket
 import threading
 import time
 import uuid
+from urllib.error import URLError
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-
-MAX_DURATION_SECONDS = 60
-MAX_AGGREGATE_MBPS = 50
+MAX_DURATION_SECONDS = 120
+MAX_AGGREGATE_MBPS = 20
 MAX_STREAMS = 4
+MAX_TOTAL_BYTES = 256 * 1024 * 1024
+CHUNK_SIZE = 64 * 1024
 
 
-def validate_test_config(target, duration_seconds=20, aggregate_mbps=5, streams=1):
-    try:
-        address = ipaddress.ip_address(str(target).strip())
-    except ValueError as exc:
-        raise ValueError("Target must be a literal IPv4 address; hostnames are not accepted.") from exc
-    if address.version != 4 or address.is_unspecified or address.is_multicast or address.is_loopback or address.is_link_local:
-        raise ValueError("Target must be a usable IPv4 address.")
+def validate_test_config(endpoint, duration_seconds=30, aggregate_mbps=5, streams=2, resolver=None):
+    raw = str(endpoint or "").strip()
+    parsed = urlsplit(raw)
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValueError("Endpoint must be a complete HTTPS URL.")
+    if parsed.username or parsed.password or parsed.fragment:
+        raise ValueError("Endpoint URLs cannot contain credentials or fragments.")
+    if parsed.port not in (None, 443):
+        raise ValueError("Only standard HTTPS port 443 is supported.")
+    if len(raw) > 2048:
+        raise ValueError("Endpoint URL is too long.")
     if isinstance(duration_seconds, bool) or not isinstance(duration_seconds, int) or not 5 <= duration_seconds <= MAX_DURATION_SECONDS:
-        raise ValueError("Test duration must be between 5 and 60 seconds.")
-    if isinstance(aggregate_mbps, bool) or not isinstance(aggregate_mbps, (int, float)) or not 0.25 <= float(aggregate_mbps) <= MAX_AGGREGATE_MBPS:
-        raise ValueError("Aggregate traffic rate must be between 0.25 and 50 Mbps.")
+        raise ValueError("Duration must be between 5 and 120 seconds.")
+    if isinstance(aggregate_mbps, bool) or not isinstance(aggregate_mbps, (int, float)) or not 0.5 <= float(aggregate_mbps) <= MAX_AGGREGATE_MBPS:
+        raise ValueError("Aggregate traffic rate must be between 0.5 and 20 Mbps.")
     if isinstance(streams, bool) or not isinstance(streams, int) or not 1 <= streams <= MAX_STREAMS:
         raise ValueError("Parallel streams must be between 1 and 4.")
-    return {
-        "target": str(address),
-        "duration_seconds": duration_seconds,
-        "aggregate_mbps": float(aggregate_mbps),
-        "streams": streams,
-    }
+    host = parsed.hostname.rstrip(".").lower()
+    try:
+        ipaddress.ip_address(host)
+        addresses = [host]
+    except ValueError:
+        lookup = resolver or socket.getaddrinfo
+        try:
+            addresses = sorted({item[4][0] for item in lookup(host, 443, type=socket.SOCK_STREAM)})
+        except OSError as exc:
+            raise ValueError("Endpoint hostname could not be resolved.") from exc
+    if not addresses:
+        raise ValueError("Endpoint hostname did not resolve to an address.")
+    for value in addresses:
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError as exc:
+            raise ValueError("Endpoint resolved to an invalid address.") from exc
+        if not address.is_global:
+            raise ValueError("Endpoint must resolve only to public internet addresses; private, local and reserved destinations are blocked.")
+    return {"endpoint": raw, "host": host, "duration_seconds": duration_seconds,
+            "aggregate_mbps": float(aggregate_mbps), "streams": streams}
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+class _TokenBucket:
+    def __init__(self, bytes_per_second):
+        self.rate = max(1.0, float(bytes_per_second))
+        self.capacity = max(CHUNK_SIZE, self.rate * 1.5)
+        self.tokens = self.capacity
+        self.updated = time.monotonic()
+        self.lock = threading.Lock()
+
+    def consume(self, amount, stop_event):
+        remaining = float(amount)
+        while remaining > 0 and not stop_event.is_set():
+            with self.lock:
+                now = time.monotonic()
+                self.tokens = min(self.capacity, self.tokens + (now - self.updated) * self.rate)
+                self.updated = now
+                taken = min(remaining, self.tokens)
+                self.tokens -= taken
+                remaining -= taken
+            if remaining > 0:
+                stop_event.wait(min(0.1, remaining / self.rate))
 
 
 class NetworkLoadTestManager:
-    """Runs one bounded iperf3 UDP test and retains its latest result."""
+    """Runs one bounded, cancellable HTTPS download test from this host."""
 
-    def __init__(self, which=None, popen=None):
-        self._which = which or shutil.which
-        self._popen = popen or subprocess.Popen
+    def __init__(self, opener_factory=None, resolver=None):
+        self._opener_factory = opener_factory or (lambda: build_opener(_NoRedirect()))
+        self._resolver = resolver
         self._lock = threading.RLock()
         self._job = None
-        self._process = None
-        self._worker = None
+        self._stop = None
+        self._workers = []
 
     def status(self):
         with self._lock:
             if not self._job:
-                return {"state": "IDLE", "available": bool(self._which("iperf3"))}
-            return dict(self._job, available=bool(self._which("iperf3")))
+                return {"state": "IDLE", "available": True}
+            job = dict(self._job)
+            elapsed = max(0.001, (job.get("finished_at") or time.time()) - job["started_at"])
+            job["elapsed_seconds"] = round(elapsed, 1)
+            job["bytes_received"] = int(job.get("_bytes_received", 0))
+            job["throughput_mbps"] = round(job["bytes_received"] * 8 / elapsed / 1_000_000, 3)
+            job.pop("_bytes_received", None)
+            job["available"] = True
+            return job
 
-    def start(self, target, duration_seconds=20, aggregate_mbps=5, streams=1):
-        config = validate_test_config(target, duration_seconds, aggregate_mbps, streams)
-        executable = self._which("iperf3")
-        if not executable:
-            raise RuntimeError("iperf3 was not found. Install the official iperf3 Windows build and ensure iperf3.exe is on PATH.")
+    def start(self, endpoint, duration_seconds=30, aggregate_mbps=5, streams=2):
+        config = validate_test_config(endpoint, duration_seconds, aggregate_mbps, streams, self._resolver)
         with self._lock:
             if self._job and self._job.get("state") in ("STARTING", "RUNNING", "STOPPING"):
-                raise RuntimeError("A network-load test is already running. Stop it before starting another.")
+                raise RuntimeError("A network load session is already active.")
             job_id = uuid.uuid4().hex[:12]
+            stop_event = threading.Event()
+            self._stop = stop_event
             self._job = {
-                "job_id": job_id, "state": "STARTING", **config,
-                "started_at": time.time(), "finished_at": None,
-                "throughput_mbps": None, "jitter_ms": None,
-                "lost_percent": None, "error": None,
+                "job_id": job_id, "state": "STARTING", "endpoint_host": config["host"],
+                "duration_seconds": config["duration_seconds"],
+                "aggregate_mbps": config["aggregate_mbps"], "streams": config["streams"],
+                "started_at": time.time(), "finished_at": None, "_bytes_received": 0,
+                "error": None,
             }
-            self._worker = threading.Thread(target=self._run, args=(job_id, executable, config), daemon=True,
-                                            name="NetworkRadarLoadTest")
-            self._worker.start()
-            return dict(self._job)
+            bucket = _TokenBucket(config["aggregate_mbps"] * 1_000_000 / 8)
+            self._workers = [
+                threading.Thread(target=self._worker, args=(job_id, config, bucket, stop_event),
+                                 daemon=True, name=f"NetworkRadarWANLoad-{i+1}")
+                for i in range(config["streams"])
+            ]
+            for worker in self._workers:
+                worker.start()
+            self._job["state"] = "RUNNING"
+            threading.Thread(target=self._supervise, args=(job_id, config["duration_seconds"], stop_event),
+                             daemon=True, name="NetworkRadarWANLoadSupervisor").start()
+            return self.status()
 
-    def _run(self, job_id, executable, config):
-        per_stream = config["aggregate_mbps"] / config["streams"]
-        command = [
-            executable, "-c", config["target"], "-u", "-b", f"{per_stream:.3f}M",
-            "-P", str(config["streams"]), "-t", str(config["duration_seconds"]), "-J",
-        ]
-        process = None
+    def _worker(self, job_id, config, bucket, stop_event):
+        opener = self._opener_factory()
+        deadline = time.monotonic() + config["duration_seconds"]
         try:
-            process = self._popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                  text=True, encoding="utf-8", errors="replace")
-            with self._lock:
-                if not self._job or self._job.get("job_id") != job_id:
-                    process.terminate()
-                    return
-                self._process = process
-                stopping = self._job["state"] == "STOPPING"
-                if not stopping:
-                    self._job["state"] = "RUNNING"
-            # A stop can arrive while Popen is being created. Re-check after
-            # publishing the process handle so that early emergency stops win.
-            if stopping:
-                process.terminate()
-            output, _ = process.communicate(timeout=config["duration_seconds"] + 12)
-            parsed = {}
-            try:
-                parsed = json.loads(output or "{}")
-            except (TypeError, ValueError):
-                pass
-            end = parsed.get("end", {}) if isinstance(parsed, dict) else {}
-            summary = end.get("sum", {}) if isinstance(end, dict) else {}
-            throughput = summary.get("bits_per_second")
-            jitter = summary.get(" jitter_ms", summary.get("jitter_ms"))
-            lost = summary.get(" lost_percent", summary.get("lost_percent"))
-            with self._lock:
-                if self._job and self._job.get("job_id") == job_id:
-                    stopped = self._job["state"] == "STOPPING"
-                    self._job.update({
-                        "state": "STOPPED" if stopped else ("COMPLETED" if process.returncode == 0 else "FAILED"),
-                        "finished_at": time.time(),
-                        "throughput_mbps": round(float(throughput) / 1_000_000, 3) if throughput is not None else None,
-                        "jitter_ms": round(float(jitter), 3) if jitter is not None else None,
-                        "lost_percent": round(float(lost), 3) if lost is not None else None,
-                        "error": None if process.returncode == 0 or stopped else (output or "iperf3 exited unsuccessfully")[-1200:],
-                    })
-        except subprocess.TimeoutExpired:
-            if process:
-                process.kill()
-                output, _ = process.communicate()
-            with self._lock:
-                if self._job and self._job.get("job_id") == job_id:
-                    self._job.update(state="FAILED", finished_at=time.time(), error="iperf3 exceeded its hard execution timeout.")
+            while not stop_event.is_set() and time.monotonic() < deadline:
+                request = Request(config["endpoint"], headers={
+                    "User-Agent": "NetworkRadar/15.7 (authorised bounded bandwidth test)",
+                    "Accept": "application/octet-stream,*/*;q=0.5",
+                    "Cache-Control": "no-cache",
+                }, method="GET")
+                try:
+                    with opener.open(request, timeout=3) as response:
+                        if response.status < 200 or response.status >= 300:
+                            raise RuntimeError(f"Endpoint returned HTTP {response.status}.")
+                        while not stop_event.is_set() and time.monotonic() < deadline:
+                            chunk = response.read(CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            bucket.consume(len(chunk), stop_event)
+                            if stop_event.is_set():
+                                break
+                            with self._lock:
+                                if self._job and self._job.get("job_id") == job_id:
+                                    self._job["_bytes_received"] += len(chunk)
+                                    if self._job["_bytes_received"] >= MAX_TOTAL_BYTES:
+                                        stop_event.set()
+                                        break
+                except Exception as exc:
+                    if not stop_event.is_set():
+                        raise RuntimeError(f"HTTPS download failed: {type(exc).__name__}: {str(exc)[:180]}") from exc
         except Exception as exc:
             with self._lock:
-                if self._job and self._job.get("job_id") == job_id:
-                    self._job.update(state="FAILED", finished_at=time.time(), error=str(exc)[:500])
-        finally:
-            with self._lock:
-                if self._job and self._job.get("job_id") == job_id:
-                    self._process = None
+                if self._job and self._job.get("job_id") == job_id and not self._job.get("error"):
+                    self._job["error"] = str(exc)[:300]
+            stop_event.set()
+
+    def _supervise(self, job_id, duration, stop_event):
+        deadline = time.monotonic() + duration
+        while not stop_event.is_set() and time.monotonic() < deadline:
+            stop_event.wait(min(0.2, max(0.0, deadline - time.monotonic())))
+        stop_event.set()
+        for worker in list(self._workers):
+            worker.join(timeout=4)
+        with self._lock:
+            if self._job and self._job.get("job_id") == job_id:
+                if self._job["state"] != "STOPPING":
+                    self._job["state"] = "FAILED" if self._job.get("error") else "COMPLETED"
+                else:
+                    self._job["state"] = "STOPPED"
+                self._job["finished_at"] = time.time()
 
     def stop(self):
         with self._lock:
             if not self._job or self._job.get("state") not in ("STARTING", "RUNNING", "STOPPING"):
-                return {"stopped": False, "message": "No active load test.", **self.status()}
+                return {"stopped": False, "message": "No active network-load session.", **self.status()}
             self._job["state"] = "STOPPING"
-            process = self._process
-        if process:
-            try:
-                process.terminate()
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=3)
-            except Exception:
-                pass
+            if self._stop:
+                self._stop.set()
         return {"stopped": True, **self.status()}
 
 
