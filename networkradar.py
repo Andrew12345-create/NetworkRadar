@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 15.4.0 — Network Control API Responsiveness, evidence intelligence and adaptive investigation.
+NetworkRadar 15.8.0 — Adaptive WAN Stress Engine, network control and device intelligence.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
