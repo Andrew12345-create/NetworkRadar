@@ -1,4 +1,4 @@
-# NetworkRadar 15.8.0
+# NetworkRadar 15.9.0
 
 ## Bandwidth enforcement integrity (15.2.0)
 - Refreshes enabled RouterOS FastTrack rules immediately before each bandwidth-limit write; Simple Queues can be bypassed by FastTracked connections.
@@ -645,19 +645,3 @@ See [Architecture](docs/ARCHITECTURE.md), [Release Notes](RELEASE_NOTES.md), and
 No license file has been selected yet. Public visibility on GitHub does not by itself grant permission to copy, modify or redistribute this project. Add an explicit license before presenting NetworkRadar as an open-source release.
 
 
-## Adaptive WAN stress engine (15.8.0)
-NetworkRadar can generate a bounded HTTPS download workload from this computer against a public endpoint that the operator owns or is explicitly authorised to use. No software is installed on LAN clients. The interface provides Light, Moderate, High, Extreme and Custom profiles:
-
-| Profile | Aggregate rate ceiling | Workers | Duration | Data allowance |
-|---|---:|---:|---:|---:|
-| Light | 1.5 Mbps | 1 | 30 seconds | 32 MB |
-| Moderate | 8 Mbps | 2 | 60 seconds | 128 MB |
-| High | 35 Mbps | 4 | 120 seconds | 512 MB |
-| Extreme | 75 Mbps | 8 | 180 seconds | 1,024 MB |
-| Custom | Operator-configured | 1–8 | 5–180 seconds | 16–1,024 MB |
-
-The server enforces hard ceilings of 100 Mbps, 180 seconds, eight workers and 1,024 MB per session, regardless of browser input. Only HTTPS on port 443 is accepted; redirects are blocked; endpoints resolving to private, local, multicast, link-local or reserved addresses are rejected. Only one session can run at a time. The emergency stop cancels active workers.
-
-The shared token-bucket rate gate is applied before socket reads so the application paces incoming reads and allows TCP receive-window back-pressure to regulate WAN transfer, rather than merely delaying data after it has already been downloaded. Live status reports received bytes, average observed throughput, configured workers, elapsed time and data-cap progress.
-
-This is a WAN bandwidth-consumption test, not per-device traffic shaping. Other clients sharing the same internet bottleneck may experience slower internet access; local LAN traffic is not intentionally targeted. The selected endpoint must be yours or explicitly authorised, and must serve enough downloadable data to sustain the chosen profile. NetworkRadar does not host or upload the test payload automatically, and it must not be pointed at arbitrary websites, public mirrors or third-party speed-test endpoints. Large test payloads should be placed on an external object-storage bucket or server under the operator's control.

@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 15.4.0 — Network Control API Responsiveness, evidence intelligence and adaptive investigation.
+NetworkRadar 15.9.0 — Core network discovery, device intelligence and safe network management.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
@@ -7196,12 +7196,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": _clean(exc, 300)}, 400)
             except Exception as exc:
                 return self.send_json({"error": _clean(exc, 300)}, 502)
-        if p.path == "/api/load-test/status":
-            try:
-                from networkradar_modules.network.load_test import NETWORK_LOAD_TEST
-                return self.send_json(NETWORK_LOAD_TEST.status())
-            except Exception as exc:
-                return self.send_json({"state": "ERROR", "error": _clean(exc, 300)}, 500)
         if p.path == "/api/network-control/status":
             try:
                 from networkradar_modules.control.service import NETWORK_CONTROL
@@ -8026,44 +8020,6 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local_request_allowed():
             return self.send_json({"error": "Local access only."}, 403)
         control_path = urlparse(self.path).path
-        if control_path.startswith("/api/load-test/"):
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0 or length > 4096:
-                return self.send_json({"error": "Invalid network-load request body."}, 400)
-            try:
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            except Exception:
-                return self.send_json({"error": "Invalid JSON request body."}, 400)
-            if not isinstance(payload, dict) or payload.get("confirm") is not True:
-                return self.send_json({"error": "Explicit confirmation is required before generating traffic."}, 400)
-            try:
-                from networkradar_modules.network.load_test import NETWORK_LOAD_TEST
-                if control_path == "/api/load-test/stop":
-                    return self.send_json(NETWORK_LOAD_TEST.stop())
-                if control_path != "/api/load-test/start":
-                    return self.send_json({"error": "Unknown network-load action."}, 404)
-                refresh_network_context()
-                with NET_LOCK:
-                    context = dict(NET_CTX)
-                if not context.get("authorized"):
-                    return self.send_json({"error": "Authorise the current network before starting a WAN load session."}, 403)
-                if payload.get("external_ack") is not True:
-                    return self.send_json({"error": "Confirm that you own or are authorised to use the HTTPS test endpoint."}, 400)
-                result = NETWORK_LOAD_TEST.start(
-                    str(payload.get("endpoint") or ""),
-                    payload.get("duration_seconds", 30),
-                    payload.get("aggregate_mbps", 5),
-                    payload.get("streams", 2),
-                    payload.get("max_total_mb", 256),
-                    str(payload.get("profile") or "Custom"),
-                )
-                return self.send_json(result, 202)
-            except ValueError as exc:
-                return self.send_json({"error": _clean(exc, 300)}, 400)
-            except RuntimeError as exc:
-                return self.send_json({"error": _clean(exc, 400)}, 409)
-            except Exception as exc:
-                return self.send_json({"error": _clean(exc, 300)}, 500)
         if control_path.startswith("/api/network-control/"):
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > 8192:

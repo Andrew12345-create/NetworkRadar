@@ -1,4 +1,12 @@
-# NetworkRadar 15.8.0
+# NetworkRadar 15.9.0
+
+## Product scope and version consistency
+- Removes the host-only WAN stress generator, its dashboard controls, API routes, implementation module and dedicated tests. It consumed shared internet capacity and was outside NetworkRadar's core monitoring, discovery, identity and managed-network control purpose.
+- Retains historical 15.8.0 release notes below as release history; the removed capability is not presented as part of the current product.
+- Makes `networkradar_modules.__version__` the canonical version source and aligns the source header, PowerShell launcher, requirements metadata, README and architecture snapshot.
+- Adds a regression test that checks release metadata against the canonical package version.
+
+## Previous release · NetworkRadar 15.8.0
 
 ## Adaptive WAN Stress Engine
 - Replaces the narrow 20 Mbps / four-worker / 256 MB WAN generator with Light, Moderate, High, Extreme and Custom profiles.
