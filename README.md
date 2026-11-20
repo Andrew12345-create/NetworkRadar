@@ -1,4 +1,4 @@
-# NetworkRadar 15.9.0
+# NetworkRadar 15.10.0
 
 ## Bandwidth enforcement integrity (15.2.0)
 - Refreshes enabled RouterOS FastTrack rules immediately before each bandwidth-limit write; Simple Queues can be bypassed by FastTracked connections.
