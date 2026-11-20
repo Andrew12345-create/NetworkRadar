@@ -1,4 +1,13 @@
-# NetworkRadar 15.9.0
+# NetworkRadar 15.10.0
+
+## Five-workspace product navigation
+- Consolidates the dashboard from seven workspaces to five: Command Centre, Devices & Identity, Network Activity, Network Control, and Security & Investigations.
+- Moves Remote Management into Devices & Identity, keeping enrolled-agent and SSH operations alongside the devices they manage.
+- Moves Intelligence & Reports into Security & Investigations, keeping the assistant, event intelligence and reporting with investigation workflows.
+- Preserves all existing tools, APIs, stored history and operational controls; this is a navigation and information-architecture consolidation, not feature deletion.
+- Updates the workspace switcher to a five-column desktop layout and aligns the sidebar with the same five destinations.
+
+## Previous maintenance release · NetworkRadar 15.9.0
 
 ## Product scope and version consistency
 - Removes the host-only WAN stress generator, its dashboard controls, API routes, implementation module and dedicated tests. It consumed shared internet capacity and was outside NetworkRadar's core monitoring, discovery, identity and managed-network control purpose.

@@ -2128,7 +2128,7 @@ th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hov
 .nw-sweep{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,transparent 0 76%,#00e5ff05 82%,#00e5ff55);animation:nwSweep 5s linear infinite}.nw-core{position:absolute;left:calc(50% - 4px);top:calc(50% - 4px);width:8px;height:8px;border-radius:50%;background:#eaffff;box-shadow:0 0 16px var(--cyan)}
 .nw-blip{position:absolute;width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green);animation:nwPulse 2.4s infinite}.nw-blip.a{left:25%;top:28%}.nw-blip.b{left:71%;top:36%;animation-delay:.7s}.nw-blip.c{left:62%;top:76%;animation-delay:1.2s}
 .nw-radar-caption{width:min(245px,65vw);display:flex;justify-content:space-between;color:#5c8a9d;font:9px Consolas,monospace}.nw-radar-caption b{color:var(--cyan)}
-.nightwatch-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:16px}.nightwatch-metrics article{padding:15px;border:1px solid #1d3849;border-radius:11px;background:linear-gradient(145deg,#0e1a26,#0a121c)}
+.nightwatch-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:16px}.nightwatch-metrics article{padding:15px;border:1px solid #1d3849;border-radius:11px;background:linear-gradient(145deg,#0e1a26,#0a121c)}
 .nightwatch-metrics article span{display:block;color:#6e92a5;font:800 9px Consolas,monospace;letter-spacing:1px}.nightwatch-metrics strong{display:block;margin:9px 0 3px;color:#eafaff;font:700 clamp(23px,2.1vw,31px) Consolas,monospace}.nightwatch-metrics article:nth-child(2) strong{color:var(--green)}.nightwatch-metrics article:nth-child(3) strong{color:var(--amber)}.nightwatch-metrics small{color:#607b8d;font-size:10px}
 .nightwatch-panel{margin-bottom:16px;padding:clamp(16px,2.4vw,26px);border:1px solid #1d3849;border-radius:14px;background:linear-gradient(145deg,#0e1824,#09121b);box-shadow:0 12px 36px #0005}
 .nw-panel-head{display:flex;justify-content:space-between;gap:15px;margin-bottom:16px}.nw-panel-head h2{margin:7px 0 5px;color:#d9f7ff;letter-spacing:1.5px}.nw-panel-head p{margin:0;color:#7893a5;font-size:12px}.nw-panel-head>b{color:#65b6c8;font:9px Consolas,monospace;letter-spacing:1px}
@@ -2151,7 +2151,7 @@ th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hov
 .fw-policy-banner{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;padding:14px 16px;margin:14px 0;border:1px solid #176448;border-radius:9px;background:#08251d;color:#c8ffdf}
 .fw-policy-banner strong{font:800 11px Consolas,monospace;color:#00ff9c;letter-spacing:1px}
 .fw-policy-banner span,.fw-footnote,.fw-message{font-size:11px;color:#8ca7b5}
-.fw-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px}
+.fw-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px}
 .fw-metrics article,.fw-profiles article{padding:13px;border:1px solid #203b4a;border-radius:9px;background:#0a1721}
 .fw-metrics article span{display:block;color:#7192a2;font:800 9px Consolas,monospace}
 .fw-metrics article strong{display:block;margin-top:7px;color:#e7f7fc;font:700 22px Consolas,monospace}
@@ -2168,7 +2168,7 @@ th{background:#101d2a;color:#70a0b7}td{border-color:#1a2c3a;color:#c9d8e3}tr:hov
 .nw-inventory-status{margin:-5px 0 16px;padding:9px 12px;border:1px solid #20394a;border-radius:7px;background:#0a141e;color:#8da8b8;font:10px Consolas,monospace;letter-spacing:.35px}
 
 
-/* 12.7.0 — six-workspace dashboard shell */
+/* 15.10.0 — five-workspace dashboard shell */
 .nr-workspace-switcher{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin:0 0 18px;padding:10px;border:1px solid #1d3b4e;border-radius:14px;background:linear-gradient(145deg,#0c1723,#08111a);box-shadow:0 10px 30px #0004}
 .nr-workspace-tab{display:flex;align-items:flex-start;gap:10px;min-width:0;min-height:72px;padding:12px 11px;text-align:left;border:1px solid #20394b;border-radius:10px;background:#0c1a27;color:#dcebf4;box-shadow:none;cursor:pointer}
 .nr-workspace-tab:hover{border-color:#28748a;background:#102636}
