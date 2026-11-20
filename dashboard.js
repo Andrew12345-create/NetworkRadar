@@ -819,60 +819,6 @@ loadCommandCenter();setInterval(loadCommandCenter,10000);loadPhantomAccess();set
 
 /* NETWORK CONTROL ENGINE — router-mediated controls with explicit confirmation. */
 let ncStatusInFlight=false;let ncLastStatusAt=0;
-let loadTestPollTimer=null;
-const NETWORK_LOAD_PROFILES={
- Light:{duration:30,rate:1.5,streams:1,maxMB:32,description:"Light: 1.5 Mbps, 1 worker, 30 seconds, 32 MB maximum. A small background load."},
- Moderate:{duration:60,rate:8,streams:2,maxMB:128,description:"Moderate: 8 Mbps, 2 workers, 60 seconds, 128 MB maximum."},
- High:{duration:120,rate:35,streams:4,maxMB:512,description:"High: 35 Mbps, 4 workers, 120 seconds, 512 MB maximum. A substantial shared-WAN load."},
- Extreme:{duration:180,rate:75,streams:8,maxMB:1024,description:"Extreme: 75 Mbps, 8 workers, 180 seconds, up to 1,024 MB. This can heavily saturate a slower shared internet connection."},
- Custom:{duration:60,rate:10,streams:2,maxMB:128,description:"Custom: set your own duration, bandwidth ceiling, workers and total data allowance within the hard safety limits."}
-};
-function applyNetworkLoadProfile(){
- const name=$("nltProfile")?.value||"Moderate",p=NETWORK_LOAD_PROFILES[name]||NETWORK_LOAD_PROFILES.Custom;
- if($("nltDuration"))$("nltDuration").value=p.duration;
- if($("nltRate"))$("nltRate").value=p.rate;
- if($("nltStreams"))$("nltStreams").value=p.streams;
- if($("nltMaxMB"))$("nltMaxMB").value=p.maxMB;
- if($("nltProfileDescription"))$("nltProfileDescription").textContent=p.description;
-}
-function setNetworkLoadCustom(){
- const profile=$("nltProfile");if(profile&&profile.value!=="Custom")profile.value="Custom";
- if($("nltProfileDescription"))$("nltProfileDescription").textContent=NETWORK_LOAD_PROFILES.Custom.description;
-}
-async function startNetworkLoadTest(){
- const endpoint=$("nltEndpoint")?.value.trim()||"",profile=$("nltProfile")?.value||"Custom";
- const duration_seconds=Number($("nltDuration")?.value||60),aggregate_mbps=Number($("nltRate")?.value||10);
- const streams=Number($("nltStreams")?.value||2),max_total_mb=Number($("nltMaxMB")?.value||128);
- if(!endpoint){ncOutput("Enter the HTTPS download URL of a test endpoint you own or are authorised to use.",true);return;}
- if(!Number.isInteger(duration_seconds)||duration_seconds<5||duration_seconds>180){ncOutput("Duration must be a whole number from 5 to 180 seconds.",true);return;}
- if(!Number.isFinite(aggregate_mbps)||aggregate_mbps<0.5||aggregate_mbps>100){ncOutput("Bandwidth cap must be between 0.5 and 100 Mbps.",true);return;}
- if(!Number.isInteger(streams)||streams<1||streams>8){ncOutput("Parallel workers must be a whole number from 1 to 8.",true);return;}
- if(!Number.isInteger(max_total_mb)||max_total_mb<16||max_total_mb>1024){ncOutput("Data allowance must be a whole number from 16 to 1,024 MB.",true);return;}
- const dataGB=(max_total_mb/1024).toFixed(2);
- const confirmText="NETWORKRADAR WAN STRESS TEST\n\nProfile: "+profile+"\nBandwidth ceiling: "+aggregate_mbps+" Mbps\nParallel workers: "+streams+"\nDuration: "+duration_seconds+" seconds\nMaximum data: "+max_total_mb+" MB ("+dataGB+" GB)\n\nThis downloads from the selected external endpoint and can slow every device sharing this internet connection. Only continue if you control this network and are authorised to use the endpoint. The engine enforces the duration, rate and data caps and can be stopped at any time.\n\nStart this test?";
- if(!confirm(confirmText))return;
- try{
-  const result=await ncPost("/api/load-test/start",{endpoint,duration_seconds,aggregate_mbps,streams,max_total_mb,profile,external_ack:true,confirm:true});
-  const out=$("nltStatus");if(out)out.textContent="STARTING · "+result.job_id+" · "+profile;
-  pollNetworkLoadTest();
- }catch(error){const out=$("nltStatus");if(out)out.textContent=error.message;}
-}
-async function stopNetworkLoadTest(){
- try{const result=await ncPost("/api/load-test/stop",{confirm:true});const out=$("nltStatus");if(out)out.textContent=result.message||result.state||"Stop requested.";pollNetworkLoadTest();}
- catch(error){const out=$("nltStatus");if(out)out.textContent=error.message;}
-}
-async function pollNetworkLoadTest(){
- try{
-  const data=await getJSON("/api/load-test/status",5000),out=$("nltStatus"),metrics=$("nltMetrics");
-  const maxMB=Number(data.max_total_mb||0),received=Number(data.bytes_received||0),progress=Number(data.progress_percent||0);
-  if(out)out.textContent=[data.state||"IDLE",data.error||"",data.job_id?"Profile "+(data.profile||"Custom")+" · "+(data.endpoint_host||"—")+" · "+data.aggregate_mbps+" Mbps ceiling · "+data.duration_seconds+"s":"",data.state==="FAILED"?"Check that your authorised HTTPS endpoint returns a successful downloadable response.":"",data.state==="COMPLETED"?"Configured time/data limit reached.":""].filter(Boolean).join("\n");
-  if(metrics)metrics.textContent=["Received: "+(received/1048576).toFixed(2)+" MB"+(maxMB?" / "+maxMB+" MB":""),"Observed average: "+(data.throughput_mbps==null?"—":data.throughput_mbps+" Mbps"),"Workers: "+(data.streams||0),"Profile: "+(data.profile||"—"),"Elapsed: "+(data.elapsed_seconds||0)+"s","Engine: "+(data.available?"READY":"UNAVAILABLE")].join(" · ");
-  const bar=$("nltProgress");if(bar)bar.value=progress;
-  const label=$("nltProgressLabel");if(label)label.textContent=progress.toFixed(1)+"%";
-  if(["STARTING","RUNNING","STOPPING"].includes(data.state)){if(loadTestPollTimer)clearTimeout(loadTestPollTimer);loadTestPollTimer=setTimeout(pollNetworkLoadTest,1000);}
-  else if(loadTestPollTimer){clearTimeout(loadTestPollTimer);loadTestPollTimer=null;}
- }catch(error){const out=$("nltStatus");if(out)out.textContent="Status unavailable: "+error.message;}
-}
 function renderNetworkControlDeviceOptions(devices){const select=$("ncDeviceSelect");if(!select)return;const current=select.value;const online=(Array.isArray(devices)?devices:[]).filter(x=>String(x.status||"").toUpperCase()==="ONLINE"&&x.ip);const options=online.map(x=>{const label=[x.hostname||x.device_name||x.device_type||"Unknown device",x.ip].filter(Boolean).join(" · ");return '<option value="'+esc(x.ip)+'">'+esc(label)+'</option>';}).join("");select.innerHTML='<option value="">Select an online device…</option>'+options;if(online.some(x=>x.ip===current))select.value=current;}
 function ncOutput(value,isError){const box=$("ncControlOutput");if(box)box.textContent=typeof value==="string"?value:JSON.stringify(value,null,2);if(isError&&$("ncRouterStatus"))$("ncRouterStatus").textContent=String(value);}
 async function ncPost(path,payload){const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});let data={};try{data=await response.json();}catch(_){}if(!response.ok){const error=new Error(data.error||("HTTP "+response.status));error.payload=data;error.status=response.status;throw error;}return data;}
