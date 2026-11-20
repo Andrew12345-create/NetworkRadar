@@ -477,17 +477,13 @@ function syncNavigationButton(){
   {id:'network',label:'Network Activity',desc:'Network workspaces, profiles, DNS, DHCP, ARP, behaviour and change history.'},
   {id:'control',label:'Network Control',desc:'Router-enforced bandwidth limits, timed device pauses and network-wide internet control.'},
   {id:'security',label:'Security & Investigations',desc:'Firewall visibility, alerts, configuration audit, threat hunts and exposure.'},
-  {id:'management',label:'Remote Management',desc:'Explicitly authorised endpoint access, SSH and enrolled-agent operations.'},
-  {id:'intelligence',label:'Intelligence & Reports',desc:'Local intelligence assistant, recent events and report generation.'}
  ];
  const groups=Object.fromEntries(definitions.map(x=>[x.id,[]]));
  const overviewIds=new Set(['top','topology','activity','cmd']);
- const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','ipv6']);
+ const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','ipv6','phantomAccess','commandCenter']);
  const networkIds=new Set(['networkWorkspaces','profiles','dns','dhcp','arp','behaviour','changes']);
  const controlIds=new Set(['networkControl']);
- const securityIds=new Set(['firewall','investigations','alerts','config','hunt','exposure']);
- const managementIds=new Set(['phantomAccess','commandCenter']);
- const intelligenceIds=new Set(['assistant','reports']);
+ const securityIds=new Set(['firewall','investigations','alerts','config','hunt','exposure','assistant','reports']);
  function classify(node){
   const id=node.id||'';
   if(overviewIds.has(id)||node.classList.contains('nightwatch-metrics')||node.classList.contains('nw-inventory-status')||node.querySelector('#jobPhase,#online,#engines'))return 'command';
@@ -495,8 +491,7 @@ function syncNavigationButton(){
   if(networkIds.has(id))return 'network';
    if(controlIds.has(id))return 'control';
   if(securityIds.has(id))return 'security';
-  if(managementIds.has(id))return 'management';
-  if(intelligenceIds.has(id)||node.querySelector('#eventRows'))return 'intelligence';
+  if(node.querySelector('#eventRows'))return 'security';
   return 'command';
  }
  const original=[...main.children];
