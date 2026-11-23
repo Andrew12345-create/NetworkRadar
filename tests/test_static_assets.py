@@ -60,6 +60,16 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertTrue(html.is_file())
         self.assertGreater(html.stat().st_size, 10000)
 
+    def test_dashboard_javascript_static_element_references_exist(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+        html_ids = set(re.findall(r"""\\bid=["']([^"']+)["']""", html))
+        referenced_ids = set(re.findall(r"""\\$\\(["']([^"']+)["']\\)""", js))
+        self.assertFalse(
+            referenced_ids - html_ids,
+            "Dashboard JavaScript references missing static HTML IDs",
+        )
+
     def test_server_has_routes_for_both_assets(self):
         source = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
         self.assertIn('p.path == "/assets/networkradar.css"', source)
