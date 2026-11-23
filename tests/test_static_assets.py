@@ -67,6 +67,16 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn("'domainIntelligence'", js)
         self.assertIn("'fullPortIntelligence'", js)
 
+    def test_deep_fingerprint_requires_fresh_authorised_subnet_scope(self):
+        server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
+        start = server.index("def deep_fingerprint(")
+        end = server.index("\ndef ", start + 5)
+        body = server[start:end]
+        self.assertIn('network_context_snapshot(max_age_seconds=120)', body)
+        self.assertIn('not context.get("_context_fresh")', body)
+        self.assertIn('not context.get("authorized")', body)
+        self.assertIn('allowed_network=allowed_network', body)
+
     def test_identity_probes_require_fresh_authorised_subnet_targets(self):
         server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
         self.assertIn("def _is_authorized_device_target(ip):", server)
