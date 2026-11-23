@@ -2546,3 +2546,15 @@ pre,.terminal-output,#paTerminalOutput,#agentCommandOutput{background:#292720;co
 
 .scan-history li{background:#faf7f1;border:1px solid #e8e0d5;color:#6f675c}
 .scan-history li strong{color:#433d35}
+
+/* High-specificity legacy panels: keep device details readable on the light canvas. */
+#sideNavigation a.active,#sideNavigation a.active .nav-label{color:#49372d}
+#deviceModal .modalhead h2{color:#302d27}
+#deviceModal .modalcontent{color:#514a40}
+#deviceModal .profileitem .value{color:#39342d}
+#deviceModal .device-kpi strong{color:#a45f45}
+#deviceModal .device-table td{color:#514a40}
+#deviceModal .notice,#phantomAccess .notice,.notice{background:#fbf3e7;border:1px solid #edddc3;color:#926c38}
+.nr-tab-copy b{color:#433d35}
+.subscan-progress-target{color:#70675c}
+.scan-monitor[data-state="ERROR"] .scan-monitor-top strong{color:#b65055}
