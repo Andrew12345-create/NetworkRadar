@@ -2484,3 +2484,29 @@ pre,.terminal-output,#paTerminalOutput,#agentCommandOutput{background:#292720;co
 @media(prefers-reduced-motion:reduce){
  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* Command palette and evidence export controls */
+.nr-command-overlay{position:fixed;inset:0;z-index:130;display:grid;place-items:start center;padding:14vh 16px 24px;background:#30292070;backdrop-filter:blur(8px)}
+.nr-command-overlay[hidden]{display:none!important}
+.nr-command-dialog{width:min(600px,100%);max-height:72vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid #e4d9cb;border-radius:17px;background:#fffdf9;box-shadow:0 28px 100px #30292040;animation:nr-command-in .16s ease both}
+@keyframes nr-command-in{from{opacity:0;transform:translateY(-8px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+.nr-command-head{display:flex;align-items:center;gap:12px;padding:17px 19px;border-bottom:1px solid #eee7dc}
+.nr-command-mark{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:#332f29;color:#fff8ef;font-weight:900;font-size:12px}
+.nr-command-head h2{margin:0;color:#332f29;font:500 19px Georgia,serif}
+.nr-command-head p{margin:4px 0 0;color:#918577;font-size:10px}
+.nr-command-head>kbd,.nr-command-foot kbd,.nr-command-item kbd,.nr-command-trigger kbd{padding:3px 6px;border:1px solid #e5ddd1;border-radius:5px;background:#f5f0e8;color:#8c8174;font:9px Consolas,monospace}
+.nr-command-head>kbd{margin-left:auto}
+.nr-command-search{display:flex;align-items:center;gap:11px;padding:13px 18px;border-bottom:1px solid #eee7dc;color:#a76549;font-size:20px}
+.nr-command-search input{width:100%;padding:3px 0!important;border:0!important;outline:0!important;background:transparent!important;color:#332f29!important;font-size:13px!important}
+.nr-command-results{overflow:auto;padding:8px}
+.nr-command-group{padding:10px 10px 6px;color:#a09587;font:9px Consolas,monospace;letter-spacing:1px;text-transform:uppercase}
+.nr-command-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border:1px solid transparent;border-radius:8px;background:transparent;color:#514a40;box-shadow:none;text-align:left;font:12px "Segoe UI",Arial,sans-serif}
+.nr-command-item:hover,.nr-command-item.selected{border-color:#eadfd3;background:#f7f1e9;color:#95563e;box-shadow:none;transform:none}
+.nr-command-empty{padding:28px 12px;text-align:center;color:#918577;font-size:12px}
+.nr-command-foot{display:flex;align-items:center;gap:16px;padding:11px 16px;border-top:1px solid #eee7dc;color:#918577;font-size:9px}
+.nr-command-foot span{display:flex;align-items:center;gap:4px}
+.nr-command-trigger{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;font-size:9px;letter-spacing:.5px}
+.nr-command-trigger>span{font-size:16px}
+.nr-export-dossier{white-space:nowrap;font-size:9px;letter-spacing:.6px}
+@media(max-width:700px){.nr-command-overlay{padding:9vh 10px 16px}.nr-command-foot{justify-content:space-between;gap:6px}.nr-command-foot span{font-size:8px}.nr-command-trigger{padding:9px 10px}}
+@media(prefers-reduced-motion:reduce){.nr-command-dialog{animation:none}}
