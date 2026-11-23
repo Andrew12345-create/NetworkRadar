@@ -7279,6 +7279,7 @@ class Handler(BaseHTTPRequestHandler):
     @classmethod
     def _ssh_ws_send(cls, sock, payload):
         cls._ssh_ws_send_raw(sock, json.dumps(payload, ensure_ascii=False).encode("utf-8"), opcode=1)
+
     def do_GET(self):
         if not self._local_request_allowed():
             return self.send_json({"error": "Local access only."}, 403)
