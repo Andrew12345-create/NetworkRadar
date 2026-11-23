@@ -915,7 +915,7 @@ async function loadNetworkControlStatus(force){if(ncStatusInFlight||(!force&&Dat
  const layer=document.createElement("div");layer.id="nrCommandPalette";layer.className="nr-command-overlay";layer.hidden=true;
  layer.innerHTML='<section class="nr-command-dialog" role="dialog" aria-modal="true" aria-labelledby="nrCommandTitle"><header class="nr-command-head"><div class="nr-command-mark">NR</div><div><h2 id="nrCommandTitle">Quick command</h2><p>Search workspaces, investigations and actions</p></div><kbd>ESC</kbd></header><label class="nr-command-search"><span>⌕</span><input id="nrCommandInput" type="search" autocomplete="off" placeholder="What would you like to do?" aria-label="Search NetworkRadar commands"></label><div id="nrCommandResults" class="nr-command-results" role="listbox" aria-label="Commands"></div><footer class="nr-command-foot"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>1–5</kbd> Workspaces</span></footer></section>';
  document.body.appendChild(layer);
- const input=layer.querySelector("#nrCommandInput"),results=layer.querySelector("#nrCommandResults");let filtered=[],selected=0;
+ const input=layer.querySelector("#nrCommandInput"),results=layer.querySelector("#nrCommandResults");let filtered=[],selected=0,lastFocus=null;
  function render(){
   const q=input.value.trim().toLowerCase();filtered=actions.filter(a=>(a.label+" "+a.group+" "+a.terms).toLowerCase().includes(q));selected=Math.min(selected,Math.max(0,filtered.length-1));results.innerHTML="";
   if(!filtered.length){const empty=document.createElement("div");empty.className="nr-command-empty";empty.textContent="No matching commands.";results.appendChild(empty);return;}
@@ -928,8 +928,8 @@ async function loadNetworkControlStatus(force){if(ncStatusInFlight||(!force&&Dat
   });
  }
  function sync(){const items=[...results.querySelectorAll(".nr-command-item")];items.forEach((b,i)=>{b.classList.toggle("selected",i===selected);b.setAttribute("aria-selected",String(i===selected));});items[selected]?.scrollIntoView({block:"nearest"});}
- function close(){layer.hidden=true;document.body.classList.remove("nr-command-open");}
- function open(){layer.hidden=false;document.body.classList.add("nr-command-open");input.value="";selected=0;render();requestAnimationFrame(()=>input.focus());}
+ function close(){layer.hidden=true;document.body.classList.remove("nr-command-open");if(lastFocus?.focus)lastFocus.focus();}
+ function open(){lastFocus=document.activeElement;layer.hidden=false;document.body.classList.add("nr-command-open");input.value="";selected=0;render();requestAnimationFrame(()=>input.focus());}
  function execute(i){const item=filtered[i];if(!item)return;close();try{item.run();}catch(error){window.toast?.(error.message||String(error));}}
  input.addEventListener("input",()=>{selected=0;render();});
  input.addEventListener("keydown",e=>{
@@ -939,6 +939,7 @@ async function loadNetworkControlStatus(force){if(ncStatusInFlight||(!force&&Dat
   else if(e.key==="Escape"){e.preventDefault();close();}
  });
  layer.addEventListener("mousedown",e=>{if(e.target===layer)close();});
+ layer.addEventListener("keydown",e=>{if(e.key!=="Tab")return;const focusable=[...layer.querySelectorAll("input,button")].filter(x=>!x.disabled);if(!focusable.length)return;const first=focusable[0],last=focusable[focusable.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}});
  document.addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){
    e.preventDefault();layer.hidden?open():close();return;
