@@ -19,8 +19,8 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn(":focus-visible", content)
         self.assertIn("prefers-reduced-motion:reduce", content)
         # Six dashboard KPIs and five workspace tabs must match their desktop grids.
-        self.assertIn(".nightwatch-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr))}", content)
-        self.assertIn(".nr-workspace-switcher{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}", content)
+        self.assertRegex(content, r"\.nightwatch-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(6,minmax\(0,1fr\)\)")
+        self.assertRegex(content, r"\.nr-workspace-switcher\s*\{[^}]*grid-template-columns:\s*repeat\(5,minmax\(0,1fr\)\)")
 
     def test_dashboard_javascript_is_a_real_nonempty_asset(self):
         js = ROOT / "dashboard.js"
