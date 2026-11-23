@@ -8504,7 +8504,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def start_web():
     global WEB_PORT, WEB_URL
-    raw_port = os.environ.get("NETWORKRADAR_PORT", str(WEB_PORT)).strip()
+    raw_port = os.environ.get("NETWORKRADAR_PORT", "").strip() or str(WEB_PORT)
     try:
         port = int(raw_port)
         # 9.5.0: port 8766 is authoritative unless the operator explicitly opts in.
