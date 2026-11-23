@@ -168,19 +168,18 @@ def discover_mdns(
     try:
         duration = max(0.25, min(float(duration), 5.0))
         max_packets = max(1, min(int(max_packets), 512))
-        bind_ip = str(interface_ip or "0.0.0.0")
-        network = None
-        if allowed_network:
-            network = ipaddress.ip_network(str(allowed_network), strict=False)
-            if network.version != 4 or not network.is_private:
-                return []
-        if bind_ip != "0.0.0.0":
-            parsed = ipaddress.ip_address(bind_ip)
-            if parsed.version != 4 or not parsed.is_private:
-                return []
-            if network is not None and parsed not in network:
-                return []
-        elif network is not None:
+        bind_ip = str(interface_ip or "").strip()
+        if not bind_ip or not allowed_network:
+            return []
+        network = ipaddress.ip_network(str(allowed_network), strict=False)
+        parsed = ipaddress.ip_address(bind_ip)
+        if (
+            network.version != 4
+            or not network.is_private
+            or parsed.version != 4
+            or not parsed.is_private
+            or parsed not in network
+        ):
             return []
     except (TypeError, ValueError):
         return []
@@ -192,9 +191,8 @@ def discover_mdns(
     try:
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
-        if bind_ip != "0.0.0.0":
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
-                            socket.inet_aton(bind_ip))
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                        socket.inet_aton(bind_ip))
         sock.bind((bind_ip, 0))
         sock.settimeout(0.10)
         # A small, deterministic query set avoids flooding the LAN.
