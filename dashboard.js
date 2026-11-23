@@ -971,7 +971,7 @@ async function loadNetworkControlStatus(force){if(ncStatusInFlight||(!force&&Dat
   button.disabled=true;button.textContent="EXPORTING…";
   try{
    const payload=await window.getJSON("/api/device?ip="+encodeURIComponent(currentIP),15000);
-   const dossier={exported_at:new Date().toISOString(),application:document.querySelector("h1")?.textContent||"NetworkRadar",device:payload.device||null,identity_evidence:payload.identity_evidence||[],identity_assessments:payload.identity_assessments||[],identity_history:payload.identity_history||[],relationships:payload.relationships||[]};
+   const dossier={schema_version:1,exported_at:new Date().toISOString(),application:document.querySelector("h1")?.textContent||"NetworkRadar",export_scope:"single_device_dossier",...payload};
    const blob=new Blob([JSON.stringify(dossier,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");
    a.href=url;a.download="networkradar-device-"+currentIP.replace(/[^a-z0-9.-]/gi,"_")+"-dossier.json";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);window.toast?.("Device dossier exported.");
   }catch(error){window.toast?.("Dossier export failed: "+error.message);}
