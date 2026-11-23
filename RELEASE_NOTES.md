@@ -1,4 +1,4 @@
-# NetworkRadar 15.11.0
+# NetworkRadar 15.11.1
 
 ## 15.11.1 — Live-readiness polish
 - Adds a command-palette action to copy a concise health snapshot for support and pre-launch diagnostics.
