@@ -63,8 +63,8 @@ class DashboardAssetTests(unittest.TestCase):
     def test_dashboard_javascript_static_element_references_exist(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
-        html_ids = set(re.findall(r"""\\bid=["']([^"']+)["']""", html))
-        referenced_ids = set(re.findall(r"""\\$\\(["']([^"']+)["']\\)""", js))
+        html_ids = set(re.findall(r"""\bid=["']([^"']+)["']""", html))
+        referenced_ids = set(re.findall(r"""\$\(["']([^"']+)["']\)""", js))
         self.assertFalse(
             referenced_ids - html_ids,
             "Dashboard JavaScript references missing static HTML IDs",
