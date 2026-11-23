@@ -61,6 +61,16 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn("'domainIntelligence'", js)
         self.assertIn("'fullPortIntelligence'", js)
 
+    def test_identity_probes_require_fresh_authorised_subnet_targets(self):
+        server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
+        self.assertIn("def _is_authorized_device_target(ip):", server)
+        for name in ("tls_certificate_intelligence", "snmpv3_intelligence",
+                     "service_banner_intelligence", "netbios_name"):
+            start = server.index("def " + name + "(")
+            end = server.find("\\ndef ", start + 5)
+            body = server[start:end if end >= 0 else len(server)]
+            self.assertIn("_is_authorized_device_target(ip)", body, name)
+
     def test_active_multicast_scope_uses_an_atomic_authorisation_snapshot(self):
         server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
         start = server.index("def _selected_discovery_scope():")
