@@ -158,6 +158,7 @@ def discover_mdns(
     interface_ip: str = "",
     max_packets: int = 256,
     services: tuple[str, ...] = SERVICE_TYPES,
+    allowed_network: str = "",
 ) -> list[dict[str, Any]]:
     """Send rate-bounded DNS-SD browse questions and return per-source records.
 
@@ -168,10 +169,19 @@ def discover_mdns(
         duration = max(0.25, min(float(duration), 5.0))
         max_packets = max(1, min(int(max_packets), 512))
         bind_ip = str(interface_ip or "0.0.0.0")
+        network = None
+        if allowed_network:
+            network = ipaddress.ip_network(str(allowed_network), strict=False)
+            if network.version != 4 or not network.is_private:
+                return []
         if bind_ip != "0.0.0.0":
             parsed = ipaddress.ip_address(bind_ip)
             if parsed.version != 4 or not parsed.is_private:
                 return []
+            if network is not None and parsed not in network:
+                return []
+        elif network is not None:
+            return []
     except (TypeError, ValueError):
         return []
 
@@ -206,7 +216,11 @@ def discover_mdns(
             source_ip = address[0]
             try:
                 parsed_source = ipaddress.ip_address(source_ip)
-                if parsed_source.version != 4 or not parsed_source.is_private:
+                if (
+                    parsed_source.version != 4
+                    or not parsed_source.is_private
+                    or (network is not None and parsed_source not in network)
+                ):
                     continue
             except ValueError:
                 continue
