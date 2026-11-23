@@ -1,4 +1,4 @@
-# NetworkRadar 15.11.0
+# NetworkRadar 15.11.1
 
 ## 15.11.0 — Premium Nightwatch workspace
 - Replaces the high-contrast dark dashboard with a warm, low-glare visual system, refined typography, calmer information hierarchy and consistent responsive surfaces.
