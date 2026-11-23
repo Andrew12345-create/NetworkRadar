@@ -124,9 +124,10 @@ def score_evidence(
         if group == local_group:
             # A locally administered MAC is only a weak contextual signal;
             # even a fresh observation contributes no more than five points.
-            groups[local_group] = max(
-                groups.get(local_group, 0.0), min(adjusted, 0.05)
-            )
+            if adjusted > 0:
+                groups[local_group] = max(
+                    groups.get(local_group, 0.0), min(adjusted, 0.05)
+                )
             continue
         groups[group] = max(groups.get(group, 0.0), adjusted)
 
