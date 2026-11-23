@@ -7379,8 +7379,7 @@ class Handler(BaseHTTPRequestHandler):
                     for r in rows:
                         try: inv=json.loads(r[9] or "{}")
                         except Exception: inv={}
-                        out.append({"agent_id":r[0],"hostname":r[1],"platform":r[2],"o
-s_version":r[3],"agent_version":r[4],"status":r[5],"enrolled_at":r[6],"last_seen":r[7],"last_ip":r[8],"inventory":inv,"capabilities":json.loads(r[10] or "[]"),"revoked_at":r[11]})
+                        out.append({"agent_id":r[0],"hostname":r[1],"platform":r[2],"os_version":r[3],"agent_version":r[4],"status":r[5],"enrolled_at":r[6],"last_seen":r[7],"last_ip":r[8],"inventory":inv,"capabilities":json.loads(r[10] or "[]"),"revoked_at":r[11]})
                     return self.send_json(out)
                 if p.path == "/api/command/summary":
                     total=conn.execute("SELECT COUNT(*) FROM remote_agents WHERE status!='REVOKED'").fetchone()[0]
