@@ -499,8 +499,8 @@ function syncNavigationButton(){
  ];
  const groups=Object.fromEntries(definitions.map(x=>[x.id,[]]));
  const overviewIds=new Set(['top','topology','activity','cmd']);
- const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','ipv6','phantomAccess','commandCenter']);
- const networkIds=new Set(['networkWorkspaces','profiles','dns','dhcp','arp','behaviour','changes']);
+ const deviceIds=new Set(['devices','identity','continuity','candidates','unknownHunter','identitySubscan','ipv6','phantomAccess','commandCenter']);
+ const networkIds=new Set(['networkWorkspaces','profiles','dns','domainIntelligence','fullPortIntelligence','dhcp','arp','behaviour','changes']);
  const controlIds=new Set(['networkControl']);
  const securityIds=new Set(['firewall','investigations','alerts','config','hunt','exposure','assistant','reports']);
  function classify(node){
