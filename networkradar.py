@@ -6293,6 +6293,32 @@ def _agent_json_body(handler, maximum=65536):
     return raw, payload
 
 
+def _agent_ip_in_scope(client_ip, bind_ip=None):
+    """Require fresh approval and keep enrolled agents on the approved subnet.
+
+    Loopback is allowed only when the agent hub itself is bound to loopback or
+    an unspecified address; remote clients must be in the approved IPv4 subnet.
+    """
+    if not is_authorized():
+        return False
+    try:
+        client = ipaddress.ip_address(str(client_ip or "").strip())
+        configured_bind = bind_ip
+        if not configured_bind:
+            configured_bind = (
+                AGENT_HUB.server_address[0] if AGENT_HUB is not None
+                else os.environ.get("NETWORKRADAR_AGENT_BIND", "127.0.0.1")
+            )
+        if str(configured_bind).strip().lower() == "localhost":
+            configured_bind = "127.0.0.1"
+        bind = ipaddress.ip_address(str(configured_bind).strip())
+    except (TypeError, ValueError):
+        return False
+    if client.is_loopback and (bind.is_loopback or bind.is_unspecified):
+        return True
+    return _is_authorized_device_target(str(client))
+
+
 class AgentHubHandler(BaseHTTPRequestHandler):
     server_version = "NetworkRadar-AgentHub/12.3.0"
     def log_message(self, *args):
@@ -6306,8 +6332,8 @@ class AgentHubHandler(BaseHTTPRequestHandler):
         try:
             raw,payload=_agent_json_body(self)
             if self.path == "/agent/v1/enrol":
-                if not is_authorized():
-                    return self._reply({"error":"Endpoint enrolment is disabled until the current network is authorised."},403)
+                if not _agent_ip_in_scope(self.client_address[0], self.server.server_address[0]):
+                    return self._reply({"error":"Endpoint enrolment requires a fresh authorised network context and a client on the approved subnet."},403)
                 token=str(payload.get("token",""))
                 if len(token)<32 or len(token)>128: return self._reply({"error":"Invalid enrolment token."},401)
                 token_hash=_agent_hash(token); agent_id="nr-"+uuid.uuid4().hex[:20]
@@ -6331,6 +6357,8 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                 return self._reply({"agent_id":agent_id,"auth_key":agent_auth_key,
                     "message":"Enrolled. Store this per-agent key securely; it will not be shown again."},201)
             if self.path == "/agent/v1/report":
+                if not _agent_ip_in_scope(self.client_address[0], self.server.server_address[0]):
+                    return self._reply({"error":"Agent reports are accepted only from the currently approved subnet."},403)
                 agent_id=_verify_agent_request(self,raw)
                 inventory=payload.get("inventory",{})
                 if not isinstance(inventory,dict): return self._reply({"error":"inventory must be an object"},400)
@@ -6472,8 +6500,8 @@ class AgentHubHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             if self.path.startswith("/agent/v1/commands"):
-                if not is_authorized():
-                    return self._reply({"error":"Command delivery is disabled until the current network is authorised."},403)
+                if not _agent_ip_in_scope(self.client_address[0], self.server.server_address[0]):
+                    return self._reply({"error":"Command delivery requires a fresh authorised network context and an agent on the approved subnet."},403)
                 agent_id=_verify_agent_request(self,b"")
                 def _take(conn):
                     conn.execute("UPDATE agent_commands SET status='EXPIRED' WHERE agent_id=? AND status IN ('QUEUED','DELIVERED') AND expires_at<?",(agent_id,now_text()))
@@ -6575,8 +6603,11 @@ def queue_agent_command(agent_id, action, args=None, actor="local-user", confirm
             raise ValueError("Invalid or protected Windows service name.")
         clean_args={"service_name":name}
     def _w(conn):
-        row=conn.execute("SELECT status,capabilities_json FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
+        row=conn.execute("SELECT status,capabilities_json,last_ip FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
         if not row or row[0]=="REVOKED": raise ValueError("Agent not found or revoked.")
+        bind_ip = AGENT_HUB.server_address[0] if AGENT_HUB is not None else os.environ.get("NETWORKRADAR_AGENT_BIND", "127.0.0.1")
+        if not _agent_ip_in_scope(row[2], bind_ip):
+            raise ValueError("Agent is not currently reachable from the approved network scope.")
         try:
             capabilities=json.loads(row[1] or "[]")
         except (TypeError, ValueError):
