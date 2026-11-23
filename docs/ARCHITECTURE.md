@@ -1,6 +1,8 @@
-# NetworkRadar architecture — repository snapshot 15.10.0
+# NetworkRadar architecture — repository snapshot 15.11.0
 
-## Dashboard information architecture (15.10.0)
+## Dashboard information architecture (15.11.0)
+
+The dashboard uses a premium warm-light design system with responsive workspace surfaces, accessible focus states and reduced-motion support. A searchable command palette provides workspace navigation and operator shortcuts. The device dossier can be exported locally as JSON after explicit privacy confirmation.
 
 The dashboard presents five workspaces: Command Centre; Devices & Identity; Network Activity; Network Control; and Security & Investigations. Endpoint-agent and SSH management are grouped with Devices & Identity. The local intelligence assistant and reports are grouped with Security & Investigations. These are navigation groupings only: underlying modules, APIs, persisted records and safety gates remain unchanged.
 
