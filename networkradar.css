@@ -2510,3 +2510,7 @@ pre,.terminal-output,#paTerminalOutput,#agentCommandOutput{background:#292720;co
 .nr-export-dossier{white-space:nowrap;font-size:9px;letter-spacing:.6px}
 @media(max-width:700px){.nr-command-overlay{padding:9vh 10px 16px}.nr-command-foot{justify-content:space-between;gap:6px}.nr-command-foot span{font-size:8px}.nr-command-trigger{padding:9px 10px}}
 @media(prefers-reduced-motion:reduce){.nr-command-dialog{animation:none}}
+
+/* Keep the palette's semantic header independent of the fixed application header. */
+.nr-command-dialog>header.nr-command-head{position:static;top:auto;z-index:auto;min-height:0;margin:0;padding:17px 19px;background:transparent;box-shadow:none;backdrop-filter:none;transition:none}
+.nr-command-dialog>footer.nr-command-foot{margin:0;background:transparent;box-shadow:none}
