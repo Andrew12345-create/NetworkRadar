@@ -1,4 +1,24 @@
-# NetworkRadar 15.10.0
+# NetworkRadar 15.11.1
+
+## 15.11.0 — Premium Nightwatch workspace
+- Replaces the high-contrast dark dashboard with a warm, low-glare visual system, refined typography, calmer information hierarchy and consistent responsive surfaces.
+- Adds a searchable command palette with **Ctrl+K** (⌘K) and direct workspace shortcuts **Ctrl+Alt+1–5**.
+- Adds one-click JSON export of an individual device dossier, including identity evidence and assessment history, with a privacy confirmation before export.
+- Improves API diagnostics for network failures, malformed JSON and HTML fallback responses; prevents overlapping toast timers from hiding newer messages.
+- Retains local-only operation, explicit active-discovery authorisation, evidence-backed identity claims and strict network-control approvals.
+
+
+### Windows dashboard port troubleshooting
+
+NetworkRadar binds to the configured port (default **8766**) and does not silently move the dashboard to another port. A Windows **WSAEACCES / error 10013** does not necessarily mean another application is listening: Windows can reserve/exclude a TCP port range.
+
+- Inspect the IPv4 exclusions: `netsh interface ipv4 show excludedportrange protocol=tcp`
+- Inspect the IPv6 exclusions: `netsh interface ipv6 show excludedportrange protocol=tcp`
+- Check for a real listener: `Get-NetTCPConnection -LocalPort 8766 -State Listen`
+- Choose a different port explicitly in PowerShell: `$env:NETWORKRADAR_PORT = "8767"`, then launch `python networkradar.py`.
+- If you explicitly permit a fallback, launch `python networkradar.py --allow-alt-port`. NetworkRadar will report the actual selected port. It will not do this unless the flag is supplied.
+
+The startup binder attempts the requested port directly (avoiding a probe-then-bind race), closes partially-created server sockets after a failed bind, and reports excluded-range details when Windows makes them available.
 
 ## Bandwidth enforcement integrity (15.2.0)
 - Refreshes enabled RouterOS FastTrack rules immediately before each bandwidth-limit write; Simple Queues can be bypassed by FastTracked connections.

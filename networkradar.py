@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 15.10.0 — Core network discovery, device intelligence and safe network management.
+NetworkRadar 15.11.1 — Core network discovery, device intelligence and safe network management.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.

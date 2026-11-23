@@ -5,9 +5,29 @@ try{const c=$("connection");if(c){c.textContent="SCRIPT ACTIVE";c.className="pil
 window.addEventListener("error",e=>{try{const c=$("connection");if(c){c.textContent="SCRIPT ERROR";c.className="pill bad";}const u=$("updated");if(u)u.textContent="Dashboard error: "+(e.message||"unknown script error");}catch(_x){}});
 window.addEventListener("unhandledrejection",e=>{try{const u=$("updated");if(u)u.textContent="Dashboard request error: "+String(e.reason?.message||e.reason||"unknown");}catch(_x){}});
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-async function getJSON(p,timeoutMs=10000){const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),timeoutMs);try{const r=await fetch(p,{cache:"no-store",signal:ctl.signal});let data={};try{data=await r.json();}catch(_){}if(!r.ok)throw new Error(data.error||("HTTP "+r.status));return data;}catch(error){if(ctl.signal.aborted){const timeout=new Error("Timed out after "+Math.ceil(timeoutMs/1000)+" seconds requesting "+p+". The local API may be busy; the request was cancelled safely.");timeout.code="NR_REQUEST_TIMEOUT";throw timeout;}throw error;}finally{clearTimeout(timer);}}
+async function getJSON(p,timeoutMs=10000){
+ const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeoutMs);
+ try{
+  const r=await fetch(p,{cache:"no-store",credentials:"same-origin",headers:{Accept:"application/json"},signal:ctl.signal});
+  const type=(r.headers.get("content-type")||"").toLowerCase();let data={};
+  if(type.includes("application/json")){
+   try{data=await r.json();}catch(_){throw new Error("The local API returned malformed JSON for "+p+". Restart NetworkRadar and retry.");}
+  }else{
+   const body=(await r.text().catch(()=> "")).trim();let parsed=false;
+   if(body.startsWith("{")){try{data=JSON.parse(body);parsed=!!data&&typeof data==="object";}catch(_){}}
+   if(!r.ok)throw new Error(data.error||("HTTP "+r.status+" from the local API."));
+   if(!parsed)throw new Error("NetworkRadar returned a webpage instead of JSON for "+p+". The dashboard route may be unavailable; restart the local server.");
+  }
+  if(!r.ok)throw new Error(data.error||("HTTP "+r.status));
+  return data;
+ }catch(error){
+  if(ctl.signal.aborted){const timeout=new Error("Timed out after "+Math.ceil(timeoutMs/1000)+" seconds requesting "+p+". The local API may be busy; the request was cancelled safely.");timeout.code="NR_REQUEST_TIMEOUT";throw timeout;}
+  if(error instanceof TypeError)throw new Error("Could not reach the local NetworkRadar API. Confirm the application is running and try again.");
+  throw error;
+ }finally{clearTimeout(timer);}
+}
 function pill(el,text,state){el.textContent=text;el.className="pill"+(state==="bad"?" bad":state==="warn"?" warn":"");}
-function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";setTimeout(()=>t.style.display="none",3500);}
+let nrToastTimer=null;function toast(m){const t=$("toast");if(!t)return;t.textContent=String(m??"");t.setAttribute("role","status");t.setAttribute("aria-live","polite");t.style.display="block";if(nrToastTimer)clearTimeout(nrToastTimer);nrToastTimer=setTimeout(()=>{t.style.display="none";},3500);}
 let deviceCache=[];
 function filterDevices(){
  const q=($("deviceSearch")?.value||"").toLowerCase().trim();
@@ -859,7 +879,7 @@ let ncStatusInFlight=false;let ncLastStatusAt=0;
 function renderNetworkControlDeviceOptions(devices){const select=$("ncDeviceSelect");if(!select)return;const current=select.value;const online=(Array.isArray(devices)?devices:[]).filter(x=>String(x.status||"").toUpperCase()==="ONLINE"&&x.ip);const options=online.map(x=>{const label=[x.hostname||x.device_name||x.device_type||"Unknown device",x.ip].filter(Boolean).join(" · ");return '<option value="'+esc(x.ip)+'">'+esc(label)+'</option>';}).join("");select.innerHTML='<option value="">Select an online device…</option>'+options;if(online.some(x=>x.ip===current))select.value=current;}
 function ncOutput(value,isError){const box=$("ncControlOutput");if(box)box.textContent=typeof value==="string"?value:JSON.stringify(value,null,2);if(isError&&$("ncRouterStatus"))$("ncRouterStatus").textContent=String(value);}
 async function ncPost(path,payload){const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});let data={};try{data=await response.json();}catch(_){}if(!response.ok){const error=new Error(data.error||("HTTP "+response.status));error.payload=data;error.status=response.status;throw error;}return data;}
-async function discoverNetworkRouter(){const panel=$("ncRouterDiscovery");if(panel)panel.textContent="Identifying the active gateway using bounded read-only probes…";try{const data=await getJSON("/api/network-control/discover",9000);if(panel){const lines=["ROUTER: "+(data.vendor||"Unknown"),"GATEWAY: "+(data.host||"—"),"IDENTIFICATION: "+(data.status||"—")+" · confidence "+(data.confidence||"—"),"MODEL: "+(data.model||"Not established from available evidence"),"FIRMWARE: "+(data.firmware||"Not established"),"MANAGEMENT PORTS: "+((data.open_management_ports||[]).join(", ")||"No standard web port responded"),"CONTROL ADAPTERS: "+((data.control_adapter_candidates||[]).join("; ")||"No verified adapter candidate yet"),data.control_message||"", "Credentials sent: NO · Configuration changed: NO"];panel.textContent=lines.join("\\n");}if($("ncRouterHost")&&data.host)$("ncRouterHost").value=data.host;if($("ncRouterPort")&&data.open_management_ports?.length)$("ncRouterPort").value=data.open_management_ports.includes(443)?443:data.open_management_ports[0];ncOutput(data);}catch(error){if(panel)panel.textContent=error.message;ncOutput(error.message,true);}}
+async function discoverNetworkRouter(){const panel=$("ncRouterDiscovery");if(panel)panel.textContent="Identifying the active gateway using bounded read-only probes…";try{const data=await getJSON("/api/network-control/discover",9000);if(panel){const lines=["ROUTER: "+(data.vendor||"Unknown"),"GATEWAY: "+(data.host||"—"),"IDENTIFICATION: "+(data.status||"—")+" · confidence "+(data.confidence||"—"),"MODEL: "+(data.model||"Not established from available evidence"),"FIRMWARE: "+(data.firmware||"Not established"),"MANAGEMENT PORTS: "+((data.open_management_ports||[]).join(", ")||"No standard web port responded"),"CONTROL ADAPTERS: "+((data.control_adapter_candidates||[]).join("; ")||"No verified adapter candidate yet"),data.control_message||"", "Credentials sent: NO · Configuration changed: NO"];panel.textContent=lines.join("\n");}if($("ncRouterHost")&&data.host)$("ncRouterHost").value=data.host;if($("ncRouterPort")&&data.open_management_ports?.length)$("ncRouterPort").value=data.open_management_ports.includes(443)?443:data.open_management_ports[0];ncOutput(data);}catch(error){if(panel)panel.textContent=error.message;ncOutput(error.message,true);}}
 async function connectNetworkRouter(){const host=$("ncRouterHost")?.value.trim()||"",username=$("ncRouterUser")?.value.trim()||"",password=$("ncRouterPassword")?.value||"",port=Number($("ncRouterPort")?.value||443),ca_file=$("ncRouterCA")?.value.trim()||"";if(!host||!username||!password){ncOutput("Enter the router IPv4 address, dedicated REST username and password.",true);return;}if(!confirm("Connect to this router using verified HTTPS and perform read-only capability checks?"))return;if($("ncRouterStatus"))$("ncRouterStatus").textContent="Testing verified HTTPS connection…";try{const result=await ncPost("/api/network-control/connect",{provider:"mikrotik-routeros",host,username,password,port,ca_file,confirm:true});$("ncRouterPassword").value="";ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
 async function disconnectNetworkRouter(){try{const result=await ncPost("/api/network-control/disconnect",{confirm:true});ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
 function ncSelectedIP(){return $("ncDeviceSelect")?.value||"";}
@@ -877,3 +897,91 @@ async function resumeWholeNetwork(){if(!confirm("Resume internet access by remov
 async function restoreNetworkControl(){if(!confirm("EMERGENCY RESTORE: remove only NetworkRadar-managed pause entries, bandwidth queues and firewall rules from the connected router? Other router rules will be left untouched."))return;try{const result=await ncPost("/api/network-control/restore",{confirm:true});ncOutput(result);await loadNetworkControlStatus(true);}catch(error){ncOutput(error.message,true);}}
 function renderNetworkControlStatus(data){const badge=$("ncConnectionBadge"),status=$("ncRouterStatus");if(!data?.connected){if(badge){badge.textContent="DISCONNECTED";badge.className="pill warn";}if(status)status.textContent=data?.message||"No router connected. Router controls are inactive.";$("ncRouterIdentity").textContent="—";$("ncRouterModel").textContent="—";$("ncRouterIPv6").textContent="UNKNOWN";$("ncRouterFastTrack").textContent="UNKNOWN";$("ncActivePolicies").textContent="No active router policies loaded.";return;}if(badge){badge.textContent="ROUTER CONNECTED";badge.className="pill ok";}if(status)status.textContent="Connected to "+(data.identity||data.host)+" · "+data.host+" · HTTPS REST · credentials memory-only.";$("ncRouterIdentity").textContent=data.identity||data.host||"—";$("ncRouterModel").textContent=[data.model,data.version].filter(Boolean).join(" · ")||"—";$("ncRouterIPv6").textContent=data.ipv6_supported?"AVAILABLE":"NOT VERIFIED";$("ncRouterFastTrack").textContent=data.fasttrack_detected?("DETECTED · "+(data.fasttrack_rule_count||1)+" RULE(S) · LIMIT BLOCKED"):"NOT DETECTED";const lines=[];(data.active_ipv4_pauses||[]).forEach(x=>lines.push("IPv4 pause · "+(x.address||"—")+" · "+(x.timeout||"timer managed by router")));(data.active_ipv6_pauses||[]).forEach(x=>lines.push("IPv6 pause · "+(x.address||"—")+" · "+(x.timeout||"timer managed by router")));if(data.bandwidth_enforcement_status==="BLOCKED_BY_FASTTRACK")lines.push("ENFORCEMENT BLOCKED · FastTrack can bypass Simple Queues. Remove the affected traffic from FastTrack before applying a speed cap.");(data.bandwidth_queues||[]).forEach(x=>lines.push("Bandwidth · "+(x.target||"—")+" · "+(x.max_limit||"—")+" · rate "+(x.rate||"not reported")+" · bytes "+(x.bytes||"not reported")));$("ncActivePolicies").textContent=lines.join("\n")||"No active NetworkRadar-managed router policies.";}
 async function loadNetworkControlStatus(force){if(ncStatusInFlight||(!force&&Date.now()-ncLastStatusAt<15000))return;ncStatusInFlight=true;ncLastStatusAt=Date.now();try{const data=await getJSON("/api/network-control/status",12000);renderNetworkControlStatus(data);}catch(error){const status=$("ncRouterStatus");if(status)status.textContent="Router status unavailable: "+error.message;}finally{ncStatusInFlight=false;}}
+
+
+/* 15.11.0 — searchable command palette and evidence dossier export. */
+(()=>{
+ const nav=[["command","Command Centre"],["devices","Devices & Identity"],["network","Network Activity"],["control","Network Control"],["security","Security & Investigations"]];
+ const actions=[
+  ...nav.map(([id,label],i)=>({label,group:"Workspaces",terms:id+" workspace dashboard",hint:"Ctrl+Alt+"+(i+1),run:()=>window.activateNetworkRadarWorkspace?.(id,true)})),
+  {label:"Start a network scan",group:"Actions",terms:"scan discover devices refresh inventory",run:()=>window.scanNow?.()},
+  {label:"Refresh all intelligence",group:"Actions",terms:"refresh dashboard data status",run:()=>window.refreshAll?.(true)},
+  {label:"Copy quick health snapshot",group:"Diagnostics",terms:"copy clipboard support report status connection scan engine local diagnostics",run:async()=>{
+   const fields=[["Application",document.querySelector("h1")?.textContent],["Connection",$("connection")?.textContent],["Network",$("network")?.textContent],["Last update",$("updated")?.textContent],["Scan phase",$("jobPhase")?.textContent],["Scan detail",$("jobMessage")?.textContent],["Scan progress",$("jobPercent")?.textContent],["Network authorisation",$("netAuthz")?.textContent],["Network warning",$("networkWarning")?.textContent],["Discovery engine",$("nmapStatus")?.textContent],["DNS engine",$("dnsStatus")?.textContent],["DHCP engine",$("dhcpStatus")?.textContent],["ARP engine",$("arpStatus")?.textContent],["Devices online",$("online")?.textContent],["Historical devices",$("historical")?.textContent],["Open investigations",$("openInvestigations")?.textContent],["Network risk",$("networkRisk")?.textContent]];
+   const report=["NETWORKRADAR QUICK HEALTH SNAPSHOT", "Captured: "+new Date().toISOString(), ...fields.map(([label,value])=>label+": "+(String(value||"—").trim()||"—")), "", "Privacy: this snapshot contains local network status only; review it before sharing."].join("\n");
+   try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(report);}else{const box=document.createElement("textarea");box.value=report;box.style.position="fixed";box.style.opacity="0";document.body.appendChild(box);box.select();try{if(!document.execCommand("copy"))throw new Error("Clipboard access is unavailable.");}finally{box.remove();}}window.toast?.("Health snapshot copied. Review it before sharing.");}
+   catch(error){window.toast?.("Could not copy diagnostics: "+(error.message||String(error)));}
+  }},
+  {label:"Find a device",group:"Actions",terms:"search inventory ip mac hostname",run:()=>{window.activateNetworkRadarWorkspace?.("devices",true);$("deviceSearch")?.focus();}},
+  {label:"Open identity timeline",group:"Actions",terms:"identity evidence assessment history",run:()=>{window.activateNetworkRadarWorkspace?.("devices",true);$("identity")?.scrollIntoView({behavior:"smooth",block:"start"});}},
+  {label:"Run identity continuity",group:"Actions",terms:"phantom track mac continuity",run:()=>{window.activateNetworkRadarWorkspace?.("devices",true);window.runContinuity?.();}},
+  {label:"Update IEEE OUI database",group:"Actions",terms:"oui mac manufacturer registry",run:()=>{window.activateNetworkRadarWorkspace?.("devices",true);window.updateOUI?.();}},
+  {label:"Open unknown-device investigations",group:"Actions",terms:"unknown hunter investigation",run:()=>{window.activateNetworkRadarWorkspace?.("security",true);$("unknownHunter")?.scrollIntoView({behavior:"smooth",block:"center"});}}
+ ];
+ const layer=document.createElement("div");layer.id="nrCommandPalette";layer.className="nr-command-overlay";layer.hidden=true;
+ layer.innerHTML='<section class="nr-command-dialog" role="dialog" aria-modal="true" aria-labelledby="nrCommandTitle"><header class="nr-command-head"><div class="nr-command-mark">NR</div><div><h2 id="nrCommandTitle">Quick command</h2><p>Search workspaces, investigations and actions</p></div><kbd>ESC</kbd></header><label class="nr-command-search"><span>⌕</span><input id="nrCommandInput" type="search" autocomplete="off" placeholder="What would you like to do?" aria-label="Search NetworkRadar commands"></label><div id="nrCommandResults" class="nr-command-results" role="listbox" aria-label="Commands"></div><footer class="nr-command-foot"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>1–5</kbd> Workspaces</span></footer></section>';
+ document.body.appendChild(layer);
+ const input=layer.querySelector("#nrCommandInput"),results=layer.querySelector("#nrCommandResults");let filtered=[],selected=0,lastFocus=null;
+ function render(){
+  const q=input.value.trim().toLowerCase();filtered=actions.filter(a=>(a.label+" "+a.group+" "+a.terms).toLowerCase().includes(q));selected=Math.min(selected,Math.max(0,filtered.length-1));results.innerHTML="";
+  if(!filtered.length){const empty=document.createElement("div");empty.className="nr-command-empty";empty.textContent="No matching commands.";results.appendChild(empty);return;}
+  let group="";
+  filtered.forEach((item,index)=>{
+   if(item.group!==group){group=item.group;const label=document.createElement("div");label.className="nr-command-group";label.textContent=group;results.appendChild(label);}
+   const button=document.createElement("button");button.type="button";button.className="nr-command-item"+(index===selected?" selected":"");button.setAttribute("role","option");button.setAttribute("aria-selected",String(index===selected));
+   const name=document.createElement("span");name.textContent=item.label;const hint=document.createElement("kbd");hint.textContent=item.hint||"↵";button.append(name,hint);
+   button.addEventListener("mouseenter",()=>{selected=index;sync();});button.addEventListener("click",()=>execute(index));results.appendChild(button);
+  });
+ }
+ function sync(){const items=[...results.querySelectorAll(".nr-command-item")];items.forEach((b,i)=>{b.classList.toggle("selected",i===selected);b.setAttribute("aria-selected",String(i===selected));});items[selected]?.scrollIntoView({block:"nearest"});}
+ function close(){layer.hidden=true;document.body.classList.remove("nr-command-open");if(lastFocus?.focus)lastFocus.focus();}
+ function open(){lastFocus=document.activeElement;layer.hidden=false;document.body.classList.add("nr-command-open");input.value="";selected=0;render();requestAnimationFrame(()=>input.focus());}
+ function execute(i){const item=filtered[i];if(!item)return;close();try{item.run();}catch(error){window.toast?.(error.message||String(error));}}
+ input.addEventListener("input",()=>{selected=0;render();});
+ input.addEventListener("keydown",e=>{
+  if(e.key==="ArrowDown"){e.preventDefault();selected=Math.min(selected+1,filtered.length-1);sync();}
+  else if(e.key==="ArrowUp"){e.preventDefault();selected=Math.max(0,selected-1);sync();}
+  else if(e.key==="Enter"){e.preventDefault();execute(selected);}
+  else if(e.key==="Escape"){e.preventDefault();close();}
+ });
+ layer.addEventListener("mousedown",e=>{if(e.target===layer)close();});
+ layer.addEventListener("keydown",e=>{if(e.key!=="Tab")return;const focusable=[...layer.querySelectorAll("input,button")].filter(x=>!x.disabled);if(!focusable.length)return;const first=focusable[0],last=focusable[focusable.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}});
+ document.addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){
+   e.preventDefault();layer.hidden?open():close();return;
+  }
+  if(e.key==="Escape"&&!layer.hidden){close();return;}
+  if(e.ctrlKey&&e.altKey&&!e.metaKey&&!e.shiftKey&&/^[1-5]$/.test(e.key)){
+   e.preventDefault();window.activateNetworkRadarWorkspace?.(nav[Number(e.key)-1][0],true);
+  }
+ });
+ const actionsRoot=document.querySelector("header .actions");
+ if(actionsRoot){const trigger=document.createElement("button");trigger.type="button";trigger.id="nrCommandTrigger";trigger.className="secondary nr-command-trigger";trigger.innerHTML='<span>⌕</span> COMMANDS <kbd>Ctrl K</kbd>';trigger.addEventListener("click",open);actionsRoot.insertBefore(trigger,actionsRoot.querySelector("#scanButton")||null);}
+ window.NRCommandPalette={open,close};
+})();
+
+(()=>{
+ const modalHead=document.querySelector("#deviceModal .modalhead");
+ if(!modalHead||modalHead.dataset.exportReady==="1")return;
+ modalHead.dataset.exportReady="1";
+ const closeButton=modalHead.querySelector("button");
+ const button=document.createElement("button");button.type="button";button.className="secondary nr-export-dossier";button.textContent="EXPORT DOSSIER";button.title="Export the selected device's identity evidence and observations as JSON";
+ modalHead.insertBefore(button,closeButton||null);
+ let currentIP="";
+ const original=window.openDevice;
+ if(typeof original==="function"){
+  window.openDevice=async function(ip){currentIP=String(ip||"");button.disabled=!currentIP;button.textContent="EXPORT DOSSIER";return original.apply(this,arguments);};
+ }
+ button.addEventListener("click",async()=>{
+  if(!currentIP)return;
+  if(!window.confirm("Export the device dossier for "+currentIP+"? The file may contain private IP/MAC addresses, hostnames, endpoint inventory, service observations and security findings."))return;
+  button.disabled=true;button.textContent="EXPORTING…";
+  try{
+   const payload=await window.getJSON("/api/device?ip="+encodeURIComponent(currentIP),15000);
+   const dossier={schema_version:1,exported_at:new Date().toISOString(),application:document.querySelector("h1")?.textContent||"NetworkRadar",export_scope:"single_device_dossier",...payload};
+   const blob=new Blob([JSON.stringify(dossier,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");
+   a.href=url;a.download="networkradar-device-"+currentIP.replace(/[^a-z0-9.-]/gi,"_")+"-dossier.json";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);window.toast?.("Device dossier exported.");
+  }catch(error){window.toast?.("Dossier export failed: "+error.message);}
+  finally{button.disabled=false;button.textContent="EXPORT DOSSIER";}
+ });
+})();

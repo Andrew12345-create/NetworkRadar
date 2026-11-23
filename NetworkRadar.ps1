@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 <#
-NetworkRadar 15.10.0 launcher
+NetworkRadar 15.11.1 launcher
 - Runs the Python intelligence platform from this installation directory.
 - Does not require elevation; capture permissions may be needed for TShark.
 - Passes command-line options through to networkradar.py.
