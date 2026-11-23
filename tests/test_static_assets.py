@@ -66,7 +66,7 @@ class DashboardAssetTests(unittest.TestCase):
         start = server.index("def _selected_discovery_scope():")
         end = server.index("def discover_devices(", start)
         scope = server[start:end]
-        self.assertIn('if not NET_CTX.get("authorized"):', scope)
+        self.assertIn('if not context.get("_context_fresh") or not context.get("authorized"):', scope)
         self.assertNotIn("if not is_authorized():", scope)
 
     def test_firewall_poll_uses_cache_and_manual_refresh_forces_collection(self):
