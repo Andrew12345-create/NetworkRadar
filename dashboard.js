@@ -429,6 +429,7 @@ async function refreshAll(forceSecondary=false){
   return;
  }
  refreshInFlight=true;
+ void loadFirewallSnapshot(forceSecondary);
  const specs=[
   ["status","/api/status"],["devices","/api/devices"],["domains","/api/domains"],
   ["domainIntel","/api/domain-intelligence"],["fullPorts","/api/port-intelligence"],
@@ -484,7 +485,6 @@ async function refreshAll(forceSecondary=false){
    lastSecondaryRefreshAt=now;
    loadNetworkWorkspaces();loadProfiles();loadChanges();loadConfig();loadAlertStream();loadIdentityIntel();loadContinuity();loadCandidates();loadPhantomPanels();
   }
-  void loadFirewallSnapshot(forceSecondary);
   loadNetworkControlStatus();
  }catch(err){pill($("connection"),"DASHBOARD ERROR","bad");$("updated").textContent=err.message||String(err);}
  finally{
