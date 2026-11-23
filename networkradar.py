@@ -6384,6 +6384,8 @@ class AgentHubHandler(BaseHTTPRequestHandler):
                     return self._reply({"error":"Agent is revoked or no longer enrolled."},401)
                 return self._reply({"ok":True,"server_time":int(time.time())})
             if self.path == "/agent/v1/result":
+                if not _agent_ip_in_scope(self.client_address[0], self.server.server_address[0]):
+                    return self._reply({"error":"Agent command results are accepted only from the currently approved subnet."},403)
                 agent_id=_verify_agent_request(self,raw)
                 command_id=int(payload.get("command_id",0)); result=payload.get("result",{})
                 if not isinstance(result,dict): result={"error":"invalid result"}
