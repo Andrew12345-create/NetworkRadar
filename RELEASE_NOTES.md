@@ -6,7 +6,7 @@
 - Binds active SSDP multicast to the selected workspace adapter and rejects responses outside the approved subnet before fetching a device description.
 - Applies the same approved-subnet response filter to active mDNS browsing.
 - Requires a fresh authorised subnet snapshot for per-device TLS, SNMPv3, HTTP service-banner and NetBIOS probes; stale inventory addresses outside the current subnet are skipped.
-- Caches Windows Firewall inventory for 30 seconds so the dashboard's five-second polling interval does not launch a full PowerShell rule enumeration on every refresh. An explicit dashboard refresh bypasses the cache.
+- Caches Windows Firewall inventory for 30 seconds so the dashboard's five-second polling interval does not launch a full PowerShell rule enumeration on every refresh. Firewall collection now runs independently of the primary dashboard refresh, so a slow PowerShell call cannot hold up device and scan panels. An explicit dashboard refresh bypasses the cache.
 - Adds regression tests for the refresh queue, workspace grouping, multicast scope and firewall cache.
 
 ## Five-workspace product navigation
