@@ -291,6 +291,7 @@ async function renderNetworkWorkspace(networkId){
 }
 
 let refreshInFlight=false;
+let forceRefreshQueued=false;
 
 /* NIGHTWATCH live presentation: all values come from existing local APIs. */
 function nwSet(id,value){const el=$(id);if(el)el.textContent=value==null?"—":String(value);}
@@ -399,7 +400,11 @@ async function runFullPortScan(){
 const SECONDARY_REFRESH_INTERVAL_MS=15000;
 let lastSecondaryRefreshAt=0;
 async function refreshAll(forceSecondary=false){
- if(refreshInFlight)return;refreshInFlight=true;
+ if(refreshInFlight){
+  if(forceSecondary){forceRefreshQueued=true;const updated=$("updated");if(updated)updated.textContent="Manual refresh queued; the current dashboard refresh will finish first.";}
+  return;
+ }
+ refreshInFlight=true;
  const specs=[
   ["status","/api/status"],["devices","/api/devices"],["domains","/api/domains"],
   ["domainIntel","/api/domain-intelligence"],["fullPorts","/api/port-intelligence"],
@@ -459,7 +464,14 @@ async function refreshAll(forceSecondary=false){
   }
   loadNetworkControlStatus();
  }catch(err){pill($("connection"),"DASHBOARD ERROR","bad");$("updated").textContent=err.message||String(err);}
- finally{refreshInFlight=false;}
+ finally{
+  refreshInFlight=false;
+  if(forceRefreshQueued){
+   forceRefreshQueued=false;
+   // Start immediately so a second click cannot race this queued refresh.
+   void refreshAll(true);
+  }
+ }
 }
 loadHuntTemplates();refreshAll();setInterval(refreshAll,5000);
 // Searchable, collapsible navigation with deterministic desktop/mobile state.
