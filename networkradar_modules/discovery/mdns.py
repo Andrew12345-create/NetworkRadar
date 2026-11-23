@@ -162,8 +162,9 @@ def discover_mdns(
 ) -> list[dict[str, Any]]:
     """Send rate-bounded DNS-SD browse questions and return per-source records.
 
-    The optional interface_ip must be a literal local IPv4 address. The caller
-    should invoke this only after the application's network-approval check.
+    Both interface_ip and allowed_network are required. The selected local
+    IPv4 must belong to the approved private subnet; the caller should invoke
+    this only after the application's fresh network-approval check.
     """
     try:
         duration = max(0.25, min(float(duration), 5.0))
