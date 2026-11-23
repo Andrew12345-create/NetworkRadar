@@ -28,6 +28,10 @@ class FirewallDefaultPolicyTests(unittest.TestCase):
 
 
 class FirewallSnapshotTests(unittest.TestCase):
+    def setUp(self):
+        firewall._FIREWALL_CACHE_DATA = None
+        firewall._FIREWALL_CACHE_AT = 0.0
+
     @patch.object(firewall.platform, "system", return_value="Windows")
     @patch.object(firewall, "_run_powershell")
     def test_snapshot_batches_profile_and_rule_queries(self, run, _system):
@@ -53,6 +57,29 @@ class FirewallSnapshotTests(unittest.TestCase):
         self.assertEqual(result["profiles"][0]["name"], "Domain")
         self.assertEqual(result["rule_counts"]["enabled"], 250)
         self.assertIn("single PowerShell process", result["collected_by"])
+
+    @patch.object(firewall.platform, "system", return_value="Windows")
+    @patch.object(firewall, "_run_powershell")
+    def test_recent_snapshot_is_cached_and_force_refresh_bypasses_cache(self, run, _system):
+        payload = {
+            "profiles": [{"Name": "Private", "Enabled": True,
+                          "DefaultInboundAction": "Block",
+                          "DefaultOutboundAction": "Allow"}],
+            "rule_counts": {"total": 10, "enabled": 8, "inbound": 4,
+                            "outbound": 4, "block": 2, "allow": 6},
+        }
+        run.return_value = subprocess.CompletedProcess(
+            args=["powershell.exe"], returncode=0,
+            stdout=json.dumps(payload), stderr=""
+        )
+        first = firewall.get_firewall_snapshot()
+        cached = firewall.get_firewall_snapshot()
+        forced = firewall.get_firewall_snapshot(force=True)
+
+        self.assertFalse(first["cached"])
+        self.assertTrue(cached["cached"])
+        self.assertFalse(forced["cached"])
+        self.assertEqual(run.call_count, 2)
 
     @patch.object(firewall.platform, "system", return_value="Windows")
     @patch.object(firewall, "_run_powershell",
