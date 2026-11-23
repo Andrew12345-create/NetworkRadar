@@ -5,7 +5,7 @@
 - Queues an explicit dashboard refresh if a periodic refresh is already in progress, instead of silently discarding the operator's refresh request.
 - Binds active SSDP multicast to the selected workspace adapter and rejects responses outside the approved subnet before fetching a device description.
 - Applies the same approved-subnet response filter to active mDNS browsing.
-- Requires a fresh authorised subnet snapshot for per-device TLS, SNMPv3, HTTP service-banner and NetBIOS probes; stale inventory addresses outside the current subnet are skipped.
+- Requires fresh network-context approval for all active operations. Per-device reverse-DNS, NetBIOS, TLS, SNMPv3 and HTTP service-banner probes, deep Nmap fingerprinting, agentless management and endpoint-agent enrolment/report/command delivery are now restricted to the currently approved subnet (with loopback agent access retained only for a loopback/unspecified hub bind).
 - Applies evidence freshness decay to identity-conflict detection as well as scoring, so an obsolete hostname/client identifier cannot permanently block a current match. Malformed, NaN and infinite evidence strengths are treated as unusable rather than crashing the fusion pass.
 - Caches Windows Firewall inventory for 30 seconds so the dashboard's five-second polling interval does not launch a full PowerShell rule enumeration on every refresh. Firewall collection now runs independently of the primary dashboard refresh, so a slow PowerShell call cannot hold up device and scan panels. An explicit dashboard refresh bypasses the cache.
 - Adds regression tests for the refresh queue, workspace grouping, multicast scope and firewall cache.
