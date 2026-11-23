@@ -61,6 +61,12 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn("'domainIntelligence'", js)
         self.assertIn("'fullPortIntelligence'", js)
 
+    def test_firewall_poll_uses_cache_and_manual_refresh_forces_collection(self):
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+        server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
+        self.assertIn('forceSecondary?"/api/firewall?refresh=1":"/api/firewall"', js)
+        self.assertIn('force_refresh = "refresh=1" in p.query.split("&")', server)
+
     def test_manual_refresh_is_queued_when_refresh_is_in_flight(self):
         js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
         html = (ROOT / "index.html").read_text(encoding="utf-8")
@@ -69,6 +75,7 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn("if(forceRefreshQueued){", js)
         self.assertIn("void refreshAll(true);", js)
         self.assertIn('onclick="refreshAll(true)"', html)
+
     def test_dashboard_html_is_a_real_nonempty_asset(self):
         html = ROOT / "index.html"
         self.assertTrue(html.is_file())
