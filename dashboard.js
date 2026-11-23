@@ -396,7 +396,9 @@ async function runFullPortScan(){
  finally{button.disabled=false;}
 }
 
-async function refreshAll(){
+const SECONDARY_REFRESH_INTERVAL_MS=15000;
+let lastSecondaryRefreshAt=0;
+async function refreshAll(forceSecondary=false){
  if(refreshInFlight)return;refreshInFlight=true;
  const specs=[
   ["status","/api/status"],["devices","/api/devices"],["domains","/api/domains"],
@@ -450,7 +452,12 @@ async function refreshAll(){
   $("behaviourStatus").textContent=diag.behaviour?.message||"Behaviour diagnostics unavailable.";
   $("behaviourRows").innerHTML=((diag.behaviour?.baseline_devices||0)>0?'<tr><td colspan="5">See device detail for samples.</td></tr>':'<tr><td colspan="5">Collecting baselines.</td></tr>');
   $("investigationRows").innerHTML=inv.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.title)}</td><td>${esc(x.severity)}</td><td>${esc(x.status)}</td><td>${esc(x.evidence_count)}</td></tr>`).join("")||'<tr><td colspan="5">None.</td></tr>';
-  loadNetworkWorkspaces();loadProfiles();loadChanges();loadConfig();loadAlertStream();loadIdentityIntel();loadContinuity();loadCandidates();loadPhantomPanels();loadNetworkControlStatus();
+  const now=Date.now();
+  if(forceSecondary||now-lastSecondaryRefreshAt>=SECONDARY_REFRESH_INTERVAL_MS){
+   lastSecondaryRefreshAt=now;
+   loadNetworkWorkspaces();loadProfiles();loadChanges();loadConfig();loadAlertStream();loadIdentityIntel();loadContinuity();loadCandidates();loadPhantomPanels();
+  }
+  loadNetworkControlStatus();
  }catch(err){pill($("connection"),"DASHBOARD ERROR","bad");$("updated").textContent=err.message||String(err);}
  finally{refreshInFlight=false;}
 }
