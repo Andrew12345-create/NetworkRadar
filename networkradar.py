@@ -1852,6 +1852,8 @@ def _is_authorized_device_target(ip):
         return False
 
 def reverse_dns(ip):
+    if not _is_authorized_device_target(ip):
+        return ""
     scope = str(current_network() or "")
     return _IDENTITY_NAME_CACHE.get(
         "reverse_dns", ip, scope, lambda: _reverse_dns(ip)
