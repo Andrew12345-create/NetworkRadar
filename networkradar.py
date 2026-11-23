@@ -1848,21 +1848,40 @@ def netbios_name(ip):
 def _same_private_host(src_ip, url):
     return is_same_private_http_host(src_ip, url)
 
+def _selected_discovery_scope():
+    """Return the selected workspace's adapter IP and subnet, not the OS default route."""
+    with NET_LOCK:
+        return (
+            str(NET_CTX.get("ip") or "").strip(),
+            str(NET_CTX.get("network") or "").strip(),
+        )
+
 def ssdp_scan(timeout=2.0):
-    """Run SSDP M-SEARCH only on a currently authorised network."""
+    """Run SSDP M-SEARCH only on the selected, currently authorised network."""
     if not is_authorized():
         return {}
-    return _ssdp_scan(timeout=timeout, app_version=APP_VERSION)
+    interface_ip, allowed_network = _selected_discovery_scope()
+    if not interface_ip or not allowed_network:
+        return {}
+    return _ssdp_scan(
+        timeout=timeout,
+        app_version=APP_VERSION,
+        interface_ip=interface_ip,
+        allowed_network=allowed_network,
+    )
 
 def mdns_active_snapshot(duration=2.0):
-    """Perform a small authorised DNS-SD browse on the selected local IPv4."""
+    """Perform a bounded DNS-SD browse on the selected authorised adapter/subnet."""
     if not is_authorized():
         return []
+    interface_ip, allowed_network = _selected_discovery_scope()
+    if not interface_ip or not allowed_network:
+        return []
     try:
-        local = local_identity()
         return _discover_mdns(
             duration=duration,
-            interface_ip=str(local.get("ip", "") or ""),
+            interface_ip=interface_ip,
+            allowed_network=allowed_network,
         )
     except Exception:
         return []
