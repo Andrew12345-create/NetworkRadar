@@ -6,9 +6,12 @@ process-start delays that can outlive the dashboard's request budget.
 """
 from __future__ import annotations
 
+import copy
 import json
 import platform
 import subprocess
+import threading
+import time
 from typing import Any
 
 
@@ -32,8 +35,14 @@ def _run_powershell(command: str, timeout: int = 20) -> subprocess.CompletedProc
     )
 
 
-def get_firewall_snapshot() -> dict[str, Any]:
-    """Collect firewall profiles and rule counts in one read-only PowerShell call."""
+_FIREWALL_CACHE_LOCK = threading.RLock()
+_FIREWALL_CACHE_DATA: dict[str, Any] | None = None
+_FIREWALL_CACHE_AT = 0.0
+_FIREWALL_CACHE_TTL_SECONDS = 30.0
+
+
+def _collect_firewall_snapshot() -> dict[str, Any]:
+    """Collect one read-only Windows Defender Firewall snapshot."""
     if platform.system().lower() != "windows":
         return {
             "supported": False, "status": "UNSUPPORTED",
@@ -95,3 +104,34 @@ def get_firewall_snapshot() -> dict[str, Any]:
     except (OSError, ValueError, RuntimeError) as exc:
         result["message"] = str(exc)[:1200]
     return result
+
+
+def get_firewall_snapshot(*, force: bool = False) -> dict[str, Any]:
+    """Return a 30-second cached snapshot; manual refresh can request a new read.
+
+    The dashboard polls every five seconds. Without this cache, every poll
+    launches PowerShell and enumerates the full ActiveStore rule collection,
+    which can take up to the 20-second subprocess timeout and stall refreshes.
+    The lock also coalesces concurrent requests into one collection.
+    """
+    global _FIREWALL_CACHE_DATA, _FIREWALL_CACHE_AT
+    with _FIREWALL_CACHE_LOCK:
+        now = time.monotonic()
+        age = max(0.0, now - _FIREWALL_CACHE_AT)
+        if (
+            not force
+            and _FIREWALL_CACHE_DATA is not None
+            and age < _FIREWALL_CACHE_TTL_SECONDS
+        ):
+            result = copy.deepcopy(_FIREWALL_CACHE_DATA)
+            result["cached"] = True
+            result["cache_age_seconds"] = int(age)
+            return result
+
+        snapshot = _collect_firewall_snapshot()
+        _FIREWALL_CACHE_DATA = copy.deepcopy(snapshot)
+        _FIREWALL_CACHE_AT = time.monotonic()
+        result = copy.deepcopy(snapshot)
+        result["cached"] = False
+        result["cache_age_seconds"] = 0
+        return result
