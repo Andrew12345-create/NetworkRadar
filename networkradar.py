@@ -1849,14 +1849,14 @@ def _same_private_host(src_ip, url):
     return is_same_private_http_host(src_ip, url)
 
 def _selected_discovery_scope():
-    """Atomically return an authorised workspace's selected adapter and subnet."""
-    with NET_LOCK:
-        if not NET_CTX.get("authorized"):
-            return "", ""
-        return (
-            str(NET_CTX.get("ip") or "").strip(),
-            str(NET_CTX.get("network") or "").strip(),
-        )
+    """Return only a fresh, authorised workspace adapter/subnet snapshot."""
+    context = network_context_snapshot(max_age_seconds=120)
+    if not context.get("_context_fresh") or not context.get("authorized"):
+        return "", ""
+    return (
+        str(context.get("ip") or "").strip(),
+        str(context.get("network") or "").strip(),
+    )
 
 def ssdp_scan(timeout=2.0):
     """Run SSDP M-SEARCH only on the selected, currently authorised network."""
