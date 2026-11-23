@@ -429,7 +429,7 @@ async function refreshAll(){
   pill($("dnsStatus"),s.dns_status||"UNKNOWN",s.dns_status==="ONLINE"?"ok":"warn");pill($("dhcpStatus"),s.dhcp_status||"UNKNOWN",s.dhcp_status==="ONLINE"?"ok":"warn");pill($("arpStatus"),s.arp_status||"UNKNOWN",s.arp_status==="ONLINE"?"ok":"warn");
   const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"");$("dhcpClass").title=dhcp.reason||"No DHCP diagnostic detail returned.";
   $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";const quality=diag.scan_quality||{},coverage=quality.identity_coverage||{},identityCoverage=coverage.available===false?"—":((coverage.coverage_percent??"—")+"%");$("scanQuality").textContent=(quality.score??"—")+"/100 · "+(quality.band||"—")+" · Identity "+identityCoverage;
-  if(data.devices){deviceCache=d;filterDevices();renderNetworkControlDeviceOptions(d);}else{$("deviceRows").innerHTML='<tr><td colspan="7">Device API unavailable. Check server log and /api/devices.</td></tr>';}
+  if(data.devices){deviceCache=d;filterDevices();renderNetworkControlDeviceOptions(d);}else{$("deviceRows").innerHTML='<tr><td colspan="8">Device API unavailable. Check server log and /api/devices.</td></tr>';}
   $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||'<tr><td colspan="3">—</td></tr>';
   renderDomainIntelligence(data.domainIntel||{});
   renderFullPortHistory(Array.isArray(data.fullPorts)?data.fullPorts:[]);
