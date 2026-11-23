@@ -55,6 +55,14 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertNotIn("DASHBOARD_JS_BUNDLED", source)
         self.assertIn('(ROOT / "index.html").read_text(encoding="utf-8")', source)
 
+    def test_manual_refresh_is_queued_when_refresh_is_in_flight(self):
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("let forceRefreshQueued=false;", js)
+        self.assertIn("if(forceSecondary){forceRefreshQueued=true;", js)
+        self.assertIn("if(forceRefreshQueued){", js)
+        self.assertIn("void refreshAll(true);", js)
+        self.assertIn('onclick="refreshAll(true)"', html)
     def test_dashboard_html_is_a_real_nonempty_asset(self):
         html = ROOT / "index.html"
         self.assertTrue(html.is_file())
