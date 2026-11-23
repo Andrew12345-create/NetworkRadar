@@ -73,6 +73,53 @@ class MdnsPacketTests(unittest.TestCase):
         self.assertEqual(discover_mdns(interface_ip="8.8.8.8"), [])
         self.assertEqual(discover_mdns(interface_ip="not-an-ip"), [])
 
+    def test_discovery_discards_responder_outside_approved_subnet(self):
+        from unittest.mock import patch
+
+        question_name = "_ipp._tcp.local"
+        question = dns_name(question_name) + struct.pack("!HH", 12, 1)
+        answer = response_record(
+            question_name, 12, "Office Printer._ipp._tcp.local"
+        )
+        packet = struct.pack("!HHHHHH", 0, 0x8400, 1, 1, 0, 0) + question + answer
+
+        class FakeSocket:
+            def __init__(self):
+                self.responses = [(packet, ("10.0.0.20", 5353))]
+
+            def setsockopt(self, *_args):
+                pass
+
+            def bind(self, _address):
+                pass
+
+            def settimeout(self, _value):
+                pass
+
+            def sendto(self, *_args):
+                pass
+
+            def recvfrom(self, _limit):
+                if self.responses:
+                    return self.responses.pop(0)
+                raise __import__("socket").timeout()
+
+            def close(self):
+                pass
+
+        with (
+            patch("networkradar_modules.discovery.mdns.socket.socket",
+                  return_value=FakeSocket()),
+            patch("networkradar_modules.discovery.mdns.time.monotonic",
+                  side_effect=[0.0, 0.1, 1.0]),
+        ):
+            result = discover_mdns(
+                duration=0.25,
+                interface_ip="192.168.1.10",
+                allowed_network="192.168.1.0/24",
+            )
+        self.assertEqual(result, [])
+
     def test_discovery_rejects_interface_outside_approved_subnet(self):
         from unittest.mock import patch
         with patch("networkradar_modules.discovery.mdns.socket.socket") as socket_factory:
