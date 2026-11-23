@@ -1,5 +1,11 @@
 # NetworkRadar 15.11.0
 
+## 15.11.1 — Live-readiness polish
+- Adds a command-palette action to copy a concise health snapshot for support and pre-launch diagnostics.
+- Includes connection, network authorisation, scan progress, discovery/DNS/DHCP/ARP collector state, inventory counts and risk status.
+- Formats the snapshot as readable lines, cleans up the clipboard fallback element even when copying fails, and reminds operators to review local network details before sharing.
+- Refines command-palette focus, touch targets, scrolling and reduced-motion behaviour.
+
 ## 15.11.0 — Premium Nightwatch workspace
 - Refreshes the local dashboard with a warm, low-glare, responsive visual system and accessible focus/reduced-motion treatment.
 - Adds a searchable command palette (Ctrl+K / ⌘K), keyboard workspace navigation (Ctrl+Alt+1–5), and quick actions for scans, device search and identity workflows.
