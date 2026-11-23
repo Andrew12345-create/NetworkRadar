@@ -193,6 +193,8 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn('layer.querySelector("#nrCommandResults")', js)
         self.assertIn('Ctrl+Alt+', js)
         self.assertIn("window.NRCommandPalette={open,close}", js)
+        self.assertIn("lastFocus=null", js)
+        self.assertIn('layer.addEventListener("keydown"', js)
         self.assertIn("EXPORT DOSSIER", js)
         self.assertIn("schema_version:1", js)
         self.assertIn('window.confirm("Export the device dossier', js)
