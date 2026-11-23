@@ -1,4 +1,5 @@
 const $=id=>document.getElementById(id);
+const UNKNOWN_IDENTITY_CONFIDENCE_THRESHOLD=35;
 // Startup diagnostics: make a failed dashboard script/API visible instead of leaving skeletons.
 try{const c=$("connection");if(c){c.textContent="SCRIPT ACTIVE";c.className="pill warn";}}catch(_e){}
 window.addEventListener("error",e=>{try{const c=$("connection");if(c){c.textContent="SCRIPT ERROR";c.className="pill bad";}const u=$("updated");if(u)u.textContent="Dashboard error: "+(e.message||"unknown script error");}catch(_x){}});
@@ -14,7 +15,7 @@ function filterDevices(){
  const rows=deviceCache.filter(x=>{
   const b=[x.ip,x.device_name,x.manual_name,x.device_type,x.manufacturer,x.mac,x.hostname,x.model,x.os_guess,x.open_ports,x.service_summary].join(" ").toLowerCase();
   const confidence=Number(x.identification_confidence||0);
-  const unknown=confidence<35||/unclass|unidentified|unknown/i.test(String(x.device_type||""));
+  const unknown=confidence<UNKNOWN_IDENTITY_CONFIDENCE_THRESHOLD||/unclass|unidentified|unknown/i.test(String(x.device_type||""));
   const ok=st==="ALL"||(st==="ONLINE"&&x.status==="ONLINE")||(st==="OFFLINE"&&x.status==="OFFLINE")||(st==="TRUSTED"&&x.trust_state==="TRUSTED")||(st==="UNKNOWN"&&unknown)||(st==="HIGH_CONFIDENCE"&&confidence>=80);
   return ok&&(!q||b.includes(q));
  });
@@ -355,7 +356,7 @@ function renderNightwatch(s,n,d,dns,a,e,t){
  const online=d.filter(x=>statusOf(x)==="ONLINE").length;
  const offline=d.filter(x=>statusOf(x)==="OFFLINE").length;
  const other=d.length-online-offline;
- const unknown=d.filter(x=>/unknown|unclassified|unidentified/i.test(String(x.device_type||""))||Number(x.identification_confidence||0)<25).length;
+ const unknown=d.filter(x=>/unknown|unclassified|unidentified/i.test(String(x.device_type||""))||Number(x.identification_confidence||0)<UNKNOWN_IDENTITY_CONFIDENCE_THRESHOLD).length;
  nwSet("nwNetwork",n.network||s.network||"Network not identified");nwSet("nwGateway",n.gateway||"Not observed");nwSet("nwLastSync",new Date().toLocaleTimeString());
  nwSet("nwDevices",d.length);nwSet("nwOnline",online);nwSet("nwUnknown",unknown);nwSet("nwPorts",nwPortCount(d));nwSet("nwDns",dns.length);nwSet("nwAlerts",a.length);
  const statusNote=$("nwInventoryStatus");
