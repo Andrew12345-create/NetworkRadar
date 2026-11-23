@@ -64,10 +64,10 @@ class SsdpNetworkScopeTests(unittest.TestCase):
 
     def test_binds_multicast_to_selected_adapter_and_accepts_only_in_subnet(self):
         packet = (
-            b"HTTP/1.1 200 OK\\r\\n"
-            b"LOCATION: http://192.168.1.20:8000/device.xml\\r\\n"
-            b"SERVER: Example/1.0 UPnP/1.0\\r\\n"
-            b"\\r\\n"
+            b"HTTP/1.1 200 OK\r\n"
+            b"LOCATION: http://192.168.1.20:8000/device.xml\r\n"
+            b"SERVER: Example/1.0 UPnP/1.0\r\n"
+            b"\r\n"
         )
         xml = b"<root><device><friendlyName>Office Router</friendlyName></device></root>"
 
@@ -137,9 +137,9 @@ class SsdpNetworkScopeTests(unittest.TestCase):
 
     def test_discards_responder_outside_approved_subnet_before_fetch(self):
         packet = (
-            b"HTTP/1.1 200 OK\\r\\n"
-            b"LOCATION: http://10.0.0.20/device.xml\\r\\n"
-            b"\\r\\n"
+            b"HTTP/1.1 200 OK\r\n"
+            b"LOCATION: http://10.0.0.20/device.xml\r\n"
+            b"\r\n"
         )
 
         class FakeSocket:
