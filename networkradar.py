@@ -1849,8 +1849,10 @@ def _same_private_host(src_ip, url):
     return is_same_private_http_host(src_ip, url)
 
 def _selected_discovery_scope():
-    """Return the selected workspace's adapter IP and subnet, not the OS default route."""
+    """Atomically return an authorised workspace's selected adapter and subnet."""
     with NET_LOCK:
+        if not NET_CTX.get("authorized"):
+            return "", ""
         return (
             str(NET_CTX.get("ip") or "").strip(),
             str(NET_CTX.get("network") or "").strip(),
@@ -1858,8 +1860,6 @@ def _selected_discovery_scope():
 
 def ssdp_scan(timeout=2.0):
     """Run SSDP M-SEARCH only on the selected, currently authorised network."""
-    if not is_authorized():
-        return {}
     interface_ip, allowed_network = _selected_discovery_scope()
     if not interface_ip or not allowed_network:
         return {}
@@ -1872,8 +1872,6 @@ def ssdp_scan(timeout=2.0):
 
 def mdns_active_snapshot(duration=2.0):
     """Perform a bounded DNS-SD browse on the selected authorised adapter/subnet."""
-    if not is_authorized():
-        return []
     interface_ip, allowed_network = _selected_discovery_scope()
     if not interface_ip or not allowed_network:
         return []
