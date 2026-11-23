@@ -7252,7 +7252,8 @@ class Handler(BaseHTTPRequestHandler):
         if p.path == "/api/firewall":
             try:
                 from networkradar_modules.security.firewall import get_firewall_snapshot
-                return self.send_json(get_firewall_snapshot())
+                force_refresh = "refresh=1" in p.query.split("&")
+                return self.send_json(get_firewall_snapshot(force=force_refresh))
             except Exception as exc:
                 return self.send_json({"supported": True, "status": "DEGRADED",
                     "default_device_policy": "ALLOW", "automatic_blocking": False,
