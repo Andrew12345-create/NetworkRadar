@@ -325,7 +325,8 @@ function renderFirewall(f){
  const cards=[["ENABLED PROFILES",profiles.filter(x=>x.enabled).length+" / "+profiles.length],["ACTIVE RULES",counts.enabled??"—"],["INBOUND RULES",counts.inbound??"—"],["OUTBOUND RULES",counts.outbound??"—"],["BLOCK RULES",counts.block??"—"],["ALLOW RULES",counts.allow??"—"]];
  host.innerHTML='<div class="fw-metrics">'+cards.map(([k,v])=>'<article><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></article>').join('')+'</div>'+
   '<div class="fw-profiles">'+(profiles.map(p=>'<article><b>'+esc(p.name)+'</b><span class="'+(p.enabled?'fw-on':'fw-off')+'">'+(p.enabled?'ENABLED':'DISABLED')+'</span><small>Inbound: '+esc(p.default_inbound_action)+' · Outbound: '+esc(p.default_outbound_action)+'</small></article>').join('')||'<div class="nw-feed-empty">No Windows firewall profiles returned.</div>')+'</div>'+
-  '<p class="fw-message">'+esc(f.message||"Firewall status unavailable.")+'</p>';
+  const cacheNote=f.cached?" · cached "+(f.cache_age_seconds??0)+"s ago":"";
+  '<p class="fw-message">'+esc((f.message||"Firewall status unavailable.")+cacheNote)+'</p>';
 }
 function renderNightwatch(s,n,d,dns,a,e,t){
  const statusOf=x=>String(x.status||"UNKNOWN").toUpperCase();
@@ -411,7 +412,7 @@ async function refreshAll(forceSecondary=false){
   ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],["topology","/api/topology"],
   ["progress","/api/progress"],["investigations","/api/investigations"],
   ["network","/api/network"],["diagnostics","/api/diagnostics"],
-  ["engine","/api/engine_diagnostics"],["firewall","/api/firewall"],
+  ["engine","/api/engine_diagnostics"],["firewall",forceSecondary?"/api/firewall?refresh=1":"/api/firewall"],
   ["scanPerformance","/api/scan_performance"]
  ];
  try{
