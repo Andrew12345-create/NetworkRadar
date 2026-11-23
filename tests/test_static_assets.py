@@ -29,6 +29,8 @@ class DashboardAssetTests(unittest.TestCase):
         content = js.read_text(encoding="utf-8")
         self.assertIn('Device API unavailable. Check server log and /api/devices.</td></tr>', content)
         self.assertIn('colspan="8">Device API unavailable.', content)
+        self.assertIn("SECONDARY_REFRESH_INTERVAL_MS=15000", content)
+        self.assertIn("refreshAll(true)", (ROOT / "index.html").read_text(encoding="utf-8"))
 
     def test_html_references_both_external_assets(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
