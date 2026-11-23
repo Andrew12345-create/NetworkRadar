@@ -915,7 +915,7 @@ async function loadNetworkControlStatus(force){if(ncStatusInFlight||(!force&&Dat
  const layer=document.createElement("div");layer.id="nrCommandPalette";layer.className="nr-command-overlay";layer.hidden=true;
  layer.innerHTML='<section class="nr-command-dialog" role="dialog" aria-modal="true" aria-labelledby="nrCommandTitle"><header class="nr-command-head"><div class="nr-command-mark">NR</div><div><h2 id="nrCommandTitle">Quick command</h2><p>Search workspaces, investigations and actions</p></div><kbd>ESC</kbd></header><label class="nr-command-search"><span>⌕</span><input id="nrCommandInput" type="search" autocomplete="off" placeholder="What would you like to do?" aria-label="Search NetworkRadar commands"></label><div id="nrCommandResults" class="nr-command-results" role="listbox" aria-label="Commands"></div><footer class="nr-command-foot"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>1–5</kbd> Workspaces</span></footer></section>';
  document.body.appendChild(layer);
- const input=$("nrCommandInput"),results=$("nrCommandResults");let filtered=[],selected=0;
+ const input=layer.querySelector("#nrCommandInput"),results=layer.querySelector("#nrCommandResults");let filtered=[],selected=0;
  function render(){
   const q=input.value.trim().toLowerCase();filtered=actions.filter(a=>(a.label+" "+a.group+" "+a.terms).toLowerCase().includes(q));selected=Math.min(selected,Math.max(0,filtered.length-1));results.innerHTML="";
   if(!filtered.length){const empty=document.createElement("div");empty.className="nr-command-empty";empty.textContent="No matching commands.";results.appendChild(empty);return;}
