@@ -1,8 +1,12 @@
+import socket
 import unittest
 import urllib.error
 import urllib.request
+from unittest.mock import patch
 
+from networkradar_modules.discovery import probes
 from networkradar_modules.discovery.probes import (
+    ssdp_scan,
     _SameHostRedirectHandler,
     is_same_private_http_host,
     netbios_name,
@@ -50,6 +54,130 @@ class SsdpLocationValidationTests(unittest.TestCase):
                 request, None, 302, "Found", {},
                 "http://169.254.169.254/latest/meta-data/",
             )
+
+
+class SsdpNetworkScopeTests(unittest.TestCase):
+    def test_fails_closed_without_selected_interface_and_network(self):
+        with patch.object(probes.socket, "socket") as socket_factory:
+            self.assertEqual(ssdp_scan(), {})
+            socket_factory.assert_not_called()
+
+    def test_binds_multicast_to_selected_adapter_and_accepts_only_in_subnet(self):
+        packet = (
+            b"HTTP/1.1 200 OK\\r\\n"
+            b"LOCATION: http://192.168.1.20:8000/device.xml\\r\\n"
+            b"SERVER: Example/1.0 UPnP/1.0\\r\\n"
+            b"\\r\\n"
+        )
+        xml = b"<root><device><friendlyName>Office Router</friendlyName></device></root>"
+
+        class FakeSocket:
+            def __init__(self):
+                self.options = []
+                self.bound = None
+                self.sent = []
+                self.responses = [(packet, ("192.168.1.20", 1900))]
+
+            def setsockopt(self, *args):
+                self.options.append(args)
+
+            def bind(self, address):
+                self.bound = address
+
+            def settimeout(self, value):
+                self.timeout = value
+
+            def sendto(self, data, address):
+                self.sent.append((data, address))
+
+            def recvfrom(self, _limit):
+                if self.responses:
+                    return self.responses.pop(0)
+                raise socket.timeout()
+
+            def close(self):
+                self.closed = True
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return xml
+
+        class FakeOpener:
+            def open(self, _request, timeout):
+                self.timeout = timeout
+                return FakeResponse()
+
+        fake_socket = FakeSocket()
+        fake_opener = FakeOpener()
+        with (
+            patch.object(probes.socket, "socket", return_value=fake_socket),
+            patch.object(probes.urllib.request, "build_opener", return_value=fake_opener),
+            patch.object(probes.time, "monotonic", side_effect=[0.0, 0.1, 3.0]),
+        ):
+            result = ssdp_scan(
+                timeout=1,
+                interface_ip="192.168.1.10",
+                allowed_network="192.168.1.0/24",
+            )
+
+        self.assertEqual(result["192.168.1.20"]["friendlyname"], "Office Router")
+        self.assertEqual(fake_socket.bound, ("192.168.1.10", 0))
+        self.assertTrue(any(
+            option[1] == probes.socket.IP_MULTICAST_IF
+            and option[2] == probes.socket.inet_aton("192.168.1.10")
+            for option in fake_socket.options
+        ))
+        self.assertTrue(fake_socket.closed)
+
+    def test_discards_responder_outside_approved_subnet_before_fetch(self):
+        packet = (
+            b"HTTP/1.1 200 OK\\r\\n"
+            b"LOCATION: http://10.0.0.20/device.xml\\r\\n"
+            b"\\r\\n"
+        )
+
+        class FakeSocket:
+            def __init__(self):
+                self.responses = [(packet, ("10.0.0.20", 1900))]
+
+            def setsockopt(self, *_args):
+                pass
+
+            def bind(self, _address):
+                pass
+
+            def settimeout(self, _value):
+                pass
+
+            def sendto(self, *_args):
+                pass
+
+            def recvfrom(self, _limit):
+                if self.responses:
+                    return self.responses.pop(0)
+                raise socket.timeout()
+
+            def close(self):
+                pass
+
+        with (
+            patch.object(probes.socket, "socket", return_value=FakeSocket()),
+            patch.object(probes.urllib.request, "build_opener") as opener_factory,
+            patch.object(probes.time, "monotonic", side_effect=[0.0, 0.1, 3.0]),
+        ):
+            result = ssdp_scan(
+                timeout=1,
+                interface_ip="192.168.1.10",
+                allowed_network="192.168.1.0/24",
+            )
+        self.assertEqual(result, {})
+        opener_factory.assert_not_called()
 
 
 class NetbiosProbeTests(unittest.TestCase):
