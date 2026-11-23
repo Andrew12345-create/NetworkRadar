@@ -1,5 +1,13 @@
 # NetworkRadar 15.10.0
 
+## Post-release maintenance fixes
+- Corrects workspace placement for the continuous identity subscan, domain intelligence and full TCP port intelligence panels.
+- Queues an explicit dashboard refresh if a periodic refresh is already in progress, instead of silently discarding the operator's refresh request.
+- Binds active SSDP multicast to the selected workspace adapter and rejects responses outside the approved subnet before fetching a device description.
+- Applies the same approved-subnet response filter to active mDNS browsing.
+- Caches Windows Firewall inventory for 30 seconds so the dashboard's five-second polling interval does not launch a full PowerShell rule enumeration on every refresh. An explicit dashboard refresh bypasses the cache.
+- Adds regression tests for the refresh queue, workspace grouping, multicast scope and firewall cache.
+
 ## Five-workspace product navigation
 - Consolidates the dashboard from seven workspaces to five: Command Centre, Devices & Identity, Network Activity, Network Control, and Security & Investigations.
 - Moves Remote Management into Devices & Identity, keeping enrolled-agent and SSH operations alongside the devices they manage.
