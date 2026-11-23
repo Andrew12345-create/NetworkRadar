@@ -1,4 +1,12 @@
-# NetworkRadar 15.10.0
+# NetworkRadar 15.11.0
+
+## 15.11.0 — Premium Nightwatch workspace
+- Refreshes the local dashboard with a warm, low-glare, responsive visual system and accessible focus/reduced-motion treatment.
+- Adds a searchable command palette (Ctrl+K / ⌘K), keyboard workspace navigation (Ctrl+Alt+1–5), and quick actions for scans, device search and identity workflows.
+- Adds privacy-confirmed full JSON device-dossier export, retaining the server-provided identity evidence, assessment history and related observations.
+- Improves API error messages for network failures, malformed JSON and HTML fallback responses; fixes notification timer races.
+- Documents Windows TCP excluded-port diagnostics and safe, explicit port selection/fallback. No automatic router policy changes or database migration are introduced.
+
 
 ## Post-release maintenance fixes
 - Corrects workspace placement for the continuous identity subscan, domain intelligence and full TCP port intelligence panels.
