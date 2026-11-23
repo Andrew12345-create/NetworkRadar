@@ -136,6 +136,10 @@ class DashboardAssetTests(unittest.TestCase):
             "Dashboard JavaScript references missing static HTML IDs",
         )
 
+    def test_blank_networkradar_port_environment_uses_default_port(self):
+        server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
+        self.assertIn('os.environ.get("NETWORKRADAR_PORT", "").strip() or str(WEB_PORT)', server)
+
     def test_server_has_routes_for_both_assets(self):
         source = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
         self.assertIn('p.path == "/assets/networkradar.css"', source)
