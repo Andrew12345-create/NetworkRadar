@@ -292,6 +292,8 @@ async function renderNetworkWorkspace(networkId){
 
 let refreshInFlight=false;
 let forceRefreshQueued=false;
+let firewallRefreshInFlight=false;
+let firewallRefreshQueued=false;
 
 /* NIGHTWATCH live presentation: all values come from existing local APIs. */
 function nwSet(id,value){const el=$(id);if(el)el.textContent=value==null?"—":String(value);}
@@ -327,6 +329,26 @@ function renderFirewall(f){
  host.innerHTML='<div class="fw-metrics">'+cards.map(([k,v])=>'<article><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></article>').join('')+'</div>'+
   '<div class="fw-profiles">'+(profiles.map(p=>'<article><b>'+esc(p.name)+'</b><span class="'+(p.enabled?'fw-on':'fw-off')+'">'+(p.enabled?'ENABLED':'DISABLED')+'</span><small>Inbound: '+esc(p.default_inbound_action)+' · Outbound: '+esc(p.default_outbound_action)+'</small></article>').join('')||'<div class="nw-feed-empty">No Windows firewall profiles returned.</div>')+'</div>'+
   '<p class="fw-message">'+esc((f.message||"Firewall status unavailable.")+cacheNote)+'</p>';
+}
+async function loadFirewallSnapshot(force=false){
+ if(firewallRefreshInFlight){
+  if(force)firewallRefreshQueued=true;
+  return;
+ }
+ firewallRefreshInFlight=true;
+ try{
+  const snapshot=await getJSON(force?"/api/firewall?refresh=1":"/api/firewall",30000);
+  renderFirewall(snapshot||{});
+ }catch(err){
+  renderFirewall({status:"DEGRADED",profiles:[],rule_counts:{},
+   message:"Firewall refresh failed: "+String(err?.message||err||"request failed")});
+ }finally{
+  firewallRefreshInFlight=false;
+  if(firewallRefreshQueued){
+   firewallRefreshQueued=false;
+   void loadFirewallSnapshot(true);
+  }
+ }
 }
 function renderNightwatch(s,n,d,dns,a,e,t){
  const statusOf=x=>String(x.status||"UNKNOWN").toUpperCase();
@@ -412,14 +434,13 @@ async function refreshAll(forceSecondary=false){
   ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],["topology","/api/topology"],
   ["progress","/api/progress"],["investigations","/api/investigations"],
   ["network","/api/network"],["diagnostics","/api/diagnostics"],
-  ["engine","/api/engine_diagnostics"],["firewall",forceSecondary?"/api/firewall?refresh=1":"/api/firewall"],
-  ["scanPerformance","/api/scan_performance"]
+  ["engine","/api/engine_diagnostics"],["scanPerformance","/api/scan_performance"]
  ];
  try{
   const settled=await Promise.allSettled(specs.map(([name,path])=>getJSON(path,name==="firewall"?30000:10000)));
   const data={},failed=[];
   settled.forEach((r,i)=>{const name=specs[i][0];if(r.status==="fulfilled")data[name]=r.value;else{data[name]=null;failed.push(name+": "+String(r.reason?.message||r.reason||"request failed"));}});
-  const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{},fw=data.firewall||{},sp=data.scanPerformance||{};
+  const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{},sp=data.scanPerformance||{};
   const statusOK=!!data.status;
   const partial=failed.length>0||!!s.status_degraded;
   pill($("connection"),!statusOK?"API DEGRADED":(partial?"CONNECTED · PARTIAL":"CONNECTED"),!statusOK?"bad":(partial?"warn":"ok"));
@@ -445,7 +466,6 @@ async function refreshAll(forceSecondary=false){
   $("eventRows").innerHTML=e.map(x=>`<tr><td>${esc(x.timestamp)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.category)}</td><td>${esc(x.event_type)}</td><td>${esc(x.details)}</td></tr>`).join("")||'<tr><td colspan="5">—</td></tr>';
   renderIdentityTimeline(e);
   renderNightwatch(s,n,d,dnsRows,a,e,topology);
-  renderFirewall(fw);
   const perfSummary=$("scanPerformanceSummary"),perfRows=$("scanPhaseRows");
   if(perfSummary){
    perfSummary.textContent=sp.available
@@ -463,6 +483,7 @@ async function refreshAll(forceSecondary=false){
    lastSecondaryRefreshAt=now;
    loadNetworkWorkspaces();loadProfiles();loadChanges();loadConfig();loadAlertStream();loadIdentityIntel();loadContinuity();loadCandidates();loadPhantomPanels();
   }
+  void loadFirewallSnapshot(forceSecondary);
   loadNetworkControlStatus();
  }catch(err){pill($("connection"),"DASHBOARD ERROR","bad");$("updated").textContent=err.message||String(err);}
  finally{
