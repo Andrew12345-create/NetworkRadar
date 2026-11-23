@@ -67,7 +67,7 @@ class DashboardAssetTests(unittest.TestCase):
         for name in ("tls_certificate_intelligence", "snmpv3_intelligence",
                      "service_banner_intelligence", "netbios_name"):
             start = server.index("def " + name + "(")
-            end = server.find("\\ndef ", start + 5)
+            end = server.find("\ndef ", start + 5)
             body = server[start:end if end >= 0 else len(server)]
             self.assertIn("_is_authorized_device_target(ip)", body, name)
 
