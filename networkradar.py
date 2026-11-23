@@ -1833,6 +1833,24 @@ _IDENTITY_NAME_CACHE = IdentityLookupCache(
     positive_ttl=600.0, negative_ttl=60.0, max_entries=2048
 )
 
+def _is_authorized_device_target(ip):
+    """Require a fresh approval and a literal IPv4 target inside that subnet."""
+    context = network_context_snapshot(max_age_seconds=120)
+    if not context.get("_context_fresh") or not context.get("authorized"):
+        return False
+    try:
+        address = ipaddress.ip_address(str(ip or "").strip())
+        network = ipaddress.ip_network(str(context.get("network") or ""), strict=False)
+        return (
+            address.version == 4
+            and network.version == 4
+            and address.is_private
+            and network.is_private
+            and address in network
+        )
+    except (TypeError, ValueError):
+        return False
+
 def reverse_dns(ip):
     scope = str(current_network() or "")
     return _IDENTITY_NAME_CACHE.get(
@@ -1840,6 +1858,8 @@ def reverse_dns(ip):
     )
 
 def netbios_name(ip):
+    if not _is_authorized_device_target(ip):
+        return ""
     scope = str(current_network() or "")
     return _IDENTITY_NAME_CACHE.get(
         "netbios", ip, scope, lambda: _netbios_name(ip)
@@ -2735,7 +2755,7 @@ def persist_identity_assessments(conn, device, assessments, timestamp=None):
 
 def tls_certificate_intelligence(ip, ports, timeout=1.5):
     """Collect a TLS certificate only when the current network is authorised."""
-    if not is_authorized():
+    if not _is_authorized_device_target(ip):
         return []
     results = []
     for port in sorted(set(ports) & {443, 8443, 9443, 10443}):
@@ -2761,7 +2781,7 @@ def tls_certificate_intelligence(ip, ports, timeout=1.5):
 
 def snmpv3_intelligence(ip, timeout=2):
     """Read-only SNMPv3 query, gated by network approval and explicit credentials."""
-    if not is_authorized():
+    if not _is_authorized_device_target(ip):
         return {}
     exe = shutil.which("snmpget")
     user = os.environ.get("NETWORKRADAR_SNMPV3_USER", "").strip()
@@ -3049,7 +3069,7 @@ def identify_device(device, ssdp=None, deep=False):
 
 def service_banner_intelligence(ip, ports, timeout=1.5):
     """Collect low-impact service metadata only on an authorised network."""
-    if not is_authorized():
+    if not _is_authorized_device_target(ip):
         return []
     out = []
     http_ports = {80, 81, 443, 631, 3000, 5000, 5001, 7001, 8000, 8008,
