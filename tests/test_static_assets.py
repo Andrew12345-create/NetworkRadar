@@ -18,11 +18,17 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn("NETWORKRADAR 13.7.0", content)
         self.assertIn(":focus-visible", content)
         self.assertIn("prefers-reduced-motion:reduce", content)
+        # Six dashboard KPIs and five workspace tabs must match their desktop grids.
+        self.assertIn(".nightwatch-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr))}", content)
+        self.assertIn(".nr-workspace-switcher{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}", content)
 
     def test_dashboard_javascript_is_a_real_nonempty_asset(self):
         js = ROOT / "dashboard.js"
         self.assertTrue(js.is_file())
         self.assertGreater(js.stat().st_size, 10000)
+        content = js.read_text(encoding="utf-8")
+        self.assertIn('Device API unavailable. Check server log and /api/devices.</td></tr>', content)
+        self.assertIn('colspan="8">Device API unavailable.', content)
 
     def test_html_references_both_external_assets(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
