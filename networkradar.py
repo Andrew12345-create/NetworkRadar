@@ -6307,7 +6307,7 @@ def _agent_ip_in_scope(client_ip, bind_ip=None):
         if not configured_bind:
             configured_bind = (
                 AGENT_HUB.server_address[0] if AGENT_HUB is not None
-                else os.environ.get("NETWORKRADAR_AGENT_BIND", "127.0.0.1")
+                else (os.environ.get("NETWORKRADAR_AGENT_BIND", "").strip() or "127.0.0.1")
             )
         if str(configured_bind).strip().lower() == "localhost":
             configured_bind = "127.0.0.1"
@@ -6546,6 +6546,35 @@ def start_agent_hub_status():
     return {"state":"NOT_STARTED_OR_BLOCKED","reason":"Check TLS certificate/key configuration and startup logs."}
 
 
+def _agent_hub_bind_settings():
+    """Validate a private IPv4 listener; blank settings remain loopback-only."""
+    raw_bind = os.environ.get("NETWORKRADAR_AGENT_BIND", "").strip()
+    bind = raw_bind or "127.0.0.1"
+    if bind.lower() == "localhost":
+        bind = "127.0.0.1"
+    try:
+        address = ipaddress.ip_address(bind)
+    except ValueError as exc:
+        raise ValueError("Agent hub bind must be a literal IPv4 address.") from exc
+    if (
+        address.version != 4
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or not (address.is_private or address.is_loopback or address.is_unspecified)
+    ):
+        raise ValueError("Agent hub may bind only to loopback, a private LAN IPv4 address, or an explicitly configured 0.0.0.0.")
+
+    raw_port = os.environ.get("NETWORKRADAR_AGENT_PORT", "").strip()
+    try:
+        port = int(raw_port) if raw_port else 8767
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Agent hub port must be an integer from 1 to 65535.") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError("Agent hub port must be an integer from 1 to 65535.")
+    return str(address), port
+
+
 def start_agent_hub():
     global AGENT_HUB, AGENT_HUB_THREAD
     if not is_authorized():
@@ -6557,8 +6586,10 @@ def start_agent_hub():
     cert=os.environ.get("NETWORKRADAR_AGENT_CERT","").strip(); key=os.environ.get("NETWORKRADAR_AGENT_KEY","").strip()
     if not cert or not key or not Path(cert).is_file() or not Path(key).is_file():
         return {"state":"BLOCKED","reason":"TLS certificate and private key are required; agent hub was not started."}
-    bind=os.environ.get("NETWORKRADAR_AGENT_BIND","127.0.0.1").strip()
-    port=int(os.environ.get("NETWORKRADAR_AGENT_PORT","8767"))
+    try:
+        bind, port = _agent_hub_bind_settings()
+    except ValueError as exc:
+        return {"state":"FAILED","reason":_clean(exc,250)}
     class TLSServer(ThreadingHTTPServer):
         daemon_threads=True; allow_reuse_address=False
     server=None
@@ -6605,7 +6636,7 @@ def queue_agent_command(agent_id, action, args=None, actor="local-user", confirm
     def _w(conn):
         row=conn.execute("SELECT status,capabilities_json,last_ip FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
         if not row or row[0]=="REVOKED": raise ValueError("Agent not found or revoked.")
-        bind_ip = AGENT_HUB.server_address[0] if AGENT_HUB is not None else os.environ.get("NETWORKRADAR_AGENT_BIND", "127.0.0.1")
+        bind_ip = AGENT_HUB.server_address[0] if AGENT_HUB is not None else (os.environ.get("NETWORKRADAR_AGENT_BIND", "").strip() or "127.0.0.1")
         if not _agent_ip_in_scope(row[2], bind_ip):
             raise ValueError("Agent is not currently reachable from the approved network scope.")
         try:
