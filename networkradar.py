@@ -6536,12 +6536,24 @@ def queue_agent_command(agent_id, action, args=None, actor="local-user", confirm
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}",name) or name.lower() in _AGENT_CRITICAL_SERVICES:
             raise ValueError("Invalid or protected Windows service name.")
         clean_args={"service_name":name}
+    with DB_MANAGER.read() as conn:
+        initial = conn.execute(
+            "SELECT status,last_ip FROM remote_agents WHERE agent_id=?", (agent_id,)
+        ).fetchone()
+    if not initial or initial[0] == "REVOKED":
+        raise ValueError("Agent not found or revoked.")
+    bind_ip = (
+        AGENT_HUB.server_address[0] if AGENT_HUB is not None
+        else (os.environ.get("NETWORKRADAR_AGENT_BIND", "").strip() or "127.0.0.1")
+    )
+    if not _agent_ip_in_scope(initial[1], bind_ip):
+        raise ValueError("Agent is not currently reachable from the approved network scope.")
+
     def _w(conn):
         row=conn.execute("SELECT status,capabilities_json,last_ip FROM remote_agents WHERE agent_id=?",(agent_id,)).fetchone()
         if not row or row[0]=="REVOKED": raise ValueError("Agent not found or revoked.")
-        bind_ip = AGENT_HUB.server_address[0] if AGENT_HUB is not None else (os.environ.get("NETWORKRADAR_AGENT_BIND", "").strip() or "127.0.0.1")
-        if not _agent_ip_in_scope(row[2], bind_ip):
-            raise ValueError("Agent is not currently reachable from the approved network scope.")
+        if str(row[2] or "") != str(initial[1] or ""):
+            raise ValueError("Agent network address changed; refresh inventory and retry.")
         try:
             capabilities=json.loads(row[1] or "[]")
         except (TypeError, ValueError):
