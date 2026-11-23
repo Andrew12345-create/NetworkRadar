@@ -146,23 +146,67 @@ def netbios_name(
     return ""
 
 
-def ssdp_scan(timeout: float = 2.0, *, app_version: str = "12.0.3") -> dict:
+def ssdp_scan(
+    timeout: float = 2.0,
+    *,
+    app_version: str = "12.0.3",
+    interface_ip: str = "",
+    allowed_network: str = "",
+) -> dict:
+    """Discover UPnP devices only on the explicitly selected private subnet.
+
+    The caller must supply the selected adapter address and approved network.
+    Multicast is bound to that adapter, and responders outside that subnet are
+    discarded before any advertised description URL is fetched.
+    """
+    try:
+        local_ip = ipaddress.ip_address(str(interface_ip or "").strip())
+        network = ipaddress.ip_network(str(allowed_network or "").strip(), strict=False)
+        timeout = max(0.25, min(float(timeout), 5.0))
+        if (
+            local_ip.version != 4
+            or network.version != 4
+            or not local_ip.is_private
+            or not network.is_private
+            or local_ip not in network
+        ):
+            return {}
+    except (TypeError, ValueError, OverflowError):
+        return {}
+
     found = {}
     message = (
-        "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
-        'MAN: "ssdp:discover"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n'
+        "M-SEARCH * HTTP/1.1\\r\\nHOST: 239.255.255.250:1900\\r\\n"
+        'MAN: "ssdp:discover"\\r\\nMX: 2\\r\\nST: ssdp:all\\r\\n\\r\\n'
     ).encode()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.settimeout(0.25)
     try:
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
+        sock.setsockopt(
+            socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+            socket.inet_aton(str(local_ip)),
+        )
+        sock.bind((str(local_ip), 0))
+        sock.settimeout(0.25)
         sock.sendto(message, ("239.255.255.250", 1900))
-        deadline = time.monotonic() + max(0.0, float(timeout))
-        while time.monotonic() < deadline:
+        deadline = time.monotonic() + timeout
+        responses = 0
+        while time.monotonic() < deadline and responses < 64:
             try:
                 packet, address = sock.recvfrom(8192)
             except socket.timeout:
                 continue
-            ip = address[0]
+            except OSError:
+                break
+            responses += 1
+            try:
+                responder = ipaddress.ip_address(address[0])
+            except (ValueError, TypeError):
+                continue
+            if responder.version != 4 or responder not in network:
+                continue
+            ip = str(responder)
             headers = {}
             for line in packet.decode("utf-8", errors="replace").splitlines()[1:]:
                 if ":" in line:
