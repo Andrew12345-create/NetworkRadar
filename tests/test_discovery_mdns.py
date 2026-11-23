@@ -73,6 +73,18 @@ class MdnsPacketTests(unittest.TestCase):
         self.assertEqual(discover_mdns(interface_ip="8.8.8.8"), [])
         self.assertEqual(discover_mdns(interface_ip="not-an-ip"), [])
 
+    def test_discovery_rejects_interface_outside_approved_subnet(self):
+        from unittest.mock import patch
+        with patch("networkradar_modules.discovery.mdns.socket.socket") as socket_factory:
+            self.assertEqual(
+                discover_mdns(
+                    interface_ip="192.168.2.10",
+                    allowed_network="192.168.1.0/24",
+                ),
+                [],
+            )
+            socket_factory.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
