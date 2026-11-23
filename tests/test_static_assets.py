@@ -67,6 +67,18 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn("'domainIntelligence'", js)
         self.assertIn("'fullPortIntelligence'", js)
 
+    def test_ssh_websocket_handler_is_defined_on_the_dashboard_handler(self):
+        server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
+        dashboard_start = server.index("class Handler(BaseHTTPRequestHandler):")
+        dashboard_get = server.index("    def do_GET(self):", dashboard_start)
+        ssh_method = server.index("    def _handle_ssh_websocket(self, parsed):", dashboard_start)
+        agent_start = server.index("class AgentHubHandler(BaseHTTPRequestHandler):")
+        agent_end = server.index("\ndef stop_agent_hub", agent_start)
+        self.assertLess(ssh_method, dashboard_get)
+        self.assertIn("return self._handle_ssh_websocket(p)", server[dashboard_get:])
+        self.assertNotIn("_handle_ssh_websocket", server[agent_start:agent_end])
+        self.assertIn("_is_authorized_device_target(session.get(\"ip\"))", server[ssh_method:dashboard_get])
+
     def test_authorisation_and_agent_management_require_fresh_network_scope(self):
         server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
         auth_start = server.index("def is_authorized():")
