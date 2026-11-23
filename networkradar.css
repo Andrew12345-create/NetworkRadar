@@ -2543,3 +2543,6 @@ pre,.terminal-output,#paTerminalOutput,#agentCommandOutput{background:#292720;co
 .progress-track{background:#e9e1d6}
 .fingerprint-box{background:#f5f0e8;border:1px solid #e5ddd1;color:#62594e}
 #paSelectionCount{background:#f1ece4;border:1px solid #e2d8ca;color:#756b5f}
+
+.scan-history li{background:#faf7f1;border:1px solid #e8e0d5;color:#6f675c}
+.scan-history li strong{color:#433d35}
