@@ -184,5 +184,32 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn('p.path == "/assets/dashboard.js"', source)
 
 
+    def test_premium_command_palette_and_device_dossier_export_are_wired(self):
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "networkradar.css").read_text(encoding="utf-8")
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('layer.id="nrCommandPalette"', js)
+        self.assertIn('layer.querySelector("#nrCommandInput")', js)
+        self.assertIn('layer.querySelector("#nrCommandResults")', js)
+        self.assertIn('Ctrl+Alt+', js)
+        self.assertIn("window.NRCommandPalette={open,close}", js)
+        self.assertIn("EXPORT DOSSIER", js)
+        self.assertIn("schema_version:1", js)
+        self.assertIn('window.confirm("Export the device dossier', js)
+        self.assertIn('URL.createObjectURL(blob)', js)
+        self.assertIn(".nr-command-overlay", css)
+        self.assertIn(".nr-command-dialog", css)
+        self.assertIn(".nr-export-dossier", css)
+        self.assertIn('content="#f5f1ea"', html)
+
+    def test_dashboard_api_errors_and_toasts_are_actionable_and_race_safe(self):
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn('credentials:"same-origin"', js)
+        self.assertIn("malformed JSON", js)
+        self.assertIn("Could not reach the local NetworkRadar API", js)
+        self.assertIn("let nrToastTimer=null", js)
+        self.assertIn("clearTimeout(nrToastTimer)", js)
+
+
 if __name__ == "__main__":
     unittest.main()
