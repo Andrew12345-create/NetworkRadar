@@ -1655,8 +1655,9 @@ def current_fingerprint():
         return NET_CTX.get("fingerprint", "")
 
 def is_authorized():
-    with NET_LOCK:
-        return bool(NET_CTX.get("authorized"))
+    """Only honour approval while its network-context snapshot is fresh."""
+    context = network_context_snapshot(max_age_seconds=120)
+    return bool(context.get("_context_fresh") and context.get("authorized"))
 
 def authorize_current(actor="local-user"):
     # Approval is a security-sensitive write: refresh live interface evidence
@@ -6611,8 +6612,8 @@ def _phantom_validate_target(ip):
         row = conn.execute("SELECT ip,status FROM devices WHERE ip=?", (str(addr),)).fetchone()
     if not row or row[1] != "ONLINE":
         raise ValueError("Target must be an ONLINE device already present in NetworkRadar inventory.")
-    if not is_authorized():
-        raise ValueError("The current network profile is not authorised for active management. Approve the current network profile first.")
+    if not _is_authorized_device_target(str(addr)):
+        raise ValueError("Target must belong to the fresh, currently authorised private subnet before active management.")
     return str(addr)
 
 def _phantom_probe_port(ip, port, timeout=0.45):
