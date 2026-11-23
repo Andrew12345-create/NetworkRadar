@@ -7170,92 +7170,7 @@ class Handler(BaseHTTPRequestHandler):
         b = json.dumps(p, ensure_ascii=False, default=str).encode("utf-8")
         return self._send_bytes(b, status, "application/json; charset=utf-8")
 
-    def do_GET(self):
-        if not self._local_request_allowed():
-            return self.send_json({"error": "Local access only."}, 403)
-        p = urlparse(self.path)
-        if p.path == "/api/network-control/discover":
-            try:
-                from networkradar_modules.control.router_discovery import identify_router
-                context = network_context_snapshot()
-                if not context.get("_context_fresh"):
-                    return self.send_json({
-                        "error": "The cached network context is stale. NetworkRadar is refreshing network information in the background; try router identification again shortly.",
-                        "context_age_seconds": context.get("_context_age_seconds"),
-                    }, 503)
-                if not context.get("authorized"):
-                    return self.send_json({"error": "Router identification requires explicit authorisation of this exact network."}, 403)
-                gateway = str(context.get("gateway") or "")
-                if not gateway:
-                    return self.send_json({"error": "No default gateway is available on the selected network."}, 409)
-                gateway_mac = str(context.get("gateway_mac") or "")
-                # OUI is corroborating address-block metadata, never router-brand proof.
-                oui_assignment = oui_lookup_details(gateway_mac) if gateway_mac else {}
-                return self.send_json(identify_router(
-                    gateway, str(context.get("network") or ""),
-                    gateway_mac=gateway_mac, oui_assignment=oui_assignment,
-                ))
-            except ValueError as exc:
-                return self.send_json({"error": _clean(exc, 300)}, 400)
-            except Exception as exc:
-                return self.send_json({"error": _clean(exc, 300)}, 502)
-        if p.path == "/api/network-control/status":
-            try:
-                from networkradar_modules.control.service import NETWORK_CONTROL
-                context = network_context_snapshot()
-                current_network = (
-                    str(context.get("network") or "")
-                    if context.get("_context_fresh") else ""
-                )
-                result = NETWORK_CONTROL.status(current_network)
-                result["network_context_fresh"] = bool(context.get("_context_fresh"))
-                result["network_context_age_seconds"] = context.get("_context_age_seconds")
-                if not context.get("_context_fresh"):
-                    result["connected"] = False
-                    result["message"] = (
-                        "Router status is paused because the cached network context is stale. "
-                        "Wait for the background network refresh, then refresh router status."
-                    )
-                return self.send_json(result)
-            except Exception as exc:
-                return self.send_json({"connected": False, "error": _clean(exc, 300)}, 502)
-        if p.path == "/api/phantom-access/ssh/terminal":
-            return self._handle_ssh_websocket(p)
-        if p.path == "/assets/networkradar.css":
-            asset = ROOT / "networkradar.css"
-            if not asset.is_file(): return self.send_json({"error": "Dashboard stylesheet is missing."}, 404)
-            return self._send_bytes(asset.read_bytes(), 200, "text/css; charset=utf-8")
-        if p.path == "/assets/dashboard.js":
-            asset = ROOT / "dashboard.js"
-            if not asset.is_file(): return self.send_json({"error": "Dashboard script is missing."}, 404)
-            return self._send_bytes(asset.read_bytes(), 200, "application/javascript; charset=utf-8")
-        if self.path == "/" or p.path == "/index.html":
-            page = (ROOT / "index.html").read_text(encoding="utf-8").replace("{APP_VERSION}", APP_VERSION)
-            b = page.encode("utf-8")
-            return self._send_bytes(b, 200, "text/html; charset=utf-8")
-        if p.path == "/api/firewall":
-            try:
-                from networkradar_modules.security.firewall import get_firewall_snapshot
-                force_refresh = "refresh=1" in p.query.split("&")
-                return self.send_json(get_firewall_snapshot(force=force_refresh))
-            except Exception as exc:
-                return self.send_json({"supported": True, "status": "DEGRADED",
-                    "default_device_policy": "ALLOW", "automatic_blocking": False,
-                    "profiles": [], "rule_counts": {},
-                    "message": _clean(exc, 500)}, 200)
-        try:
-            if p.path == "/api/phantom-access/devices":
-                return self.send_json(phantom_access_inventory())
-            if p.path == "/api/phantom-access/summary":
-                return self.send_json(phantom_access_summary())
-            with DB_MANAGER.read() as conn:
-                if p.path == "/api/command/agents":
-                    rows=conn.execute("SELECT agent_id,hostname,platform,os_version,agent_version,CASE WHEN status='REVOKED' THEN status WHEN last_seen<? THEN 'OFFLINE' ELSE status END AS display_status,enrolled_at,last_seen,last_ip,inventory_json,capabilities_json,revoked_at FROM remote_agents ORDER BY last_seen DESC",((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
-                    out=[]
-                    for r in rows:
-                        try: inv=json.loads(r[9] or "{}")
-                        except Exception: inv={}
-                        out.append({"agent_id":r[0],"hostname":r[1],"platform":r[2],"o    def _handle_ssh_websocket(self, parsed):
+    def _handle_ssh_websocket(self, parsed):
         origin = self.headers.get("Origin", "")
         port = int(self.server.server_address[1])
         expected_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
@@ -7364,7 +7279,92 @@ class Handler(BaseHTTPRequestHandler):
     @classmethod
     def _ssh_ws_send(cls, sock, payload):
         cls._ssh_ws_send_raw(sock, json.dumps(payload, ensure_ascii=False).encode("utf-8"), opcode=1)
-
+    def do_GET(self):
+        if not self._local_request_allowed():
+            return self.send_json({"error": "Local access only."}, 403)
+        p = urlparse(self.path)
+        if p.path == "/api/network-control/discover":
+            try:
+                from networkradar_modules.control.router_discovery import identify_router
+                context = network_context_snapshot()
+                if not context.get("_context_fresh"):
+                    return self.send_json({
+                        "error": "The cached network context is stale. NetworkRadar is refreshing network information in the background; try router identification again shortly.",
+                        "context_age_seconds": context.get("_context_age_seconds"),
+                    }, 503)
+                if not context.get("authorized"):
+                    return self.send_json({"error": "Router identification requires explicit authorisation of this exact network."}, 403)
+                gateway = str(context.get("gateway") or "")
+                if not gateway:
+                    return self.send_json({"error": "No default gateway is available on the selected network."}, 409)
+                gateway_mac = str(context.get("gateway_mac") or "")
+                # OUI is corroborating address-block metadata, never router-brand proof.
+                oui_assignment = oui_lookup_details(gateway_mac) if gateway_mac else {}
+                return self.send_json(identify_router(
+                    gateway, str(context.get("network") or ""),
+                    gateway_mac=gateway_mac, oui_assignment=oui_assignment,
+                ))
+            except ValueError as exc:
+                return self.send_json({"error": _clean(exc, 300)}, 400)
+            except Exception as exc:
+                return self.send_json({"error": _clean(exc, 300)}, 502)
+        if p.path == "/api/network-control/status":
+            try:
+                from networkradar_modules.control.service import NETWORK_CONTROL
+                context = network_context_snapshot()
+                current_network = (
+                    str(context.get("network") or "")
+                    if context.get("_context_fresh") else ""
+                )
+                result = NETWORK_CONTROL.status(current_network)
+                result["network_context_fresh"] = bool(context.get("_context_fresh"))
+                result["network_context_age_seconds"] = context.get("_context_age_seconds")
+                if not context.get("_context_fresh"):
+                    result["connected"] = False
+                    result["message"] = (
+                        "Router status is paused because the cached network context is stale. "
+                        "Wait for the background network refresh, then refresh router status."
+                    )
+                return self.send_json(result)
+            except Exception as exc:
+                return self.send_json({"connected": False, "error": _clean(exc, 300)}, 502)
+        if p.path == "/api/phantom-access/ssh/terminal":
+            return self._handle_ssh_websocket(p)
+        if p.path == "/assets/networkradar.css":
+            asset = ROOT / "networkradar.css"
+            if not asset.is_file(): return self.send_json({"error": "Dashboard stylesheet is missing."}, 404)
+            return self._send_bytes(asset.read_bytes(), 200, "text/css; charset=utf-8")
+        if p.path == "/assets/dashboard.js":
+            asset = ROOT / "dashboard.js"
+            if not asset.is_file(): return self.send_json({"error": "Dashboard script is missing."}, 404)
+            return self._send_bytes(asset.read_bytes(), 200, "application/javascript; charset=utf-8")
+        if self.path == "/" or p.path == "/index.html":
+            page = (ROOT / "index.html").read_text(encoding="utf-8").replace("{APP_VERSION}", APP_VERSION)
+            b = page.encode("utf-8")
+            return self._send_bytes(b, 200, "text/html; charset=utf-8")
+        if p.path == "/api/firewall":
+            try:
+                from networkradar_modules.security.firewall import get_firewall_snapshot
+                force_refresh = "refresh=1" in p.query.split("&")
+                return self.send_json(get_firewall_snapshot(force=force_refresh))
+            except Exception as exc:
+                return self.send_json({"supported": True, "status": "DEGRADED",
+                    "default_device_policy": "ALLOW", "automatic_blocking": False,
+                    "profiles": [], "rule_counts": {},
+                    "message": _clean(exc, 500)}, 200)
+        try:
+            if p.path == "/api/phantom-access/devices":
+                return self.send_json(phantom_access_inventory())
+            if p.path == "/api/phantom-access/summary":
+                return self.send_json(phantom_access_summary())
+            with DB_MANAGER.read() as conn:
+                if p.path == "/api/command/agents":
+                    rows=conn.execute("SELECT agent_id,hostname,platform,os_version,agent_version,CASE WHEN status='REVOKED' THEN status WHEN last_seen<? THEN 'OFFLINE' ELSE status END AS display_status,enrolled_at,last_seen,last_ip,inventory_json,capabilities_json,revoked_at FROM remote_agents ORDER BY last_seen DESC",((datetime.now()-timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
+                    out=[]
+                    for r in rows:
+                        try: inv=json.loads(r[9] or "{}")
+                        except Exception: inv={}
+                        out.append({"agent_id":r[0],"hostname":r[1],"platform":r[2],"o
 s_version":r[3],"agent_version":r[4],"status":r[5],"enrolled_at":r[6],"last_seen":r[7],"last_ip":r[8],"inventory":inv,"capabilities":json.loads(r[10] or "[]"),"revoked_at":r[11]})
                     return self.send_json(out)
                 if p.path == "/api/command/summary":
