@@ -2558,3 +2558,14 @@ pre,.terminal-output,#paTerminalOutput,#agentCommandOutput{background:#292720;co
 .nr-tab-copy b{color:#433d35}
 .subscan-progress-target{color:#70675c}
 .scan-monitor[data-state="ERROR"] .scan-monitor-top strong{color:#b65055}
+
+
+/* 15.11.1 — command palette interaction and live-readiness polish */
+.nr-command-item{min-height:42px;transition:background-color .14s ease,border-color .14s ease,color .14s ease}
+.nr-command-item:focus-visible{outline:2px solid #a45f45!important;outline-offset:2px!important;border-color:#d8b7a4;background:#fbf4ed}
+.nr-command-item:active{background:#efe5da;transform:translateY(1px)}
+.nr-command-item:disabled{opacity:.55;cursor:not-allowed}
+.nr-command-results{overscroll-behavior:contain;scrollbar-gutter:stable}
+.nr-command-dialog{isolation:isolate}
+@media(max-width:520px){.nr-command-dialog{max-height:80vh;border-radius:13px}.nr-command-item{min-height:46px;padding:12px}.nr-command-head{padding:14px}.nr-command-search{padding:12px 14px}}
+@media(prefers-reduced-motion:reduce){.nr-command-item{transition:none}}
