@@ -61,6 +61,14 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn("'domainIntelligence'", js)
         self.assertIn("'fullPortIntelligence'", js)
 
+    def test_active_multicast_scope_uses_an_atomic_authorisation_snapshot(self):
+        server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
+        start = server.index("def _selected_discovery_scope():")
+        end = server.index("def discover_devices(", start)
+        scope = server[start:end]
+        self.assertIn('if not NET_CTX.get("authorized"):', scope)
+        self.assertNotIn("if not is_authorized():", scope)
+
     def test_firewall_poll_uses_cache_and_manual_refresh_forces_collection(self):
         js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
         server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
