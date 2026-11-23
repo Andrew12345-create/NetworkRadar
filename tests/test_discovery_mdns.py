@@ -78,8 +78,12 @@ class MdnsPacketTests(unittest.TestCase):
             socket_factory.assert_not_called()
 
     def test_discovery_rejects_non_private_interface(self):
-        self.assertEqual(discover_mdns(interface_ip="8.8.8.8"), [])
-        self.assertEqual(discover_mdns(interface_ip="not-an-ip"), [])
+        self.assertEqual(
+            discover_mdns(interface_ip="8.8.8.8", allowed_network="192.168.1.0/24"), []
+        )
+        self.assertEqual(
+            discover_mdns(interface_ip="not-an-ip", allowed_network="192.168.1.0/24"), []
+        )
 
     def test_discovery_discards_responder_outside_approved_subnet(self):
         from unittest.mock import patch
