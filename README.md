@@ -1,4 +1,12 @@
-# NetworkRadar 15.10.0
+# NetworkRadar 15.11.0
+
+## 15.11.0 — Premium Nightwatch workspace
+- Replaces the high-contrast dark dashboard with a warm, low-glare visual system, refined typography, calmer information hierarchy and consistent responsive surfaces.
+- Adds a searchable command palette with **Ctrl+K** (⌘K) and direct workspace shortcuts **Ctrl+Alt+1–5**.
+- Adds one-click JSON export of an individual device dossier, including identity evidence and assessment history, with a privacy confirmation before export.
+- Improves API diagnostics for network failures, malformed JSON and HTML fallback responses; prevents overlapping toast timers from hiding newer messages.
+- Retains local-only operation, explicit active-discovery authorisation, evidence-backed identity claims and strict network-control approvals.
+
 
 ## Bandwidth enforcement integrity (15.2.0)
 - Refreshes enabled RouterOS FastTrack rules immediately before each bandwidth-limit write; Simple Queues can be bypassed by FastTracked connections.
