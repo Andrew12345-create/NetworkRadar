@@ -55,6 +55,12 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertNotIn("DASHBOARD_JS_BUNDLED", source)
         self.assertIn('(ROOT / "index.html").read_text(encoding="utf-8")', source)
 
+    def test_workspace_groups_include_identity_and_network_intelligence_panels(self):
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("'identitySubscan'", js)
+        self.assertIn("'domainIntelligence'", js)
+        self.assertIn("'fullPortIntelligence'", js)
+
     def test_manual_refresh_is_queued_when_refresh_is_in_flight(self):
         js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
         html = (ROOT / "index.html").read_text(encoding="utf-8")
