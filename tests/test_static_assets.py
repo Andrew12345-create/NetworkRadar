@@ -79,10 +79,21 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn('if not context.get("_context_fresh") or not context.get("authorized"):', scope)
         self.assertNotIn("if not is_authorized():", scope)
 
+    def test_slow_firewall_refresh_does_not_block_primary_dashboard_poll(self):
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+        start = js.index("async function refreshAll(")
+        end = js.index("loadHuntTemplates();refreshAll();", start)
+        refresh = js[start:end]
+        self.assertNotIn('["firewall",', refresh)
+        self.assertIn("void loadFirewallSnapshot(forceSecondary);", refresh)
+        self.assertIn("firewallRefreshInFlight", js)
+        self.assertIn("firewallRefreshQueued", js)
+
     def test_firewall_poll_uses_cache_and_manual_refresh_forces_collection(self):
         js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
         server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
-        self.assertIn('forceSecondary?"/api/firewall?refresh=1":"/api/firewall"', js)
+        self.assertIn('force?"/api/firewall?refresh=1":"/api/firewall"', js)
+        self.assertIn("void loadFirewallSnapshot(forceSecondary);", js)
         self.assertIn('force_refresh = "refresh=1" in p.query.split("&")', server)
 
     def test_manual_refresh_is_queued_when_refresh_is_in_flight(self):
