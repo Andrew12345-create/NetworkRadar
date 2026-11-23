@@ -80,8 +80,8 @@ class DashboardAssetTests(unittest.TestCase):
     def test_identity_probes_require_fresh_authorised_subnet_targets(self):
         server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
         self.assertIn("def _is_authorized_device_target(ip):", server)
-        for name in ("tls_certificate_intelligence", "snmpv3_intelligence",
-                     "service_banner_intelligence", "netbios_name"):
+        for name in ("reverse_dns", "netbios_name", "tls_certificate_intelligence",
+                     "snmpv3_intelligence", "service_banner_intelligence"):
             start = server.index("def " + name + "(")
             end = server.find("\ndef ", start + 5)
             body = server[start:end if end >= 0 else len(server)]
