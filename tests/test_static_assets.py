@@ -204,6 +204,15 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn(".nr-export-dossier", css)
         self.assertIn('content="#f5f1ea"', html)
 
+    def test_command_palette_can_copy_a_reviewable_health_snapshot(self):
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+        css = (ROOT / "networkradar.css").read_text(encoding="utf-8")
+        self.assertIn('label:"Copy quick health snapshot"', js)
+        self.assertIn('navigator.clipboard?.writeText', js)
+        self.assertIn('Privacy: this snapshot contains local network status only', js)
+        self.assertIn('.nr-command-item:focus-visible', css)
+        self.assertIn('overscroll-behavior:contain', css)
+
     def test_dashboard_api_errors_and_toasts_are_actionable_and_race_safe(self):
         js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
         self.assertIn('credentials:"same-origin"', js)
