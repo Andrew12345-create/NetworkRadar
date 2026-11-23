@@ -69,6 +69,14 @@ class MdnsPacketTests(unittest.TestCase):
         self.assertEqual(parse_mdns_packet(b"short"), [])
         self.assertEqual(parse_mdns_packet(b"\x00" * 12), [])
 
+    def test_discovery_requires_explicit_interface_and_approved_subnet(self):
+        from unittest.mock import patch
+        with patch("networkradar_modules.discovery.mdns.socket.socket") as socket_factory:
+            self.assertEqual(discover_mdns(), [])
+            self.assertEqual(discover_mdns(interface_ip="192.168.1.10"), [])
+            self.assertEqual(discover_mdns(allowed_network="192.168.1.0/24"), [])
+            socket_factory.assert_not_called()
+
     def test_discovery_rejects_non_private_interface(self):
         self.assertEqual(discover_mdns(interface_ip="8.8.8.8"), [])
         self.assertEqual(discover_mdns(interface_ip="not-an-ip"), [])
