@@ -1,6 +1,6 @@
-# NetworkRadar architecture — repository snapshot 15.11.0
+# NetworkRadar architecture — repository snapshot 15.11.1
 
-## Dashboard information architecture (15.11.0)
+## Dashboard information architecture (15.11.1)
 
 The dashboard uses a premium warm-light design system with responsive workspace surfaces, accessible focus states and reduced-motion support. A searchable command palette provides workspace navigation and operator shortcuts. The device dossier can be exported locally as JSON after explicit privacy confirmation.
 
