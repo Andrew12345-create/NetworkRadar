@@ -8526,8 +8526,15 @@ def start_web():
     return server
 
 def deep_fingerprint(devices, profiler=None, progress_callback=None):
-    """Run authorised TCP, OS, safe-script and targeted UDP identification."""
-    if not devices or not is_authorized():
+    """Run bounded TCP/OS fingerprinting only inside a fresh authorised subnet."""
+    context = network_context_snapshot(max_age_seconds=120)
+    allowed_network = str(context.get("network") or "").strip()
+    if (
+        not devices
+        or not context.get("_context_fresh")
+        or not context.get("authorized")
+        or not allowed_network
+    ):
         return False
     # Use the latest port-scan attempt as the fingerprint freshness clock.
     # last_identified is intentionally unsuitable: passive evidence fusion
@@ -8575,7 +8582,7 @@ def deep_fingerprint(devices, profiler=None, progress_callback=None):
     ]
     plan = build_fingerprint_plan(
         planner_devices, last_fingerprint_at, max_targets=8, max_udp_targets=3,
-        allowed_network=current_network(),
+        allowed_network=allowed_network,
     )
     selected_ips = set(plan["targets"])
     target_devices = [dev for dev in devices if str(dev.get("ip") or "") in selected_ips]
