@@ -55,6 +55,12 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertNotIn("DASHBOARD_JS_BUNDLED", source)
         self.assertIn('(ROOT / "index.html").read_text(encoding="utf-8")', source)
 
+    def test_unknown_device_metrics_and_filter_share_one_confidence_threshold(self):
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("const UNKNOWN_IDENTITY_CONFIDENCE_THRESHOLD=35;", js)
+        self.assertEqual(js.count("UNKNOWN_IDENTITY_CONFIDENCE_THRESHOLD"), 3)
+        self.assertNotIn("identification_confidence||0)<25", js)
+
     def test_workspace_groups_include_identity_and_network_intelligence_panels(self):
         js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
         self.assertIn("'identitySubscan'", js)
