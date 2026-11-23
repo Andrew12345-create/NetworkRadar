@@ -437,7 +437,7 @@ async function refreshAll(forceSecondary=false){
   ["engine","/api/engine_diagnostics"],["scanPerformance","/api/scan_performance"]
  ];
  try{
-  const settled=await Promise.allSettled(specs.map(([name,path])=>getJSON(path,name==="firewall"?30000:10000)));
+  const settled=await Promise.allSettled(specs.map(([,path])=>getJSON(path,10000)));
   const data={},failed=[];
   settled.forEach((r,i)=>{const name=specs[i][0];if(r.status==="fulfilled")data[name]=r.value;else{data[name]=null;failed.push(name+": "+String(r.reason?.message||r.reason||"request failed"));}});
   const s=data.status||{},d=Array.isArray(data.devices)?data.devices:[],domains=Array.isArray(data.domains)?data.domains:[],a=Array.isArray(data.alerts)?data.alerts:[],e=Array.isArray(data.events)?data.events:[],inv=Array.isArray(data.investigations)?data.investigations:[],dnsRows=Array.isArray(data.dns)?data.dns:[],topology=data.topology||{},n=data.network||{},diag=data.diagnostics||{},eng=data.engine||{},j=data.progress||{},sp=data.scanPerformance||{};
