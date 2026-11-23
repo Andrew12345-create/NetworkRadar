@@ -6398,105 +6398,6 @@ class AgentHubHandler(BaseHTTPRequestHandler):
             return self._reply({"error":"Not found"},404)
         except PermissionError as exc: return self._reply({"error":str(exc)},401)
         except Exception as exc: return self._reply({"error":_clean(exc,250)},400)
-    def _handle_ssh_websocket(self, parsed):
-        origin = self.headers.get("Origin", "")
-        port = int(self.server.server_address[1])
-        expected_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
-        if origin not in expected_origins:
-            return self.send_json({"error": "SSH terminal requires a same-origin local browser session."}, 403)
-        if self.headers.get("Upgrade", "").lower() != "websocket" or "upgrade" not in self.headers.get("Connection", "").lower():
-            return self.send_json({"error": "WebSocket upgrade required."}, 400)
-        if self.headers.get("Sec-WebSocket-Version") != "13":
-            return self.send_json({"error": "Unsupported WebSocket version."}, 400)
-        ws_key = self.headers.get("Sec-WebSocket-Key", "")
-        try:
-            raw_key = base64.b64decode(ws_key, validate=True)
-            if len(raw_key) != 16: raise ValueError("invalid key")
-        except Exception:
-            return self.send_json({"error": "Invalid WebSocket handshake."}, 400)
-        _phantom_ssh_prune_sessions()
-        token = parse_qs(parsed.query).get("token", [""])[0]
-        with SSH_SESSION_LOCK:
-            session = SSH_SESSIONS.get(token)
-            if not session or session.get("attached") or time.time()-session.get("last_activity",0) > SSH_SESSION_TTL_SECONDS:
-                session = None
-            else:
-                session["attached"] = True
-                session["last_activity"] = time.time()
-        if not session:
-            return self.send_json({"error": "SSH session is invalid, expired or already attached."}, 401)
-        accept = base64.b64encode(hashlib.sha1((ws_key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()).decode("ascii")
-        self.send_response(101, "Switching Protocols")
-        self.send_header("Upgrade", "websocket")
-        self.send_header("Connection", "Upgrade")
-        self.send_header("Sec-WebSocket-Accept", accept)
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.flush()
-        self.close_connection = True
-        sock = self.connection
-        buffer = bytearray()
-        started = time.time()
-        try:
-            sock.setblocking(False)
-            self._ssh_ws_send(sock, {"type": "status", "state": "connected", "ip": session["ip"], "username": session["username"]})
-            while time.time() - started < SSH_SESSION_TTL_SECONDS:
-                if not session["channel"].active or not session["client"].get_transport() or not session["client"].get_transport().is_active():
-                    break
-                readable, _, _ = select.select([sock], [], [], 0.04)
-                if readable:
-                    try: chunk = sock.recv(65536)
-                    except BlockingIOError: chunk = None
-                    if chunk == b"": break
-                    if chunk: buffer.extend(chunk)
-                    for opcode, payload in _ws_extract_frames(buffer):
-                        if opcode == 8: raise ConnectionAbortedError("Browser closed terminal.")
-                        if opcode == 9:
-                            self._ssh_ws_send_raw(sock, payload, opcode=10)
-                            continue
-                        if opcode != 1: continue
-                        try: message = json.loads(payload.decode("utf-8"))
-                        except Exception: continue
-                        if not isinstance(message, dict): continue
-                        kind = message.get("type")
-                        if kind == "input":
-                            data = message.get("data", "")
-                            if isinstance(data, str) and len(data) <= 8192:
-                                session["channel"].sendall(data.encode("utf-8"))
-                                session["last_activity"] = time.time()
-                        elif kind == "resize":
-                            cols = max(40, min(240, int(message.get("cols", 120))))
-                            rows = max(10, min(100, int(message.get("rows", 36))))
-                            session["channel"].resize_pty(width=cols, height=rows)
-                        elif kind == "close":
-                            raise ConnectionAbortedError("Operator closed terminal.")
-                channel = session["channel"]
-                if channel.recv_ready():
-                    output = channel.recv(32768)
-                    if output: self._ssh_ws_send(sock, {"type": "output", "data": output.decode("utf-8", errors="replace")})
-                if channel.recv_stderr_ready():
-                    output = channel.recv_stderr(16384)
-                    if output: self._ssh_ws_send(sock, {"type": "output", "data": output.decode("utf-8", errors="replace")})
-                session["last_activity"] = time.time()
-        except Exception:
-            # A failed browser socket or SSH channel must always release the session.
-            pass
-        finally:
-            try: self._ssh_ws_send(sock, {"type": "status", "state": "closed"})
-            except Exception: pass
-            phantom_ssh_close(token, "websocket_closed")
-
-    @staticmethod
-    def _ssh_ws_send_raw(sock, payload, opcode=1):
-        frame = _ws_encode(payload, opcode=opcode)
-        sock.setblocking(True); sock.settimeout(1.0)
-        try: sock.sendall(frame)
-        finally: sock.setblocking(False)
-
-    @classmethod
-    def _ssh_ws_send(cls, sock, payload):
-        cls._ssh_ws_send_raw(sock, json.dumps(payload, ensure_ascii=False).encode("utf-8"), opcode=1)
-
     def do_GET(self):
         try:
             if self.path.startswith("/agent/v1/commands"):
@@ -7354,7 +7255,117 @@ class Handler(BaseHTTPRequestHandler):
                     for r in rows:
                         try: inv=json.loads(r[9] or "{}")
                         except Exception: inv={}
-                        out.append({"agent_id":r[0],"hostname":r[1],"platform":r[2],"os_version":r[3],"agent_version":r[4],"status":r[5],"enrolled_at":r[6],"last_seen":r[7],"last_ip":r[8],"inventory":inv,"capabilities":json.loads(r[10] or "[]"),"revoked_at":r[11]})
+                        out.append({"agent_id":r[0],"hostname":r[1],"platform":r[2],"o    def _handle_ssh_websocket(self, parsed):
+        origin = self.headers.get("Origin", "")
+        port = int(self.server.server_address[1])
+        expected_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+        if origin not in expected_origins:
+            return self.send_json({"error": "SSH terminal requires a same-origin local browser session."}, 403)
+        if self.headers.get("Upgrade", "").lower() != "websocket" or "upgrade" not in self.headers.get("Connection", "").lower():
+            return self.send_json({"error": "WebSocket upgrade required."}, 400)
+        if self.headers.get("Sec-WebSocket-Version") != "13":
+            return self.send_json({"error": "Unsupported WebSocket version."}, 400)
+        ws_key = self.headers.get("Sec-WebSocket-Key", "")
+        try:
+            raw_key = base64.b64decode(ws_key, validate=True)
+            if len(raw_key) != 16: raise ValueError("invalid key")
+        except Exception:
+            return self.send_json({"error": "Invalid WebSocket handshake."}, 400)
+        _phantom_ssh_prune_sessions()
+        token = parse_qs(parsed.query).get("token", [""])[0]
+        with SSH_SESSION_LOCK:
+            session = SSH_SESSIONS.get(token)
+            if (
+                not session
+                or session.get("attached")
+                or time.time()-session.get("last_activity",0) > SSH_SESSION_TTL_SECONDS
+                or not _is_authorized_device_target(session.get("ip"))
+            ):
+                session = None
+            else:
+                session["attached"] = True
+                session["last_activity"] = time.time()
+        if not session:
+            return self.send_json({"error": "SSH session is invalid, expired or already attached."}, 401)
+        accept = base64.b64encode(hashlib.sha1((ws_key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()).decode("ascii")
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.flush()
+        self.close_connection = True
+        sock = self.connection
+        buffer = bytearray()
+        started = time.time()
+        scope_checked_at = 0.0
+        try:
+            sock.setblocking(False)
+            self._ssh_ws_send(sock, {"type": "status", "state": "connected", "ip": session["ip"], "username": session["username"]})
+            while time.time() - started < SSH_SESSION_TTL_SECONDS:
+                current_time = time.time()
+                if current_time - scope_checked_at >= 1.0:
+                    if not _is_authorized_device_target(session.get("ip")):
+                        raise PermissionError("SSH session network scope is no longer authorised.")
+                    scope_checked_at = current_time
+                if not session["channel"].active or not session["client"].get_transport() or not session["client"].get_transport().is_active():
+                    break
+                readable, _, _ = select.select([sock], [], [], 0.04)
+                if readable:
+                    try: chunk = sock.recv(65536)
+                    except BlockingIOError: chunk = None
+                    if chunk == b"": break
+                    if chunk: buffer.extend(chunk)
+                    for opcode, payload in _ws_extract_frames(buffer):
+                        if opcode == 8: raise ConnectionAbortedError("Browser closed terminal.")
+                        if opcode == 9:
+                            self._ssh_ws_send_raw(sock, payload, opcode=10)
+                            continue
+                        if opcode != 1: continue
+                        try: message = json.loads(payload.decode("utf-8"))
+                        except Exception: continue
+                        if not isinstance(message, dict): continue
+                        kind = message.get("type")
+                        if kind == "input":
+                            data = message.get("data", "")
+                            if isinstance(data, str) and len(data) <= 8192:
+                                session["channel"].sendall(data.encode("utf-8"))
+                                session["last_activity"] = time.time()
+                        elif kind == "resize":
+                            cols = max(40, min(240, int(message.get("cols", 120))))
+                            rows = max(10, min(100, int(message.get("rows", 36))))
+                            session["channel"].resize_pty(width=cols, height=rows)
+                        elif kind == "close":
+                            raise ConnectionAbortedError("Operator closed terminal.")
+                channel = session["channel"]
+                if channel.recv_ready():
+                    output = channel.recv(32768)
+                    if output: self._ssh_ws_send(sock, {"type": "output", "data": output.decode("utf-8", errors="replace")})
+                if channel.recv_stderr_ready():
+                    output = channel.recv_stderr(16384)
+                    if output: self._ssh_ws_send(sock, {"type": "output", "data": output.decode("utf-8", errors="replace")})
+                session["last_activity"] = time.time()
+        except Exception:
+            # A failed browser socket or SSH channel must always release the session.
+            pass
+        finally:
+            try: self._ssh_ws_send(sock, {"type": "status", "state": "closed"})
+            except Exception: pass
+            phantom_ssh_close(token, "websocket_closed")
+
+    @staticmethod
+    def _ssh_ws_send_raw(sock, payload, opcode=1):
+        frame = _ws_encode(payload, opcode=opcode)
+        sock.setblocking(True); sock.settimeout(1.0)
+        try: sock.sendall(frame)
+        finally: sock.setblocking(False)
+
+    @classmethod
+    def _ssh_ws_send(cls, sock, payload):
+        cls._ssh_ws_send_raw(sock, json.dumps(payload, ensure_ascii=False).encode("utf-8"), opcode=1)
+
+s_version":r[3],"agent_version":r[4],"status":r[5],"enrolled_at":r[6],"last_seen":r[7],"last_ip":r[8],"inventory":inv,"capabilities":json.loads(r[10] or "[]"),"revoked_at":r[11]})
                     return self.send_json(out)
                 if p.path == "/api/command/summary":
                     total=conn.execute("SELECT COUNT(*) FROM remote_agents WHERE status!='REVOKED'").fetchone()[0]
