@@ -67,6 +67,18 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn("'domainIntelligence'", js)
         self.assertIn("'fullPortIntelligence'", js)
 
+    def test_agent_hub_blank_bind_and_port_settings_are_safe(self):
+        server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
+        start = server.index("def _agent_hub_bind_settings():")
+        end = server.index("\ndef start_agent_hub():", start)
+        config = server[start:end]
+        self.assertIn('raw_bind = os.environ.get("NETWORKRADAR_AGENT_BIND", "").strip()', config)
+        self.assertIn('bind = raw_bind or "127.0.0.1"', config)
+        self.assertIn('raw_port = os.environ.get("NETWORKRADAR_AGENT_PORT", "").strip()', config)
+        self.assertIn("if not 1 <= port <= 65535:", config)
+        self.assertIn("address.is_multicast", config)
+        self.assertIn("address.is_reserved", config)
+
     def test_ssh_websocket_handler_is_defined_on_the_dashboard_handler(self):
         server = (ROOT / "networkradar.py").read_text(encoding="utf-8-sig")
         dashboard_start = server.index("class Handler(BaseHTTPRequestHandler):")
