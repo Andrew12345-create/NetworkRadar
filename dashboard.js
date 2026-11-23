@@ -13,10 +13,10 @@ async function getJSON(p,timeoutMs=10000){
   if(type.includes("application/json")){
    try{data=await r.json();}catch(_){throw new Error("The local API returned malformed JSON for "+p+". Restart NetworkRadar and retry.");}
   }else{
-   const body=(await r.text().catch(()=> "")).trim();
-   if(body.startsWith("{")){try{data=JSON.parse(body);}catch(_){}}
+   const body=(await r.text().catch(()=> "")).trim();let parsed=false;
+   if(body.startsWith("{")){try{data=JSON.parse(body);parsed=!!data&&typeof data==="object";}catch(_){}}
    if(!r.ok)throw new Error(data.error||("HTTP "+r.status+" from the local API."));
-   throw new Error("NetworkRadar returned a webpage instead of JSON for "+p+". The dashboard route may be unavailable; restart the local server.");
+   if(!parsed)throw new Error("NetworkRadar returned a webpage instead of JSON for "+p+". The dashboard route may be unavailable; restart the local server.");
   }
   if(!r.ok)throw new Error(data.error||("HTTP "+r.status));
   return data;
@@ -967,7 +967,7 @@ async function loadNetworkControlStatus(force){if(ncStatusInFlight||(!force&&Dat
  }
  button.addEventListener("click",async()=>{
   if(!currentIP)return;
-  if(!window.confirm("Export the device dossier for "+currentIP+"? The file may contain private IP/MAC addresses, hostnames, service observations and security evidence."))return;
+  if(!window.confirm("Export the device dossier for "+currentIP+"? The file may contain private IP/MAC addresses, hostnames, endpoint inventory, service observations and security findings."))return;
   button.disabled=true;button.textContent="EXPORTING…";
   try{
    const payload=await window.getJSON("/api/device?ip="+encodeURIComponent(currentIP),15000);
