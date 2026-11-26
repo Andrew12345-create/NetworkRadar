@@ -96,19 +96,45 @@ def probe_tcp(host: str = "1.1.1.1", port: int = 443,
                 "error": type(exc).__name__}
 
 
-def probe_dns(hostname: str = "example.com") -> dict:
-    """Measure the system resolver without changing process-wide socket defaults.
-
-    The lookup runs on the monitor's own daemon thread. Python's portable
-    getaddrinfo interface does not expose a per-call timeout.
-    """
+def probe_dns(hostname: str = "example.com",
+              timeout_seconds: float = 3.0) -> dict:
+    """Measure system DNS resolution with a process-level timeout."""
     started = time.perf_counter()
+    if __import__("os").name == "nt":
+        command = ["nslookup", hostname]
+    else:
+        command = ["getent", "ahosts", hostname]
     try:
-        socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
-        return {"resolved": True,
-                "latency_ms": round((time.perf_counter() - started) * 1000.0, 1),
-                "hostname": hostname}
-    except OSError as exc:
+        result = subprocess.run(
+            command, capture_output=True, text=True, errors="replace",
+            timeout=max(1.0, float(timeout_seconds)), check=False,
+        )
+        output = (result.stdout or "") + "\n" + (result.stderr or "")
+        if __import__("os").name == "nt":
+            resolved = (
+                result.returncode == 0
+                and bool(re.search(r"(?im)^\\s*Name\\s*:", output))
+                and not bool(re.search(
+                    r"timed out|non-existent domain|can't find|server failed",
+                    output, re.IGNORECASE,
+                ))
+            )
+        else:
+            resolved = result.returncode == 0 and bool(output.strip())
+        return {
+            "resolved": resolved,
+            "latency_ms": round((time.perf_counter() - started) * 1000.0, 1)
+            if resolved else None,
+            "hostname": hostname,
+            **({} if resolved else {"error": "DNS lookup failed."}),
+        }
+    except FileNotFoundError:
+        return {"resolved": False, "latency_ms": None,
+                "hostname": hostname, "error": "DNS lookup utility unavailable."}
+    except subprocess.TimeoutExpired:
+        return {"resolved": False, "latency_ms": None,
+                "hostname": hostname, "error": "DNS lookup timed out."}
+    except Exception as exc:
         return {"resolved": False, "latency_ms": None,
                 "hostname": hostname, "error": type(exc).__name__}
 
