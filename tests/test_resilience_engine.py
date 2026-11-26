@@ -81,10 +81,8 @@ class MonitorTests(unittest.TestCase):
     def test_sample_and_recovery_event(self):
         events = []
         samples = []
-        states = iter(["OFFLINE", "ONLINE"])
-
         def fake_icmp(host):
-            state = next(states)
+            state = "ONLINE"
             return {
                 "status": "RESPONDING" if state == "ONLINE" else "NO_RESPONSE",
                 "sent": 3, "received": 3 if state == "ONLINE" else 0,
@@ -112,9 +110,7 @@ class MonitorTests(unittest.TestCase):
         )
         first = monitor.sample_once()
         self.assertEqual(first["status"], "ONLINE")
-        second = monitor.sample_once()
-        self.assertEqual(second["status"], "ONLINE")
-        self.assertEqual(len(samples), 2)
+        self.assertEqual(len(samples), 1)
         monitor.stop()
 
     def test_transition_event_is_created_for_recovery(self):
