@@ -9519,7 +9519,7 @@ def _main_inner():
         subscan_thread.join(timeout=5)
         if RESILIENCE_MONITOR:
             try:
-                RESILIENCE_MONITOR.stop(timeout=6)
+                RESILIENCE_MONITOR.stop(timeout=20)
             except Exception as resilience_error:
                 print("RESILIENCE SHUTDOWN WARNING:", _clean(resilience_error, 180))
             RESILIENCE_MONITOR = None
