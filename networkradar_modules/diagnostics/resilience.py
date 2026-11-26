@@ -8,6 +8,7 @@ one DNS lookup are performed on a configurable interval.
 from __future__ import annotations
 
 import math
+import os
 import re
 import socket
 import subprocess
@@ -52,7 +53,7 @@ def probe_icmp(host: str, count: int = 3, timeout_ms: int = 1200) -> dict:
         raise ValueError("ICMP sample count must be between 1 and 5.")
     if int(timeout_ms) < 250 or int(timeout_ms) > 3000:
         raise ValueError("ICMP timeout must be between 250 and 3000 ms.")
-    if __import__("os").name == "nt":
+    if os.name == "nt":
         command = ["ping", "-n", str(count), "-w", str(timeout_ms), host]
         process_timeout = (count * timeout_ms / 1000.0) + 3.0
     else:
