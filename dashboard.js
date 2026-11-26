@@ -375,7 +375,7 @@ function renderResilience(payload){
  const set=(id,value)=>{const el=$(id);if(el)el.textContent=value===undefined||value===null||value===""?"—":String(value);};
  set("resilienceScore",current.health_score===undefined||current.health_score===null?"—":current.health_score+"/100");
  set("resilienceLatency",current.avg_latency_ms===undefined||current.avg_latency_ms===null?"—":current.avg_latency_ms+" ms");
- set("resilienceLoss",current.packet_loss_percent===undefined||current.packet_loss_percent===null?"—":current.packet_loss_percent+"%");
+ set("resilienceLoss",current.packet_loss_percent===undefined||current.packet_loss_percent===null?"—":(Number(current.packet_loss_percent)>=100&&current.internet_tcp_reachable&&current.dns_status==="RESOLVED"?"100% · ICMP only":current.packet_loss_percent+"%"));
  set("resilienceGateway",current.gateway_status||"—");
  set("resilienceGatewayLatency",current.gateway_avg_rtt_ms===undefined||current.gateway_avg_rtt_ms===null?"No ICMP reply":current.gateway_avg_rtt_ms+" ms average RTT");
  set("resilienceInternet",current.internet_tcp_reachable===true?"REACHABLE":current.internet_tcp_reachable===false?"UNREACHABLE":"—");
