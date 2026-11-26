@@ -1,4 +1,12 @@
-# NetworkRadar 15.10.0
+# NetworkRadar 15.11.0
+
+## Network Resilience Engine
+- Adds continuous local-path monitoring for the current gateway and internet connection.
+- Samples gateway and external ICMP reachability, packet loss and round-trip latency, outbound TCP/443 reachability, and system DNS resolution every 30 seconds by default.
+- Distinguishes ICMP filtering from a real internet outage by combining ICMP, TCP and DNS evidence.
+- Persists samples and outage/degradation/recovery transitions in additive SQLite tables and exposes them through the local API and Command Centre dashboard.
+- Does not scan other LAN devices, generate sustained traffic, or change router/network configuration.
+
 
 ## Bandwidth enforcement integrity (15.2.0)
 - Refreshes enabled RouterOS FastTrack rules immediately before each bandwidth-limit write; Simple Queues can be bypassed by FastTracked connections.
