@@ -1,4 +1,13 @@
-# NetworkRadar 15.10.0
+# NetworkRadar 15.11.0
+
+## Network Resilience Engine
+- Adds a background monitor for the NetworkRadar host's current gateway and internet path.
+- Measures gateway and external ICMP packet loss/latency, outbound TCP/443 reachability and system DNS resolution every 30 seconds by default.
+- Classifies ONLINE, DEGRADED, INTERNET_DOWN and OFFLINE using independent signals; an ICMP-only failure does not automatically become an outage.
+- Persists measurements and outage/degradation/recovery transitions in additive SQLite tables.
+- Exposes live state, recent measurements and event history through GET /api/resilience and the Command Centre dashboard.
+- Stops cleanly before database shutdown. No LAN-wide scan, traffic generator or router configuration change is introduced.
+
 
 ## Post-release maintenance fixes
 - Corrects workspace placement for the continuous identity subscan, domain intelligence and full TCP port intelligence panels.
