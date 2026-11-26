@@ -30,8 +30,7 @@ def parse_ping_output(output: str, sent: int = 3) -> dict:
         comparator, raw_value = match.groups()
         value = float(raw_value)
         rtts.append(value / 2.0 if comparator == "<" else value)
-    reply_lines = len(_REPLY_RE.findall(text))
-    received = min(max(0, int(sent)), max(reply_lines, len(rtts)))
+    # Count only replies with a parsed RTT. Windows "Destination host\n    # unreachable" lines can also begin with "Reply from" and are not\n    # successful echo replies.\n    received = min(max(0, int(sent)), len(rtts))
     sent = max(0, int(sent))
     loss = round(((sent - received) / sent) * 100.0, 1) if sent else 0.0
     return {
