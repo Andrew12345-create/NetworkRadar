@@ -67,6 +67,7 @@
 <div class="statusline"><span>DNS</span><span class="pill warn" id="dnsStatus">STARTING</span></div>
 <div class="statusline"><span>DHCP</span><span class="pill warn" id="dhcpStatus">STARTING</span></div>
 <div class="statusline"><span>ARP</span><span class="pill warn" id="arpStatus">STARTING</span></div>
+<div class="statusline"><span>Network resilience</span><span class="pill warn" id="resilienceEngineStatus">STARTING</span></div>
 <div class="statusline"><span>DHCP classification</span><span class="mono" id="dhcpClass">—</span></div>
 <div class="statusline"><span>Network context</span><span class="mono" id="netAuthz">—</span></div>
 <div class="statusline"><span>DB queue</span><span class="mono" id="dbQueue">—</span></div>
@@ -83,6 +84,26 @@
 <button id="authorizeNetwork" onclick="authorizeCurrentNetwork()" class="is-hidden">AUTHORISE THIS NETWORK</button>
 </section>
 </div>
+<section class="section card" id="networkResilience">
+ <div class="row-between-wide">
+  <div><h2 class="m-0">NETWORK RESILIENCE ENGINE</h2><div class="hint">Live measurements from this NetworkRadar host to its current gateway and the internet. ICMP filtering is distinguished from actual connectivity failure.</div></div>
+  <span class="pill warn" id="resilienceStateBadge">STARTING</span>
+ </div>
+ <div class="grid mt-12">
+  <div class="card"><div class="label">NETWORK HEALTH</div><div class="value" id="resilienceScore">—</div><div class="hint">Operational score · 0–100</div></div>
+  <div class="card"><div class="label">INTERNET LATENCY</div><div class="value" id="resilienceLatency">—</div><div class="hint">ICMP average RTT</div></div>
+  <div class="card"><div class="label">PACKET LOSS</div><div class="value" id="resilienceLoss">—</div><div class="hint">External ICMP sample</div></div>
+  <div class="card"><div class="label">GATEWAY</div><div class="value" id="resilienceGateway">—</div><div class="hint" id="resilienceGatewayLatency">Waiting for measurement</div></div>
+  <div class="card"><div class="label">INTERNET TCP</div><div class="value" id="resilienceInternet">—</div><div class="hint" id="resilienceTcpLatency">Outbound TCP/443 reachability</div></div>
+  <div class="card"><div class="label">DNS RESOLUTION</div><div class="value" id="resilienceDns">—</div><div class="hint" id="resilienceDnsLatency">System resolver</div></div>
+ </div>
+ <div class="hint mt-8" id="resilienceLastSample">Waiting for the first resilience sample.</div>
+ <div class="split mt-14">
+  <div><h3>RECENT MEASUREMENTS</h3><div class="scroll"><table><thead><tr><th>TIME</th><th>STATE</th><th>SCORE</th><th>LATENCY</th><th>LOSS</th><th>DNS</th></tr></thead><tbody id="resilienceHistoryRows"><tr><td colspan="6">Waiting for measurements…</td></tr></tbody></table></div></div>
+  <div><h3>OUTAGE &amp; RECOVERY TIMELINE</h3><div id="resilienceEvents" class="nw-activity-feed"><div class="nw-feed-empty">No resilience transitions recorded yet.</div></div></div>
+ </div>
+ <div class="hint mt-8">The monitor performs three bounded ICMP probes, one TCP connection check to 1.1.1.1:443 and one system DNS lookup every 30 seconds by default. It does not scan other devices or change network configuration.</div>
+</section>
 <section class="section card" id="scanPerformance">
  <div class="row-between-wide"><div><h2 class="m-0">SCAN PERFORMANCE</h2><div class="hint" id="scanPerformanceSummary">No scan timing data yet.</div></div><span class="pill">MEASURED</span></div>
  <div class="scroll mt-10"><table><thead><tr><th>PHASE</th><th>CALLS</th><th>TOTAL</th><th>LAST</th><th>ERRORS</th></tr></thead><tbody id="scanPhaseRows"><tr><td colspan="5">Run a scan to collect phase timings.</td></tr></tbody></table></div>
