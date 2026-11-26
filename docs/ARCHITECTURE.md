@@ -1,8 +1,21 @@
-# NetworkRadar architecture — repository snapshot 15.10.0
+# NetworkRadar architecture — repository snapshot 15.11.0
 
-## Dashboard information architecture (15.10.0)
+## Dashboard information architecture (15.11.0)
 
 The dashboard presents five workspaces: Command Centre; Devices & Identity; Network Activity; Network Control; and Security & Investigations. Endpoint-agent and SSH management are grouped with Devices & Identity. The local intelligence assistant and reports are grouped with Security & Investigations. These are navigation groupings only: underlying modules, APIs, persisted records and safety gates remain unchanged.
+
+## Network Resilience Engine (15.11.0)
+
+The local resilience monitor runs independently of the discovery scan loop. On a
+30-second default interval it sends three bounded ICMP probes to the selected
+gateway and a public connectivity target, makes one TCP connection check to
+1.1.1.1:443, and measures a system DNS lookup. ICMP loss is retained as a
+measurement but is not treated as proof of an outage: the state classifier
+correlates gateway reachability, outbound TCP and DNS. It records an operational
+health score, sample history, and state-transition events in additive SQLite
+tables. The monitor observes only the NetworkRadar host's own network path; it
+does not test every LAN client or modify router configuration. The interval can
+be adjusted with NETWORKRADAR_RESILIENCE_INTERVAL (15–300 seconds).
 
 ## 13.5.0 scan observability and unknown-device guidance
 
