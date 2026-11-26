@@ -1,5 +1,5 @@
 ﻿"""
-NetworkRadar 15.10.0 — Core network discovery, device intelligence and safe network management.
+NetworkRadar 15.11.0 — Core network discovery, device intelligence and safe network management.
 13.6.1 — Isolated identity subscan progress and scan coordination.
 13.5.0 changes:
   - Measures discovery, Nmap TCP/OS, fallback, UDP, enrichment and analysis phases.
@@ -305,6 +305,7 @@ from networkradar_modules.core.startup import (
     release_instance_lock as _release_instance_lock, bind_local_server,
 )
 from networkradar_modules.diagnostics.status import engine_record
+from networkradar_modules.diagnostics.resilience import NetworkResilienceMonitor
 from networkradar_modules.diagnostics.scan_profiler import ScanProfiler, measure_phase
 from networkradar_modules.identity.investigation import build_identity_next_steps
 from networkradar_modules.identity.evidence_intelligence import (
@@ -440,6 +441,7 @@ HEALTH_LOCK = threading.RLock()
 HEALTH = {"status": "STARTING", "gateway": "", "gateway_latency_ms": None,
           "dns_resolution_ms": None, "internet": "UNKNOWN", "adapter": "",
           "sampled_at": "", "notes": []}
+RESILIENCE_MONITOR = None
 
 DNS_STATE_LOCK = threading.Lock()
 DNS_STATE = {"status": "STARTING", "interface": "Not selected", "queries": 0,
@@ -658,6 +660,21 @@ def initialize_database():
             "timestamp TEXT NOT NULL, network TEXT, gateway TEXT, "
             "gateway_latency_ms REAL, dns_resolution_ms REAL, internet_status TEXT, "
             "adapter TEXT, notes TEXT DEFAULT '')",
+            """CREATE TABLE IF NOT EXISTS network_resilience_samples(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+                network TEXT DEFAULT '', gateway TEXT DEFAULT '', adapter TEXT DEFAULT '',
+                status TEXT NOT NULL, health_score INTEGER,
+                gateway_status TEXT DEFAULT '', gateway_packet_loss_percent REAL,
+                gateway_avg_rtt_ms REAL, internet_icmp_status TEXT DEFAULT '',
+                packet_loss_percent REAL, avg_latency_ms REAL, min_latency_ms REAL,
+                max_latency_ms REAL, internet_tcp_reachable INTEGER DEFAULT 0,
+                tcp_latency_ms REAL, dns_status TEXT DEFAULT '',
+                dns_resolution_ms REAL, notes TEXT DEFAULT '')""",
+            """CREATE TABLE IF NOT EXISTS network_resilience_events(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+                network TEXT DEFAULT '', event_type TEXT NOT NULL,
+                previous_state TEXT DEFAULT '', current_state TEXT DEFAULT '',
+                severity TEXT DEFAULT 'INFO', details TEXT DEFAULT '')""",
             "CREATE TABLE IF NOT EXISTS arp_bindings(ip TEXT PRIMARY KEY, "
             "mac TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, "
             "change_count INTEGER DEFAULT 0)",
@@ -913,6 +930,8 @@ def initialize_database():
             "CREATE INDEX IF NOT EXISTS idx_behavior_time ON behavior_alerts(timestamp)",
             "CREATE INDEX IF NOT EXISTS idx_behavior_dev ON device_behavior_samples(device_id,timestamp)",
             "CREATE INDEX IF NOT EXISTS idx_health_time ON network_health_samples(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_nrs_time ON network_resilience_samples(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_nre_time ON network_resilience_events(timestamp)",
             "CREATE INDEX IF NOT EXISTS idx_obs_ip ON device_observations(ip)",
             "CREATE INDEX IF NOT EXISTS idx_iph_ip ON device_ip_history(ip)",
             "CREATE INDEX IF NOT EXISTS idx_ne_time ON network_events(timestamp)",
@@ -1786,6 +1805,62 @@ def health_sample():
     except Exception:
         pass
     return sample
+
+
+def _resilience_context():
+    with NET_LOCK:
+        context = dict(NET_CTX)
+    return {
+        "network": context.get("network", ""),
+        "gateway": context.get("gateway", ""),
+        "interface": context.get("interface", ""),
+    }
+
+
+def _persist_resilience_sample(sample):
+    def _write(conn):
+        conn.execute("""INSERT INTO network_resilience_samples(
+            timestamp, network, gateway, adapter, status, health_score,
+            gateway_status, gateway_packet_loss_percent, gateway_avg_rtt_ms,
+            internet_icmp_status, packet_loss_percent, avg_latency_ms,
+            min_latency_ms, max_latency_ms, internet_tcp_reachable,
+            tcp_latency_ms, dns_status, dns_resolution_ms, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+            sample.get("timestamp", ""), sample.get("network", ""),
+            sample.get("gateway", ""), sample.get("adapter", ""),
+            sample.get("status", "UNKNOWN"), sample.get("health_score"),
+            sample.get("gateway_status", ""),
+            sample.get("gateway_packet_loss_percent"),
+            sample.get("gateway_avg_rtt_ms"),
+            sample.get("internet_icmp_status", ""),
+            sample.get("packet_loss_percent"), sample.get("avg_latency_ms"),
+            sample.get("min_latency_ms"), sample.get("max_latency_ms"),
+            1 if sample.get("internet_tcp_reachable") else 0,
+            sample.get("tcp_latency_ms"), sample.get("dns_status", ""),
+            sample.get("dns_resolution_ms"),
+            "; ".join(sample.get("notes") or [])[:1000],
+        ))
+    DB_MANAGER.write(_write)
+
+
+def _persist_resilience_event(event):
+    def _write(conn):
+        conn.execute("""INSERT INTO network_resilience_events(
+            timestamp, network, event_type, previous_state, current_state,
+            severity, details
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)""", (
+            event.get("timestamp", ""), event.get("network", ""),
+            event.get("event_type", "NETWORK_STATE_CHANGED"),
+            event.get("previous_state", ""), event.get("current_state", ""),
+            event.get("severity", "INFO"), str(event.get("details", ""))[:1000],
+        ))
+        record_event(
+            conn, "-", event.get("event_type", "NETWORK_STATE_CHANGED"),
+            str(event.get("details", "")), category="network_resilience",
+            severity=event.get("severity", "INFO"),
+        )
+    DB_MANAGER.write(_write)
+
 
 # ============================================================
 # ARP CACHE, LOCAL IDENTITY, SSDP
@@ -7523,6 +7598,13 @@ class Handler(BaseHTTPRequestHandler):
                         "reason": "; ".join(ctx.get("auth_reasons") or []),
                         "confidence": ctx.get("confidence", 0),
                     }
+                    resilience = (RESILIENCE_MONITOR.snapshot()
+                                  if RESILIENCE_MONITOR else {})
+                    engines["network_resilience"] = {
+                        "state": resilience.get("status", "STARTING"),
+                        "reason": resilience.get("message", ""),
+                        "health_score": resilience.get("health_score"),
+                    }
                     return self.send_json({"engines": engines, "timestamp": now_text()})
 
                 if p.path == "/api/presence":
@@ -7609,6 +7691,38 @@ class Handler(BaseHTTPRequestHandler):
                 if p.path == "/api/health":
                     with HEALTH_LOCK:
                         return self.send_json(dict(HEALTH))
+
+                if p.path == "/api/resilience":
+                    current = (RESILIENCE_MONITOR.snapshot()
+                               if RESILIENCE_MONITOR else {
+                                   "available": False, "status": "STARTING",
+                                   "message": "Resilience monitor has not started.",
+                               })
+                    sample_rows = conn.execute("""SELECT timestamp, status,
+                        health_score, gateway_status, gateway_avg_rtt_ms,
+                        packet_loss_percent, avg_latency_ms, internet_tcp_reachable,
+                        dns_status, dns_resolution_ms FROM network_resilience_samples
+                        ORDER BY id DESC LIMIT 60""").fetchall()
+                    event_rows = conn.execute("""SELECT timestamp, event_type,
+                        previous_state, current_state, severity, details
+                        FROM network_resilience_events ORDER BY id DESC LIMIT 30""").fetchall()
+                    history = [{
+                        "timestamp": r[0], "status": r[1], "health_score": r[2],
+                        "gateway_status": r[3], "gateway_avg_rtt_ms": r[4],
+                        "packet_loss_percent": r[5], "avg_latency_ms": r[6],
+                        "internet_tcp_reachable": bool(r[7]),
+                        "dns_status": r[8], "dns_resolution_ms": r[9],
+                    } for r in sample_rows]
+                    events = [{
+                        "timestamp": r[0], "event_type": r[1],
+                        "previous_state": r[2], "current_state": r[3],
+                        "severity": r[4], "details": r[5],
+                    } for r in event_rows]
+                    return self.send_json({
+                        "current": current, "history": history, "events": events,
+                        "interval_seconds": (RESILIENCE_MONITOR.interval_seconds
+                                              if RESILIENCE_MONITOR else None),
+                    })
 
                 if p.path == "/api/progress":
                     with JOB_LOCK:
@@ -9050,7 +9164,7 @@ def mdns_passive_snapshot(duration=3):
 DHCP_ENGINE = None  # global, set by main() so /api/engine_diagnostics can reach it
 
 def _main_inner():
-    global DHCP_ENGINE
+    global DHCP_ENGINE, RESILIENCE_MONITOR
     print(f"\nINITIALISING NETWORKRADAR {APP_VERSION}...")
     if not NMAP.exists():
         print(f"ERROR: Nmap not found: {NMAP}")
@@ -9094,6 +9208,23 @@ def _main_inner():
         except Exception as cleanup_error:
             print("DATABASE SHUTDOWN WARNING:", _clean(cleanup_error, 180))
         raise SystemExit(2)
+
+    try:
+        interval = int(os.environ.get("NETWORKRADAR_RESILIENCE_INTERVAL", "30"))
+    except (TypeError, ValueError):
+        interval = 30
+    try:
+        RESILIENCE_MONITOR = NetworkResilienceMonitor(
+            context_provider=_resilience_context,
+            sample_callback=_persist_resilience_sample,
+            event_callback=_persist_resilience_event,
+            interval_seconds=interval,
+        )
+        RESILIENCE_MONITOR.start()
+        print("NETWORK RESILIENCE: monitoring gateway, internet TCP, ICMP loss and DNS.")
+    except Exception as exc:
+        RESILIENCE_MONITOR = None
+        print("NETWORK RESILIENCE STARTUP WARNING:", _clean(exc, 200))
 
     dns = DNSEngine()
     dhcp = DHCPEngine()
@@ -9386,6 +9517,12 @@ def _main_inner():
         dhcp.join(timeout=5)
         arp.join(timeout=5)
         subscan_thread.join(timeout=5)
+        if RESILIENCE_MONITOR:
+            try:
+                RESILIENCE_MONITOR.stop(timeout=6)
+            except Exception as resilience_error:
+                print("RESILIENCE SHUTDOWN WARNING:", _clean(resilience_error, 180))
+            RESILIENCE_MONITOR = None
         print("Flushing database...")
         DB_MANAGER.flush(timeout=10)
         DB_MANAGER.stop(timeout=10)
