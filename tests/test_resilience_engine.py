@@ -45,6 +45,22 @@ class ClassificationTests(unittest.TestCase):
         )
         self.assertEqual(state, "ONLINE")
 
+    def test_filtered_icmp_does_not_degrade_when_tcp_and_dns_work(self):
+        state = classify_state(
+            {"received": 0},
+            {"packet_loss_percent": 100, "avg_rtt_ms": None},
+            {"reachable": True},
+            {"resolved": True},
+        )
+        self.assertEqual(state, "ONLINE")
+        score = calculate_health_score({
+            "status": state, "packet_loss_percent": 100,
+            "internet_icmp_status": "NO_RESPONSE",
+            "internet_tcp_reachable": True, "avg_latency_ms": None,
+            "dns_resolution_ms": 5,
+        })
+        self.assertEqual(score, 100)
+
     def test_high_packet_loss_is_degraded(self):
         state = classify_state(
             {"received": 3},
