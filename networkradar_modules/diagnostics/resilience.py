@@ -19,7 +19,6 @@ from typing import Callable, Optional
 
 
 _RTT_RE = re.compile(r"time\s*([=<])\s*(\d+(?:\.\d+)?)\s*ms", re.IGNORECASE)
-_REPLY_RE = re.compile(r"(?:reply\s+from|bytes\s+from)", re.IGNORECASE)
 
 
 def parse_ping_output(output: str, sent: int = 3) -> dict:
@@ -30,7 +29,9 @@ def parse_ping_output(output: str, sent: int = 3) -> dict:
         comparator, raw_value = match.groups()
         value = float(raw_value)
         rtts.append(value / 2.0 if comparator == "<" else value)
-    # Count only replies with a parsed RTT. Windows "Destination host\n    # unreachable" lines can also begin with "Reply from" and are not\n    # successful echo replies.\n    received = min(max(0, int(sent)), len(rtts))
+    # Count only replies with a parsed RTT. Windows "Destination host unreachable"
+    # lines can also begin with "Reply from" and are not successful echo replies.
+    received = min(max(0, int(sent)), len(rtts))
     sent = max(0, int(sent))
     loss = round(((sent - received) / sent) * 100.0, 1) if sent else 0.0
     return {
