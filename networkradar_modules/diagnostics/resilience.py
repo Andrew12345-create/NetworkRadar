@@ -96,13 +96,14 @@ def probe_tcp(host: str = "1.1.1.1", port: int = 443,
                 "error": type(exc).__name__}
 
 
-def probe_dns(hostname: str = "example.com",
-              timeout_seconds: float = 3.0) -> dict:
-    """Measure a bounded system-resolver lookup."""
+def probe_dns(hostname: str = "example.com") -> dict:
+    """Measure the system resolver without changing process-wide socket defaults.
+
+    The lookup runs on the monitor's own daemon thread. Python's portable
+    getaddrinfo interface does not expose a per-call timeout.
+    """
     started = time.perf_counter()
-    prior_timeout = socket.getdefaulttimeout()
     try:
-        socket.setdefaulttimeout(timeout_seconds)
         socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
         return {"resolved": True,
                 "latency_ms": round((time.perf_counter() - started) * 1000.0, 1),
@@ -110,8 +111,6 @@ def probe_dns(hostname: str = "example.com",
     except OSError as exc:
         return {"resolved": False, "latency_ms": None,
                 "hostname": hostname, "error": type(exc).__name__}
-    finally:
-        socket.setdefaulttimeout(prior_timeout)
 
 
 def classify_state(gateway: dict, internet_icmp: dict,
