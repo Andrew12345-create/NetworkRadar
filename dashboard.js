@@ -367,6 +367,29 @@ function renderNightwatch(s,n,d,dns,a,e,t){
  const auth=$("nwAuthState");if(auth)auth.classList.toggle("authorised",!!n.authorized);nwTopology(t||{});nwActivity(e,a);
 }
 
+function renderResilience(payload){
+ const current=payload?.current||{};
+ const status=String(current.status||"STARTING").toUpperCase();
+ const badge=$("resilienceStateBadge");
+ if(badge){badge.textContent=status;badge.className="pill "+(status==="ONLINE"?"ok":status==="DEGRADED"?"warn":"bad");}
+ const set=(id,value)=>{const el=$(id);if(el)el.textContent=value===undefined||value===null||value===""?"—":String(value);};
+ set("resilienceScore",current.health_score===undefined||current.health_score===null?"—":current.health_score+"/100");
+ set("resilienceLatency",current.avg_latency_ms===undefined||current.avg_latency_ms===null?"—":current.avg_latency_ms+" ms");
+ set("resilienceLoss",current.packet_loss_percent===undefined||current.packet_loss_percent===null?"—":current.packet_loss_percent+"%");
+ set("resilienceGateway",current.gateway_status||"—");
+ set("resilienceGatewayLatency",current.gateway_avg_rtt_ms===undefined||current.gateway_avg_rtt_ms===null?"No ICMP reply":current.gateway_avg_rtt_ms+" ms average RTT");
+ set("resilienceInternet",current.internet_tcp_reachable===true?"REACHABLE":current.internet_tcp_reachable===false?"UNREACHABLE":"—");
+ set("resilienceTcpLatency",current.tcp_latency_ms===undefined||current.tcp_latency_ms===null?"TCP/443 check":"TCP connect "+current.tcp_latency_ms+" ms");
+ set("resilienceDns",current.dns_status||"—");
+ set("resilienceDnsLatency",current.dns_resolution_ms===undefined||current.dns_resolution_ms===null?"Resolver timing unavailable":current.dns_resolution_ms+" ms");
+ set("resilienceLastSample",current.timestamp?("Last sample "+current.timestamp+" · "+(current.adapter||"adapter unknown")+" · "+(current.gateway||"gateway unknown")):(current.message||"Waiting for the first resilience sample."));
+ const history=Array.isArray(payload?.history)?payload.history:[];
+ const rows=$("resilienceHistoryRows");
+ if(rows)rows.innerHTML=history.map(x=>'<tr><td>'+esc(x.timestamp||"—")+'</td><td>'+esc(x.status||"—")+'</td><td>'+esc(x.health_score??"—")+'</td><td>'+esc(x.avg_latency_ms===null||x.avg_latency_ms===undefined?"—":x.avg_latency_ms+" ms")+'</td><td>'+esc(x.packet_loss_percent===null||x.packet_loss_percent===undefined?"—":x.packet_loss_percent+"%")+'</td><td>'+esc(x.dns_status||"—")+'</td></tr>').join("")||'<tr><td colspan="6">Waiting for measurements…</td></tr>';
+ const events=Array.isArray(payload?.events)?payload.events:[];
+ const eventBox=$("resilienceEvents");
+ if(eventBox)eventBox.innerHTML=events.map(x=>'<article class="nw-feed-item"><time>'+esc(x.timestamp||"—")+'</time><div><b>'+esc(x.event_type||"NETWORK EVENT")+'</b><small>'+esc(x.details||((x.previous_state||"")+" → "+(x.current_state||"")))+'</small></div><em class="'+(x.severity==="CRITICAL"||x.severity==="HIGH"?"high":x.severity==="MEDIUM"?"medium":"info")+'">'+esc(x.severity||"INFO")+'</em></article>').join("")||'<div class="nw-feed-empty">No resilience transitions recorded yet.</div>';
+}
 function renderScanMonitor(job){
  const state=String(job?.state||"IDLE").toUpperCase();
  const phase=String(job?.phase||"Waiting");
@@ -436,7 +459,7 @@ async function refreshAll(forceSecondary=false){
   ["alerts","/api/alerts"],["events","/api/events"],["dns","/api/dns"],["topology","/api/topology"],
   ["progress","/api/progress"],["investigations","/api/investigations"],
   ["network","/api/network"],["diagnostics","/api/diagnostics"],
-  ["engine","/api/engine_diagnostics"],["scanPerformance","/api/scan_performance"]
+  ["engine","/api/engine_diagnostics"],["scanPerformance","/api/scan_performance"],["resilience","/api/resilience"]
  ];
  try{
   const settled=await Promise.allSettled(specs.map(([,path])=>getJSON(path,10000)));
@@ -454,11 +477,11 @@ async function refreshAll(forceSecondary=false){
   $("network").textContent=s.network||n.network||"—";$("activeSubnet").textContent=n.network||s.network||"—";
   $("defaultGateway").textContent=n.gateway||"—";const ncHost=$("ncRouterHost");if(ncHost&&!ncHost.value&&n.gateway)ncHost.value=n.gateway;$("fingerprint").textContent=n.fingerprint||"—";$("fpConf").textContent=(n.confidence||0)+"%";
   $("networkWarning").textContent=n.warning||(n.authorized?"Authorised.":"Passive only.");$("authorizeNetwork").style.display=n.authorized?"none":"inline-block";$("netAuthz").textContent=n.auth_decision||"—";
-  $("jobPhase").textContent=j.phase||"—";$("jobMessage").textContent=j.message||"Waiting for engine status.";$("jobPercent").textContent=(j.percent??0)+"%";$("jobBar").style.width=(j.percent??0)+"%";renderScanMonitor(j);
+  $("jobPhase").textContent=j.phase||"—";$("jobMessage").textContent=j.message||"Waiting for engine status.";$("jobPercent").textContent=(j.percent??0)+"%";$("jobBar").style.width=(j.percent??0)+"%";renderScanMonitor(j);renderResilience(data.resilience||{});
   $("online").textContent=s.online??"—";$("historical").textContent=s.historical??"—";$("deviceHint").textContent=(s.offline??"—")+" offline";$("openInvestigations").textContent=s.open_investigations??inv.length;
   const nr=$("networkRisk");nr.textContent=s.network_risk_band||"UNKNOWN";nr.className="value risk-"+(s.network_risk_band||"UNKNOWN");
   pill($("dnsStatus"),s.dns_status||"UNKNOWN",s.dns_status==="ONLINE"?"ok":"warn");pill($("dhcpStatus"),s.dhcp_status||"UNKNOWN",s.dhcp_status==="ONLINE"?"ok":"warn");pill($("arpStatus"),s.arp_status||"UNKNOWN",s.arp_status==="ONLINE"?"ok":"warn");
-  const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"");$("dhcpClass").title=dhcp.reason||"No DHCP diagnostic detail returned.";
+  const dhcp=eng.engines?.dhcp||{};$("dhcpClass").textContent=(dhcp.state||"UNKNOWN")+" — "+(dhcp.reason||"");$("dhcpClass").title=dhcp.reason||"No DHCP diagnostic detail returned.";const resilienceEngine=eng.engines?.network_resilience||{};pill($("resilienceEngineStatus"),resilienceEngine.state||"STARTING",resilienceEngine.state==="ONLINE"?"ok":resilienceEngine.state==="DEGRADED"?"warn":"bad");
   $("dbQueue").textContent=(s.db_health?.queued??"—")+" queued, "+(s.db_health?.processed??"—")+" done";const quality=diag.scan_quality||{},coverage=quality.identity_coverage||{},identityCoverage=coverage.available===false?"—":((coverage.coverage_percent??"—")+"%");$("scanQuality").textContent=(quality.score??"—")+"/100 · "+(quality.band||"—")+" · Identity "+identityCoverage;
   if(data.devices){deviceCache=d;filterDevices();renderNetworkControlDeviceOptions(d);}else{$("deviceRows").innerHTML='<tr><td colspan="8">Device API unavailable. Check server log and /api/devices.</td></tr>';}
   $("domainRows").innerHTML=domains.map(x=>`<tr><td class="mono">${esc(x.domain)}</td><td>${x.query_count}</td><td>${esc(x.risk_level)}</td></tr>`).join("")||'<tr><td colspan="3">—</td></tr>';
