@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Callable, Optional
 
 
-_RTT_RE = re.compile(r"time\s*[=<]\s*(\d+(?:\.\d+)?)\s*ms", re.IGNORECASE)
+_RTT_RE = re.compile(r"time\s*([=<])\s*(\d+(?:\.\d+)?)\s*ms", re.IGNORECASE)
 _REPLY_RE = re.compile(r"(?:reply\s+from|bytes\s+from)", re.IGNORECASE)
 
 
@@ -26,9 +26,9 @@ def parse_ping_output(output: str, sent: int = 3) -> dict:
     text = str(output or "")
     rtts = []
     for match in _RTT_RE.finditer(text):
-        prefix = text[max(0, match.start() - 2):match.start()]
-        value = float(match.group(1))
-        rtts.append(0.5 if "<" in prefix else value)
+        comparator, raw_value = match.groups()
+        value = float(raw_value)
+        rtts.append(value / 2.0 if comparator == "<" else value)
     reply_lines = len(_REPLY_RE.findall(text))
     received = min(max(0, int(sent)), max(reply_lines, len(rtts)))
     sent = max(0, int(sent))
@@ -113,7 +113,7 @@ def probe_dns(hostname: str = "example.com",
         if __import__("os").name == "nt":
             resolved = (
                 result.returncode == 0
-                and bool(re.search(r"(?im)^\\s*Name\\s*:", output))
+                and bool(re.search(r"(?im)^\s*Name\s*:", output))
                 and not bool(re.search(
                     r"timed out|non-existent domain|can't find|server failed",
                     output, re.IGNORECASE,
@@ -146,8 +146,13 @@ def classify_state(gateway: dict, internet_icmp: dict,
     dns_ok = bool((dns or {}).get("resolved"))
     loss = (internet_icmp or {}).get("packet_loss_percent")
     rtt = (internet_icmp or {}).get("avg_rtt_ms")
+    # A completely silent ICMP target may simply filter echo requests. If
+    # TCP/443 and DNS both work, do not call that packet loss or an outage.
+    icmp_filtered = (
+        loss is not None and float(loss) >= 100.0 and rtt is None
+    )
     degraded_icmp = (
-        loss is not None and float(loss) >= 10.0
+        loss is not None and float(loss) >= 10.0 and not icmp_filtered
     ) or (
         rtt is not None and float(rtt) >= 500.0
     )
@@ -166,7 +171,11 @@ def calculate_health_score(sample: dict) -> int:
     loss = sample.get("packet_loss_percent")
     latency = sample.get("avg_latency_ms")
     dns_latency = sample.get("dns_resolution_ms")
-    if loss is not None:
+    icmp_filtered = (
+        sample.get("internet_icmp_status") in ("NO_RESPONSE", "TIMEOUT", "UNAVAILABLE")
+        and bool(sample.get("internet_tcp_reachable"))
+    )
+    if loss is not None and not icmp_filtered:
         score -= min(55.0, max(0.0, float(loss)) * 0.55)
     if latency is not None and float(latency) > 100.0:
         score -= min(25.0, (float(latency) - 100.0) / 25.0)
